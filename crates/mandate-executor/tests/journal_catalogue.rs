@@ -1,0 +1,386 @@
+//! DEC-2139 item 3: no record the executor drafts on the account stream may outrun the journal. A
+//! kill switch's batch, `[AgentModeApplied, KillSwitchActivated]`, was refused whole as
+//! `unknown_schema` until journal spec v0.90 closed the account stream's `KillSwitchActivated`, so
+//! the cell's executor crash-looped on every switch it applied. Each switch the executor can apply
+//! is carried here through the journal's own `Draft::parse` and `check_batch`, and every account
+//! event type its sources name is closed in `mandate-journal`, but the ones still pending.
+
+mod common;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+use common::{FixedInstruments, FixedMandate, Shell, TestIds, agent, config, ports, price, qty};
+use mandate_canon::{Value, to_canonical};
+use mandate_executor::{
+    AccountRef, BrokerAccount, BrokerUpdate, Command, EventDraft, Initiator, Input, KillScope,
+    OwnerConfirmation,
+};
+use mandate_journal::{Draft, StreamType, check_batch, stream_event_types};
+
+/// The account-stream records the executor drafts that the journal does not close yet: none since
+/// DEC-2803 closed `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2139
+/// item 4). A record added here fails this test once it is closed, so the list only shrinks.
+const PENDING: [&str; 0] = [];
+
+/// A started executor on an opened stream, reconciled, as a production shell starts.
+fn opened(ports: &mandate_executor::Ports<'_>) -> Shell {
+    let mut shell = Shell::new(1);
+    shell
+        .fold_one(&common::stream_opened())
+        .expect("the stream opens");
+    shell.restart_ready(ports)
+}
+
+fn confirmation() -> OwnerConfirmation {
+    OwnerConfirmation {
+        bid: price("155"),
+        bid_size: qty("100"),
+        floor: price("150.35"),
+        user: "user-1".to_owned(),
+        step_up: "assertion-1".to_owned(),
+    }
+}
+
+/// The event id a registration probe is appended under.
+const EVENT: &str = "01J8Z3M4000000000000000001";
+
+/// `draft` in the envelope the shell appends it in, as canonical bytes (journal spec §3), its own
+/// and its cause's ids the ULIDs `ulids` maps the test's ids to.
+fn enveloped_as(draft: &EventDraft, ulids: &BTreeMap<String, String>) -> Vec<u8> {
+    let ulid = |id: &str| ulids.get(id).cloned().unwrap_or_else(|| id.to_owned());
+    let cause = draft
+        .causation_id
+        .as_ref()
+        .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", ulid(&id.0)));
+    let body = format!(
+        r#"{{"envelope_version":1,"environment":"paper",
+        "event_id":"{}","stream_id":"{}",
+        "event_type":"{}","schema_version":{},
+        "event_time":"2026-09-22T14:00:00.000000000Z","clock_source":"local",
+        "causation_id":{},"correlation_id":null,
+        "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+        "build":"sha256:{}"}},"config_refs":{},"payload":{},
+        "artifact_refs":[],"pii_refs":[]}}"#,
+        ulid(&draft.event_id.0),
+        common::ACCOUNT_STREAM,
+        draft.event_type,
+        draft.schema_version,
+        cause,
+        "3".repeat(64),
+        String::from_utf8_lossy(&to_canonical(&Value::Object(draft.config_refs.clone()))),
+        String::from_utf8_lossy(&to_canonical(&remapped(&draft.payload, ulids))),
+    );
+    body.into_bytes()
+}
+
+/// `value` with every string that is one of the test's ids replaced by its ULID, so a record
+/// naming another, as `OwnerAlertSent`'s `subject` names its switch, names it as the journal
+/// reads it.
+fn remapped(value: &Value, ulids: &BTreeMap<String, String>) -> Value {
+    match value {
+        Value::Str(id) => Value::Str(ulids.get(id).cloned().unwrap_or_else(|| id.clone())),
+        Value::Array(items) => Value::Array(items.iter().map(|v| remapped(v, ulids)).collect()),
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .map(|(key, v)| (key.clone(), remapped(v, ulids)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn enveloped(draft: &EventDraft) -> Vec<u8> {
+    enveloped_as(draft, &BTreeMap::new())
+}
+
+/// Each draft's id mapped to a ULID of its own, in draft order.
+fn ulids(drafts: &[EventDraft]) -> BTreeMap<String, String> {
+    drafts
+        .iter()
+        .enumerate()
+        .map(|(n, d)| {
+            (
+                d.event_id.0.clone(),
+                format!("01J8Z3M4000000000000000{:03}", n + 2),
+            )
+        })
+        .collect()
+}
+
+/// Every kill switch the executor applies, of each scope, initiator, and confirmation the owner
+/// may give, is journaled in one batch the journal accepts whole.
+#[test]
+fn every_kill_switch_batch_is_accepted_by_the_journal() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let scopes = [
+        KillScope::Agent(agent(common::AGENT)),
+        KillScope::Account(AccountRef(common::ACCOUNT.to_owned())),
+    ];
+    let switches = [
+        (Initiator::Owner, None),
+        (Initiator::Owner, Some(confirmation())),
+        (Initiator::RiskLimit, None),
+        (Initiator::PlatformOperator, None),
+    ];
+    let mut failed = Vec::new();
+    for scope in &scopes {
+        for (initiator, confirmation) in &switches {
+            let mut shell = opened(&ports);
+            let ran = shell.run(
+                Input::Command(Command::KillSwitch {
+                    scope: scope.clone(),
+                    initiator: *initiator,
+                    confirmation: confirmation.clone(),
+                    cause: None,
+                }),
+                &ports,
+            );
+            let case = format!(
+                "{scope:?} {initiator:?} confirmed {}",
+                confirmation.is_some()
+            );
+            assert!(
+                ran.draft("KillSwitchActivated").is_some(),
+                "{case}: the switch is journaled"
+            );
+            let ulids = ulids(&ran.drafts);
+            let bytes: Vec<Vec<u8>> = ran
+                .drafts
+                .iter()
+                .map(|draft| enveloped_as(draft, &ulids))
+                .collect();
+            let parsed: Result<Vec<Draft>, _> = bytes.iter().map(|b| Draft::parse(b)).collect();
+            match parsed.map(|drafts| check_batch(&drafts).map_err(|(_, e)| e)) {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) | Err(e) => failed.push(format!(
+                    "{case}: {:?} refused {} at {}",
+                    ran.draft_types(),
+                    e.reason.code(),
+                    e.path
+                )),
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// Every event type `dir`'s Rust sources draft by name, recursively: the literal each
+/// `Batch::journal` or `Batch::journal_with_refs` call opens with.
+fn drafted_names(dir: &Path, names: &mut BTreeSet<String>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            drafted_names(&path, names);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            let source = std::fs::read_to_string(&path).unwrap();
+            for call in [".journal(", ".journal_with_refs("] {
+                for (at, _) in source.match_indices(call) {
+                    let rest = source[at + call.len()..].trim_start();
+                    if let Some(named) = rest.strip_prefix('"').and_then(|r| r.split('"').next()) {
+                        names.insert(named.to_owned());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Whether the journal registers `event_type` on the account stream at some version: a draft of
+/// it with an empty payload is refused for its members, never as `unknown_schema`.
+fn registered(event_type: &str) -> bool {
+    (1..=4).any(|version| {
+        let draft = EventDraft {
+            event_id: mandate_executor::EventId(EVENT.to_owned()),
+            event_type: event_type.to_owned(),
+            schema_version: version,
+            config_refs: mandate_canon::Object::new(),
+            causation_id: None,
+            payload: Value::Object(mandate_canon::Object::new()),
+        };
+        Draft::parse(&enveloped(&draft))
+            .map_or_else(|e| e.reason.code() != "unknown_schema", |_| true)
+    })
+}
+
+/// Every event type the executor drafts on the account stream is registered in `mandate-journal`
+/// at some version, but exactly the pending ones, so a writer can no longer outrun the journal.
+#[test]
+fn every_event_type_the_executor_drafts_is_registered_but_the_pending_ones() {
+    let mut names = BTreeSet::new();
+    drafted_names(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut names,
+    );
+    let account: BTreeSet<&str> = stream_event_types(StreamType::Account).collect();
+    let elsewhere: Vec<&String> = names
+        .iter()
+        .filter(|name| !account.contains(name.as_str()))
+        .collect();
+    assert!(
+        elsewhere.is_empty(),
+        "drafted off the account stream: {elsewhere:?}"
+    );
+    let named: Vec<&str> = names.iter().map(String::as_str).collect();
+    assert!(named.contains(&"KillSwitchActivated"), "{named:?}");
+    let open: BTreeSet<&str> = named
+        .iter()
+        .copied()
+        .filter(|event_type| !registered(event_type))
+        .collect();
+    assert_eq!(
+        open,
+        PENDING.into_iter().collect(),
+        "drafted on the account stream: {named:?}"
+    );
+}
+
+/// E7-2u (journal spec §9.5, DEC-2137): a blocked account's batch names its restriction's cause,
+/// a broker notice (trading spec §7.3 row 1), and the journal accepts the whole batch, restriction,
+/// modes and alert. Before the executor wrote `cause` the journal refused the batch at
+/// `payload.cause`, so a blocked account stopped the process and the owner was never told.
+#[test]
+fn a_blocked_accounts_batch_names_its_cause_and_is_accepted_by_the_journal() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = opened(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(BrokerAccount {
+            trading_blocked: true,
+            ..common::broker_account()
+        })),
+        &ports,
+    );
+    let restricted = ran
+        .draft("AccountRestrictionChanged")
+        .expect("the restriction is journaled");
+    assert_eq!(
+        restricted.payload.get("cause").and_then(Value::as_str),
+        Some("broker_notice")
+    );
+    let ulids = ulids(&ran.drafts);
+    let bytes: Vec<Vec<u8>> = ran
+        .drafts
+        .iter()
+        .map(|draft| enveloped_as(draft, &ulids))
+        .collect();
+    let parsed: Result<Vec<Draft>, _> = bytes.iter().map(|b| Draft::parse(b)).collect();
+    let judged = parsed.map(|drafts| check_batch(&drafts).map_err(|(_, e)| e));
+    assert!(
+        matches!(judged, Ok(Ok(()))),
+        "{:?}: {judged:?}",
+        ran.draft_types()
+    );
+}
+
+/// E7-2u (trading spec §7.3 rows 2 and 3, DEC-143): a reject that restricts the account to closing
+/// only, by its message or by the run of 403s, names a broker reject as its cause, and the journal
+/// accepts the restricting reject's whole batch: its `RejectObserved`, the restriction, the modes
+/// and the alert.
+#[test]
+fn a_restricting_reject_names_a_broker_reject_and_is_accepted_by_the_journal() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let reject = |message: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Reject(common::broker_reject(
+            None, 403, message,
+        )))
+    };
+    for (case, rejects) in [
+        (
+            "a closing message",
+            vec!["account is closing transactions only"],
+        ),
+        ("three 403s", vec!["forbidden"; 3]),
+    ] {
+        let mut shell = opened(&ports);
+        let mut restricting = None;
+        for message in rejects {
+            let ran = shell.run(reject(message), &ports);
+            if ran.draft("AccountRestrictionChanged").is_some() {
+                restricting = Some(ran);
+            }
+        }
+        let ran = restricting.unwrap_or_else(|| panic!("{case}: the account is restricted"));
+        let restricted = ran
+            .draft("AccountRestrictionChanged")
+            .unwrap_or_else(|| panic!("{case}: the restriction"));
+        assert_eq!(
+            restricted.payload.get("cause").and_then(Value::as_str),
+            Some("broker_reject"),
+            "{case}"
+        );
+        let ulids = ulids(&ran.drafts);
+        let bytes: Vec<Vec<u8>> = ran
+            .drafts
+            .iter()
+            .map(|draft| enveloped_as(draft, &ulids))
+            .collect();
+        let parsed: Result<Vec<Draft>, _> = bytes.iter().map(|b| Draft::parse(b)).collect();
+        let judged = parsed.map(|drafts| check_batch(&drafts).map_err(|(_, e)| e));
+        assert!(
+            matches!(judged, Ok(Ok(()))),
+            "{case}: {:?}: {judged:?}",
+            ran.draft_types()
+        );
+    }
+}
+
+/// E7-2v (journal spec v0.96 rule 309, DEC-2816): a block, then a reject's closing-only
+/// restriction, is one account stream the journal admits from its start: the reject is a second
+/// cause in force, and its record follows the block's in the stream rule's order.
+#[test]
+fn a_second_cause_in_force_is_admitted_by_the_journals_stream_rule() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = opened(&ports);
+    let mut drafts = shell
+        .run(
+            Input::BrokerUpdate(BrokerUpdate::Account(BrokerAccount {
+                trading_blocked: true,
+                ..common::broker_account()
+            })),
+            &ports,
+        )
+        .drafts;
+    drafts.extend(
+        shell
+            .run(
+                Input::BrokerUpdate(BrokerUpdate::Reject(common::broker_reject(
+                    None,
+                    403,
+                    "account is closing transactions only",
+                ))),
+                &ports,
+            )
+            .drafts,
+    );
+    let causes = drafts
+        .iter()
+        .filter(|draft| draft.event_type == "AccountRestrictionChanged")
+        .count();
+    assert_eq!(causes, 2, "both causes are journaled");
+    let ulids = ulids(&drafts);
+    let parsed: Vec<Draft> = drafts
+        .iter()
+        .map(|draft| Draft::parse(&enveloped_as(draft, &ulids)).unwrap())
+        .collect();
+    assert_eq!(
+        mandate_journal::check_stream(&[], &parsed).map_err(|(i, e)| (i, e.reason.code(), e.path)),
+        Ok(())
+    );
+}

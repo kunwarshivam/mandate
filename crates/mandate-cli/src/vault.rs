@@ -27,7 +27,8 @@ use mandate_vault::credentials::{
 use mandate_vault::kube::kube_secrets;
 use mandate_vault::kubernetes::{KubernetesAuth, kubernetes_mount_requests};
 use mandate_vault::openbao::{
-    OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
+    OpenBaoConfig, OpenBaoSource, ProvisionError, RoleCredentials, provision,
+    provision_kubernetes_auth,
 };
 use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
 use mandate_vault::source::SecretSource;
@@ -76,6 +77,9 @@ pub enum PutSecret {
     ModelProviderKey,
     #[value(name = "email-credential")]
     EmailCredential,
+    /// The Alpaca news reader's paper data key, one line `<key id>:<secret>` (DEC-2277).
+    #[value(name = "news-data-key")]
+    NewsDataKey,
     #[value(name = "alpaca-oauth-client-secret")]
     AlpacaOauthClientSecret,
 }
@@ -92,6 +96,10 @@ pub fn put_path(secret: PutSecret) -> Result<(SecretPath, &'static str), SourceE
         PutSecret::EmailCredential => (
             SecretPath::Platform(PlatformSecret::EmailCredential),
             "email credential",
+        ),
+        PutSecret::NewsDataKey => (
+            SecretPath::Platform(PlatformSecret::NewsDataKey),
+            "news data key",
         ),
         PutSecret::AlpacaOauthClientSecret => {
             (SecretPath::ClientSecret, "Alpaca OAuth client secret")
@@ -338,6 +346,16 @@ pub fn run_put(
     Ok(())
 }
 
+/// How a stopped provisioning reads: its refusal and reason code, and, when the vault's own
+/// refusal stopped it, the request refused, its method, path and status (E21-32v).
+pub fn stopped_line(stopped: &ProvisionError) -> String {
+    let code = stopped.error.code();
+    match &stopped.refused {
+        Some(request) => format!("{} ({code}): {request}", stopped.error),
+        None => format!("{} ({code})", stopped.error),
+    }
+}
+
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
 /// `--out` is checked before the vault is reached, so a directory the write would refuse leaves no
 /// secret id issued and unwritten. A refusal names its reason code; none carries a token, a
@@ -357,6 +375,7 @@ pub fn run_provision(
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
+    let stopped = |e: ProvisionError| anyhow!("{}", stopped_line(&e));
     let connections = args
         .connections
         .iter()
@@ -403,7 +422,7 @@ pub fn run_provision(
         let auth = kubernetes.ok_or_else(|| refused(SourceError::Config))?;
         return runtime
             .block_on(provision_kubernetes_auth(&config, &operator, &auth))
-            .map_err(refused);
+            .map_err(stopped);
     }
     let credentials = runtime
         .block_on(provision(
@@ -412,7 +431,7 @@ pub fn run_provision(
             &connections,
             kubernetes.as_ref(),
         ))
-        .map_err(refused)?;
+        .map_err(stopped)?;
     match (&args.out, &args.secrets_namespace) {
         (Some(dir), _) => {
             for name in write_credentials(dir, &credentials).map_err(refused)? {

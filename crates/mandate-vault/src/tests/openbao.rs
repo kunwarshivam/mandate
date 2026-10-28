@@ -1,13 +1,13 @@
 //! A sealed vault or a dev server is refused before any login (DEC-977 items 5 and 6).
 
 use crate::SourceError;
-use reqwest::StatusCode;
+use reqwest::{Method, StatusCode};
 
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 
-use crate::openbao::provisioned_policy;
+use crate::openbao::{Http, ProvisionError, Refused, provisioned_policy};
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
     kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
@@ -141,6 +141,8 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
             Identity::Runtime,
             Identity::SecretImport,
             Identity::ModelGateway,
+            Identity::NewsReader,
+            Identity::BarsReader,
             Identity::EmailSender,
             Identity::Executor(c("c1")),
             Identity::TokenExchange(c("c1")),
@@ -148,7 +150,7 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
             Identity::TokenExchange(c("c2")),
         ]
     );
-    assert_eq!(provisioned_identities(&[], false).len(), 6);
+    assert_eq!(provisioned_identities(&[], false).len(), 8);
 }
 
 /// Given the workspace's namespace, provisioning also makes the role provisioner's AppRole, after
@@ -157,10 +159,10 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
 fn the_role_provisioner_is_provisioned_only_with_the_workspaces_namespace() {
     let c = |id: &str| ConnectionId::new(id).unwrap();
     let with = provisioned_identities(&[c("c1")], true);
-    assert_eq!(with.len(), 9);
-    assert_eq!(with[6], Identity::Provisioner);
+    assert_eq!(with.len(), 11);
+    assert_eq!(with[8], Identity::Provisioner);
     assert_eq!(
-        with[7..],
+        with[9..],
         [
             Identity::Executor(c("c1")),
             Identity::TokenExchange(c("c1"))
@@ -174,6 +176,8 @@ fn the_role_provisioner_is_provisioned_only_with_the_workspaces_namespace() {
             Identity::Runtime,
             Identity::SecretImport,
             Identity::ModelGateway,
+            Identity::NewsReader,
+            Identity::BarsReader,
             Identity::EmailSender,
             Identity::Provisioner,
             Identity::Executor(c("c1")),
@@ -195,12 +199,14 @@ fn a_secret_id_is_issued_to_every_identity_but_the_token_exchanges() {
             Identity::Runtime,
             Identity::SecretImport,
             Identity::ModelGateway,
+            Identity::NewsReader,
+            Identity::BarsReader,
             Identity::EmailSender,
             Identity::Executor(c("c1")),
             Identity::Executor(c("c2")),
         ]
     );
-    assert_eq!(secret_id_identities(&[], false).len(), 6);
+    assert_eq!(secret_id_identities(&[], false).len(), 8);
 }
 
 /// Provisioning a vault nobody answers for is an outage, never an empty success that would leave
@@ -216,7 +222,8 @@ async fn provisioning_an_unreachable_vault_is_an_outage() {
     let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()], None).await;
     assert_eq!(
         provisioned.map(|credentials| credentials.len()),
-        Err(SourceError::Unavailable)
+        Err(ProvisionError::from(SourceError::Unavailable)),
+        "a vault that never answered refused nothing, so no request is named"
     );
 }
 
@@ -247,6 +254,8 @@ async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
         Identity::Runtime,
         Identity::SecretImport,
         Identity::ModelGateway,
+        Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
         Identity::Provisioner,
     ] {
@@ -720,4 +729,80 @@ fn only_a_missing_fingerprint_key_is_created_and_any_other_error_fails() {
             "{refusal:?}"
         );
     }
+}
+
+/// A refused request shows as its method, its path under `/v1/`, and its status, and nothing else.
+#[test]
+fn a_refused_request_shows_its_method_path_and_status() {
+    let refused = crate::openbao::Refused {
+        method: "PUT".to_owned(),
+        path: "sys/policies/acl/mandate-runtime".to_owned(),
+        status: 403,
+    };
+    assert_eq!(
+        refused.to_string(),
+        "PUT /v1/sys/policies/acl/mandate-runtime answered 403"
+    );
+    let stopped = ProvisionError {
+        error: SourceError::Denied,
+        refused: Some(refused),
+    };
+    assert_eq!(
+        stopped.to_string(),
+        "this identity's policy does not allow that",
+        "the error shows as its refusal; the caller names the request"
+    );
+}
+
+/// Provisioning names a refused request only when that refusal is the error that stopped it: a
+/// refusal gone past, a later answer of 200, a request that never reached an answer, or an error
+/// of another kind names none.
+#[test]
+fn provisioning_names_a_refusal_only_when_it_is_what_stopped_it() {
+    let http = Http::new(&unreachable()).unwrap();
+    let named = |http: &Http, error: SourceError| http.explained(error).refused;
+    let mounts_get = Refused {
+        method: "GET".to_owned(),
+        path: "sys/mounts/kv".to_owned(),
+        status: 404,
+    };
+    assert_eq!(named(&http, SourceError::Denied), None, "nothing asked yet");
+    http.note(
+        &Method::GET,
+        "sys/mounts/kv",
+        StatusCode::NOT_FOUND,
+        &Err(SourceError::Missing),
+    );
+    assert_eq!(named(&http, SourceError::Missing), Some(mounts_get));
+    assert_eq!(
+        named(&http, SourceError::Config),
+        None,
+        "an error of another kind is not the refusal's"
+    );
+    http.note(&Method::POST, "sys/mounts/kv", StatusCode::OK, &Ok(()));
+    assert_eq!(
+        named(&http, SourceError::Missing),
+        None,
+        "a refusal gone past is forgotten at the next answer"
+    );
+    http.note(
+        &Method::PUT,
+        "sys/policies/acl/mandate-api",
+        StatusCode::FORBIDDEN,
+        &Err(SourceError::Denied),
+    );
+    assert_eq!(
+        named(&http, SourceError::Denied),
+        Some(Refused {
+            method: "PUT".to_owned(),
+            path: "sys/policies/acl/mandate-api".to_owned(),
+            status: 403,
+        })
+    );
+    http.forget();
+    assert_eq!(
+        named(&http, SourceError::Denied),
+        None,
+        "a request that never reached an answer names no earlier one"
+    );
 }

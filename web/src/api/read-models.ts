@@ -5,6 +5,7 @@
  * the fixtures or computed in its place (rule 3). The reads the schemas do not define yet (health,
  * connections) are optional: a 404 is "not reported", never the deployment down.
  */
+import { CONNECTION_STATES, type ConnectionState } from "./connect";
 import type { WorkspaceClient } from "./client";
 import { array, closedEnum, contentRef, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
 import { emptyWorkspace } from "./reads";
@@ -51,6 +52,17 @@ export interface AgentDetail extends AgentRow {
    * stream was not found.
    */
   account_positions: ReadPosition[] | null;
+  /**
+   * A standing reason every opening of the agent's is held (DEC-2143), or `null` when none applies,
+   * which is not "openings run". A deployment that does not serve the member reads as `unknown`,
+   * never as `null`.
+   */
+  openings_held: OpeningsHeld | null;
+}
+
+/** `read-models/agent`'s `OpeningsHeld` (DEC-2143). */
+export interface OpeningsHeld {
+  reason: "account_traded" | "research_agent_traded" | "unknown";
 }
 
 export type ApprovalState = "pending" | "acted" | "skipped" | "timed_out" | "canceled";
@@ -80,7 +92,14 @@ export interface ApprovalRow {
 
 export interface ApprovalDetail extends ApprovalRow {
   content: Record<string, unknown>;
+  /** The `ApprovalRequested` version `content` comes from: version 3's names the checks its dry run deferred (DEC-2518). */
+  schema_version: ApprovalVersion;
+  /** The deferred checks of the decision the request names, as served, or `null` when the API found none (DEC-2519); judged by `deferredChecks`. */
+  decision_deferred_to_binding: unknown[] | null;
 }
+
+/** The `ApprovalRequested` versions the journal spec defines (§9.6). */
+export type ApprovalVersion = 1 | 2 | 3;
 
 /** What the API's own screens read: every agent with its detail, and every approval with its content. */
 export interface ApiView {
@@ -150,8 +169,17 @@ const agentMembers = {
   mandate: nullable(mandateSummary),
 };
 const agentRow = object<AgentRow>(agentMembers);
-const position = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
-const agentDetail = object<AgentDetail>({ ...agentMembers, account_positions: nullable(array(position)) });
+export const reconciledHolding = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
+const openingsHeld = object<OpeningsHeld>({ reason: closedEnum(["account_traded", "research_agent_traded", "unknown"] as const) });
+/** `openings_held` as served, or `unknown` from a deployment that does not serve it yet: an unjudged hold never reads as none. */
+const servedOpeningsHeld: Decoder<OpeningsHeld | null> = (value, path) => (value === undefined ? { ok: true, value: { reason: "unknown" } } : nullable(openingsHeld)(value, path));
+const agentDetailMembers = object<Omit<AgentDetail, "openings_held">>({ ...agentMembers, account_positions: nullable(array(reconciledHolding)) });
+const agentDetail: Decoder<AgentDetail> = (value, path) => {
+  const read = agentDetailMembers(value, path);
+  if (!read.ok) return read;
+  const held = servedOpeningsHeld((value as Record<string, unknown>).openings_held, `${path}/openings_held`);
+  return held.ok ? { ok: true, value: { ...read.value, openings_held: held.value } } : held;
+};
 
 const boundOrder = object<BoundOrder>({
   instrument,
@@ -174,7 +202,15 @@ const approvalMembers = {
   order: boundOrder,
 };
 const approvalRow = object<ApprovalRow>(approvalMembers);
-const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record });
+const APPROVAL_VERSIONS: readonly ApprovalVersion[] = [1, 2, 3];
+const approvalVersion: Decoder<ApprovalVersion> = (value, path) => {
+  const read = integer(value, path);
+  if (!read.ok) return read;
+  return (APPROVAL_VERSIONS as readonly number[]).includes(read.value) ? { ok: true, value: read.value as ApprovalVersion } : fail(path, "unknown_enum_value", String(read.value));
+};
+/** A list as served, its items unread here, or `null`: what is in it is the screen's to judge, so a bad item never hides the approval. */
+const servedList: Decoder<unknown[] | null> = (value, path) => (value === null || Array.isArray(value) ? { ok: true, value } : fail(path, "wrong_type"));
+const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record, schema_version: approvalVersion, decision_deferred_to_binding: servedList });
 
 export const agentsRead = object<{ agents: AgentRow[] }>({ agents: array(agentRow) });
 export const agentRead = object<{ agent: AgentDetail }>({ agent: agentDetail });
@@ -187,13 +223,14 @@ export function deadlineIso(deadline: number): string {
 }
 
 /**
- * The read the schemas do not define yet (DEC-975 item 5's provisional body): connections. Health
+ * The connections read (`read-models/connections`, DEC-2620), only the members the workspace needs:
+ * each connection's id, environment and state. Health
  * (`GET /health`, workspace API spec §4.7) is not read until the API routes it: the API answers an
  * unrouted path with its one 401 (API-1), which would read as signed out and hide every agent, so
  * web/ reads routed paths only and the status strip shows health as not reported (backlog E21-63).
  */
-const connections = object<{ connections: Array<{ connection_id: string; environment: Environment }> }>({
-  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]) })),
+const connections = object<{ connections: Array<{ connection_id: string; environment: Environment; state: ConnectionState }> }>({
+  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]), state: closedEnum(CONNECTION_STATES) })),
 });
 
 /** A read the API may not serve yet: its 404 is "not reported" (`null`), any other failure is the load's. */
@@ -258,7 +295,12 @@ export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
 
   const now = new Date().toISOString();
   const unreported = { state: "stale" as const, as_of: null };
-  const connection = held.value?.connections[0] ?? null;
+  /**
+   * The workspace's connection is an established one: a pending, refused or revoked connection is
+   * never the scope of Stop-all or Close-all. With none established the workspace names none, and
+   * those take the workspace scope instead, which covers every connection (spec §5.4).
+   */
+  const connection = held.value?.connections.find((c) => c.state === "established") ?? null;
   const base = emptyWorkspace("ready", now);
   const ws: Workspace = {
     ...base,

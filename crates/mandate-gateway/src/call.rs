@@ -277,7 +277,7 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         if request.workspace_id != self.settings.workspace_id {
             return Err(RequestError::ForeignWorkspace);
         }
-        if request.agent_id.is_none() != (request.purpose == Purpose::Compiler) {
+        if request.agent_id.is_some() != request.purpose.names_agent() {
             return Err(RequestError::AgentPurpose);
         }
         if !is_ulid(&request.call_id) {
@@ -783,7 +783,7 @@ fn billed(cost: Usd6, unknown_cost: bool) -> bool {
 pub enum RequestError {
     #[error("the request names another workspace (INF-9)")]
     ForeignWorkspace,
-    #[error("the compiler names no agent, and every other purpose names one")]
+    #[error("the compiler and an evaluation name no agent, and every other purpose names one")]
     AgentPurpose,
     #[error("the call id is not a ULID")]
     CallId,
@@ -801,11 +801,16 @@ pub enum RequestError {
         "the transcript is not a run of the entry's validated tool calls, each with one result, within max_turns"
     )]
     Transcript,
+    /// The caller's own: the exchange with the model-gateway service was lost before its whole
+    /// reply arrived, by its deadline (DEC-2397 item 2). The gateway never returns it.
+    #[error("the model-gateway service did not answer the call whole by its deadline")]
+    GatewayUnreachable,
 }
 
 impl RequestError {
-    /// Every refusal, in the order the gateway checks them.
-    pub const ALL: [Self; 9] = [
+    /// Every refusal, in the order the gateway checks them, then the caller's own
+    /// [`RequestError::GatewayUnreachable`], which the gateway never returns.
+    pub const ALL: [Self; 10] = [
         Self::ForeignWorkspace,
         Self::AgentPurpose,
         Self::CallId,
@@ -815,6 +820,7 @@ impl RequestError {
         Self::RunKind,
         Self::Tools,
         Self::Transcript,
+        Self::GatewayUnreachable,
     ];
 
     /// The refusal's code: its name on the wire and in a log line.
@@ -829,6 +835,7 @@ impl RequestError {
             Self::RunKind => "run_kind",
             Self::Tools => "tools",
             Self::Transcript => "transcript",
+            Self::GatewayUnreachable => "gateway_unreachable",
         }
     }
 }

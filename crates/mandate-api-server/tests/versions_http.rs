@@ -3,8 +3,14 @@
 //! judged as the CLI judges them, step-up through the port last, and recorded on the control
 //! stream, with the record in the store, before the answer. Every expected id, version, digest,
 //! and member below is computed here from the spec's own definitions, not by the server's code.
+//!
+//! A confirm under passkey step-up ([DEC-2128] items 1 to 3) runs against the server's real
+//! binding, its challenge from the challenge route and signed by a software authenticator.
+//!
+//! [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 
 mod common;
+mod support_passkey;
 
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
@@ -15,12 +21,16 @@ use mandate_api::envelope::StepUpEvidence;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::problem::{CurrentBase, Effect, Problem, ProblemCode, Violation};
 use mandate_api::wire::{Id, decode};
+use mandate_api_server::challenges::Challenges;
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
+use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
+use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
+use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
@@ -33,8 +43,9 @@ use mandate_identity::{
 };
 use mandate_identity_seal::Seal;
 use mandate_identity_testkit::{StaticLookup, membership, session};
-use mandate_journal::{ArtifactRef, Draft, StoredEvent, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactSource, Draft, StoredEvent, check_batch, get_artifact};
 use mandate_time::UtcNanos;
+use support_passkey::{CREDENTIAL, Signer, enrol, enrolled, unb64url};
 
 const APP: &str = "https://app.owlhead.test";
 const T0: i64 = 1_791_000_000;
@@ -43,7 +54,7 @@ const KEY_2: &str = "k2Z-9_bbbbbbbbbb";
 const ALICE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Z";
 const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W41";
 const MANDATE: &str = include_str!("../../mandate-cli/tests/fixtures/spy_mandate.json");
-const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"SPY"}"#;
+const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
 const MODEL: &str = r#"{"admits_instruments":false,"content_hash":"sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}"#;
 const CONNECTION: &str = "conn_alpaca_paper_01";
 const ACCOUNT: &str = "acct1";
@@ -89,6 +100,16 @@ struct Fixture {
     store: Arc<Objects<FsArtifactStore>>,
     sessions: Arc<Sessions>,
     asked: Arc<Accepting>,
+    challenges: Arc<Challenges>,
+}
+
+/// Subject links that name no one, so no `cli_confirm` evidence counts.
+struct Unlinked;
+
+impl NamesPrincipal for Unlinked {
+    fn names(&self, _who: PrincipalId) -> Result<bool, LinkRefusal> {
+        Ok(false)
+    }
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -98,6 +119,8 @@ static DIRS: Mutex<u32> = Mutex::new(0);
 enum Port {
     Accepting,
     Unbound,
+    /// The server's real binding, as `main.rs` binds it (DEC-2126 item 2).
+    Methods,
 }
 
 fn fixture() -> Fixture {
@@ -105,6 +128,17 @@ fn fixture() -> Fixture {
 }
 
 fn built(port: Port, with_store: bool) -> Fixture {
+    built_with(
+        port,
+        with_store,
+        vec![
+            activated(1, alice(), &[Role::Operator]),
+            activated(2, bob(), &[Role::Viewer]),
+        ],
+    )
+}
+
+fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::env::temp_dir().join(format!(
@@ -122,10 +156,6 @@ fn built(port: Port, with_store: bool) -> Fixture {
         FsArtifactStore::open(dir.join("store")).expect("a store"),
     ));
     let journal = Arc::new(MemJournal::default());
-    let records = vec![
-        activated(1, alice(), &[Role::Operator]),
-        activated(2, bob(), &[Role::Viewer]),
-    ];
     let sessions = Arc::new(Sessions::new(&key, Box::new(OsRandom::new())));
     let clock = common::ManualClock::at(T0);
     let config = IssuerConfig::new(
@@ -135,9 +165,21 @@ fn built(port: Port, with_store: bool) -> Fixture {
     )
     .expect("the issuer");
     let asked = Arc::new(Accepting::default());
+    let challenges: Arc<Challenges> = Arc::default();
     let step_up: Arc<dyn StepUp> = match port {
         Port::Accepting => Arc::clone(&asked) as Arc<dyn StepUp>,
         Port::Unbound => Arc::new(Unbound),
+        Port::Methods => Arc::new(Methods {
+            passkey: Passkey {
+                challenges: Arc::clone(&challenges),
+                rp: support_passkey::rp(),
+                keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
+            },
+            cli_confirm: CliConfirm {
+                challenges: Arc::clone(&challenges),
+                links: Arc::new(Unlinked),
+            },
+        }),
     };
     let app = App {
         settings: Settings {
@@ -153,9 +195,10 @@ fn built(port: Port, with_store: bool) -> Fixture {
         artifacts: None,
         objects: with_store.then(|| Arc::clone(&store) as Arc<dyn ObjectStore>),
         step_up,
-        challenges: Arc::default(),
+        challenges: Arc::clone(&challenges),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),
@@ -163,6 +206,7 @@ fn built(port: Port, with_store: bool) -> Fixture {
         store,
         sessions,
         asked,
+        challenges,
     };
     seed(&f);
     f
@@ -1162,6 +1206,10 @@ fn a_deploy_checks_v_002_against_the_accounts_equity_snapshot() {
     assert!(events(&f, "AgentDeployed").is_empty());
 }
 
+/// Go-live is always `live_unavailable`; while the gate is off, as here, its refusal is the one
+/// record it leaves ([DEC-2134] item 4), and a refused role or a missing key leaves none.
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
 #[test]
 fn go_live_is_always_live_unavailable() {
     let f = fixture();
@@ -1185,7 +1233,9 @@ fn go_live_is_always_live_unavailable() {
         422,
         ProblemCode::Invalid,
     );
-    assert_eq!(control(&f).len(), 4);
+    let rows = control(&f);
+    assert_eq!(rows.len(), 5);
+    assert_eq!(rows[4].event_type, "RealMoneyRefused");
 }
 
 #[test]
@@ -1425,6 +1475,13 @@ fn another_connections_records_leave_the_documents_connection_unrecorded() {
     );
 }
 
+/// A version-2 establishment of [`CONNECTION`] on [`ACCOUNT`], as rule 201 reads it.
+fn established_payload() -> String {
+    format!(
+        r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","margin_attestation":null,"scopes":["data","trading"],"step_up":{EVIDENCE},"user":"alice"}}"#
+    )
+}
+
 /// `seed_control` at schema version 2.
 fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) {
     let mut streams = f.journal.streams.lock().expect("unpoisoned");
@@ -1614,4 +1671,1007 @@ fn a_version_2_deploy_is_appended_only_at_the_head_it_read() {
     let deployed = events(&f, "AgentDeployed");
     assert_eq!(deployed.len(), 1);
     assert_eq!(deployed[0].schema_version, 2);
+}
+
+const CHALLENGE_KEY: &str = "k3Z-9_challeng01";
+
+/// The real binding's fixture: `v1` created, and Alice's passkey enrolled as [`CREDENTIAL`] at
+/// counter 0, past its cool-off, its key in the store. The binding folds the member's passkeys
+/// from whole envelopes (journal spec §3), so the seeded control rows are written again as such.
+struct Passkeyed {
+    f: Fixture,
+    signer: Signer,
+    cookie: String,
+}
+
+fn passkeyed() -> Passkeyed {
+    passkeyed_with(false)
+}
+
+/// [`passkeyed`], with [`CONNECTION`] established on [`ACCOUNT`] at version 2 before Alice
+/// enrols when `established`, so a deployment of `v1` meets §9.24's rule 201.
+fn passkeyed_with(established: bool) -> Passkeyed {
+    let f = built(Port::Methods, true);
+    let signer = Signer::es256();
+    f.store.put(&signer.cose_key()).expect("the key");
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let seeded = streams.remove(&ctl()).expect("seeded");
+        let mut rows = common::control::Rows::opened();
+        for row in seeded.iter().skip(1) {
+            let payload: serde_json::Value =
+                serde_json::from_slice(&to_canonical(&payload(row))).expect("JSON");
+            rows.hosted(&row.event_type, T0 - 1_000, payload);
+        }
+        if established {
+            let payload: serde_json::Value =
+                serde_json::from_str(&established_payload()).expect("JSON");
+            rows.edited("ConnectionEstablished", T0 - 1_000, |envelope| {
+                envelope["payload"] = payload;
+                envelope["schema_version"] = serde_json::json!(2);
+            });
+        }
+        enrol(
+            &mut rows,
+            T0 - 900,
+            enrolled(alice(), CREDENTIAL, &signer, 0, Some(T0 - 800)),
+        );
+        streams.insert(ctl(), rows.rows);
+    }
+    let cookie = signed_in(&f, alice());
+    assert_eq!(create(&f, &cookie, KEY, "v1").status, 202);
+    Passkeyed { f, signer, cookie }
+}
+
+/// A challenge the challenge route issued: its id, the bytes the authenticator signs, and when.
+struct Issued {
+    id: String,
+    bytes: Vec<u8>,
+    issued_at: String,
+}
+
+impl Passkeyed {
+    /// Alice's challenge to confirm `v1`, bound to §3.5's digest of the confirmation.
+    fn challenge(&self) -> Issued {
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent_id":null,"base_version":null,"mandate_version":"{}"}}"#,
+            version("v1")
+        ))));
+        self.challenge_for("confirm_version", bound, CHALLENGE_KEY)
+    }
+
+    /// Alice's challenge to deploy `agt_a` on `v1`, bound to the deploy digest (§3.5).
+    fn deploy_challenge(&self) -> Issued {
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent_id":"agt_a","mandate_version":"{}"}}"#,
+            version("v1")
+        ))));
+        self.challenge_for("deploy", bound, "k3Z-9_cccccccccc")
+    }
+
+    /// Alice's challenge of `kind` bound to `bound`, under the challenge route's `key`.
+    fn challenge_for(&self, kind: &str, bound: Digest, key: &str) -> Issued {
+        let body = format!(
+            r#"{{"action":{{"kind":"{kind}","digest":"sha256:{}"}}}}"#,
+            bound.to_hex()
+        );
+        let reply = post(
+            &self.f,
+            &ws("/step-up/challenges"),
+            &self.cookie,
+            Some(key),
+            body.as_bytes(),
+        );
+        assert_eq!(
+            reply.status,
+            201,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let answer = self::body(&reply);
+        Issued {
+            id: text(&answer, &["challenge_id"]).to_owned(),
+            bytes: unb64url(text(&answer, &["webauthn_challenge"])),
+            issued_at: text(&answer, &["issued_at"]).to_owned(),
+        }
+    }
+
+    /// `v1`'s confirm body under `method` evidence for `issued`, with `assertion` beside it.
+    fn body(&self, issued: &Issued, method: &str, assertion: Option<serde_json::Value>) -> String {
+        let evidence = format!(
+            r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"{method}"}}"#,
+            issued.id, issued.issued_at
+        );
+        with_assertion(&confirm_body(&screen_digest("v1"), &evidence), assertion)
+    }
+
+    fn confirm(&self, body: &str) -> Reply {
+        confirm(&self.f, &self.cookie, KEY, "v1", body)
+    }
+
+    /// `v1` confirmed under passkey step-up, its assertion at counter 9.
+    fn confirmed(&self) {
+        let issued = self.challenge();
+        let signed = self.signer.assert(&issued.bytes, 9);
+        let reply = self.confirm(&self.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            202,
+            "{:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+    }
+
+    /// The deploy body of `agt_a` on `v1` under passkey evidence for `issued`, with `assertion`.
+    fn deploy_body(&self, issued: &Issued, assertion: Option<serde_json::Value>) -> String {
+        let evidence = format!(
+            r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"passkey"}}"#,
+            issued.id, issued.issued_at
+        );
+        with_assertion(&deploy_body("agt_a", "v1", &evidence), assertion)
+    }
+
+    /// The account's equity snapshot V-002 reads, so a deployment passes its V-rules.
+    fn funded(&self) {
+        let mut snapshot = row(
+            &account(),
+            2,
+            "AccountSnapshotRecorded",
+            r#"{"equity":"25000"}"#,
+        );
+        snapshot.recorded_at = "2026-10-17T11:00:00.000000000Z".to_owned();
+        self.f
+            .journal
+            .streams
+            .lock()
+            .expect("unpoisoned")
+            .insert(account(), vec![snapshot]);
+    }
+
+    fn held(&self, issued: &Issued) -> bool {
+        self.f.challenges.held(&issued.id).is_some()
+    }
+}
+
+/// `body` with `step_up_assertion` set to `assertion`, or as it is for `None`.
+fn with_assertion(body: &str, assertion: Option<serde_json::Value>) -> String {
+    let mut body: serde_json::Value = serde_json::from_str(body).expect("JSON");
+    if let Some(assertion) = assertion {
+        body["step_up_assertion"] = assertion;
+    }
+    body.to_string()
+}
+
+/// `reply` is `invalid` with one violation, at `/step_up_assertion` (DEC-2128 item 1).
+fn invalid_at_the_assertion(reply: &Reply) {
+    assert_eq!(
+        reply.status,
+        422,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert_eq!(problem(reply).code, ProblemCode::Invalid);
+    let paths: Vec<String> = violations(reply)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(paths, ["/step_up_assertion"]);
+}
+
+#[test]
+fn an_assertion_beside_cli_confirm_evidence_on_a_confirm_is_invalid_and_confirms_nothing() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    create(&f, &cookie, KEY, "v1");
+    let evidence = EVIDENCE.replace("\"passkey\"", "\"cli_confirm\"");
+    let signed = Signer::es256().assert(b"any challenge", 9);
+    let body = with_assertion(
+        &confirm_body(&screen_digest("v1"), &evidence),
+        Some(signed.json(CREDENTIAL)),
+    );
+    invalid_at_the_assertion(&confirm(&f, &cookie, KEY, "v1", &body));
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+    assert!(events(&f, "MandateConfirmed").is_empty());
+}
+
+#[test]
+fn an_assertion_beside_null_step_up_on_a_confirm_is_invalid_before_step_up_required() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    create(&f, &cookie, KEY, "v1");
+    let signed = Signer::es256().assert(b"any challenge", 9);
+    let body = with_assertion(
+        &confirm_body(&screen_digest("v1"), "null"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    invalid_at_the_assertion(&confirm(&f, &cookie, KEY, "v1", &body));
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+    assert!(events(&f, "MandateConfirmed").is_empty());
+}
+
+#[test]
+fn passkey_evidence_without_an_assertion_on_a_confirm_is_step_up_missing() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", None)),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+#[test]
+fn a_refused_passkey_confirm_confirms_nothing_and_keeps_the_challenge() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    let mut signed = w.signer.assert(&issued.bytes, 9);
+    let last = signed.signature.len() - 1;
+    signed.signature[last] ^= 1;
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)))),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(events(&w.f, "StepUpAsserted").is_empty());
+    assert!(
+        get_artifact(
+            w.f.store.as_ref(),
+            &ArtifactRef::of(&signed.canonical(CREDENTIAL))
+        )
+        .is_err(),
+        "no assertion is stored"
+    );
+    assert!(w.held(&issued), "a refused confirm keeps the challenge");
+}
+
+#[test]
+fn a_confirm_whose_passkeys_cannot_be_read_is_journal_unavailable() {
+    let w = passkeyed();
+    {
+        let mut streams = w.f.journal.streams.lock().expect("unpoisoned");
+        let seeded = streams.remove(&ctl()).expect("seeded");
+        let mut rows = common::control::Rows { rows: seeded };
+        rows.hosted(
+            "CredentialEnrolled",
+            T0 - 500,
+            serde_json::json!({"member": ALICE, "credential": CREDENTIAL, "alg": "rs256"}),
+        );
+        streams.insert(ctl(), rows.rows);
+    }
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)))),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+#[test]
+fn a_passkey_confirm_commits_mandate_confirmed_then_its_assertion_and_stores_the_raw_assertion() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let rows = control(&w.f);
+    let last_two: Vec<&str> = rows
+        .iter()
+        .rev()
+        .take(2)
+        .rev()
+        .map(|row| row.event_type.as_str())
+        .collect();
+    assert_eq!(
+        last_two,
+        ["MandateConfirmed", "StepUpAsserted"],
+        "the confirmation, then its assertion, in one batch (DEC-2128 item 3)"
+    );
+    let confirmed = &rows[rows.len() - 2];
+    let assertion = &rows[rows.len() - 1];
+    assert_eq!(confirmed.event_id, derived("confirm_version", KEY));
+    assert_eq!(
+        assertion.event_id,
+        derived("confirm_version_step_up_asserted", KEY),
+        "the assertion's id is §3.4's under its own operation (DEC-2128 item 3)"
+    );
+    assert_eq!(
+        confirmed.schema_version, 3,
+        "version 3 under passkey step-up (DEC-2131 item 3)"
+    );
+    let evidence = format!(
+        r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"passkey"}}"#,
+        issued.id, issued.issued_at
+    );
+    let confirmation = payload(confirmed);
+    assert_eq!(
+        confirmation.get("step_up").map(to_canonical),
+        Some(to_canonical(&parse(evidence.as_bytes()).expect("JSON"))),
+        "the evidence the API judged, which rule 253 reads"
+    );
+    for member in ["agent_id", "base_version"] {
+        assert_eq!(
+            confirmation.get(member),
+            Some(&Value::Null),
+            "a new mandate's version 2 members: {member}"
+        );
+    }
+    let canonical = signed.canonical(CREDENTIAL);
+    let expected = format!(
+        r#"{{"assertion":"sha256:{}","challenge":"{}","credential":"{CREDENTIAL}","sign_count":9}}"#,
+        Digest::of(&canonical).to_hex(),
+        issued.id
+    );
+    assert_eq!(to_canonical(&payload(assertion)), expected.into_bytes());
+    let record = parse(&assertion.body).expect("JSON");
+    assert_eq!(
+        record.get("causation_id").and_then(Value::as_str),
+        Some(confirmed.event_id.as_str()),
+        "rule 253: caused by the confirmation it authorized"
+    );
+    assert_eq!(
+        get_artifact(w.f.store.as_ref(), &ArtifactRef::of(&canonical)),
+        Ok(canonical),
+        "the raw assertion is stored under its own digest"
+    );
+    let drafts: Vec<Draft> = [confirmed, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(
+        check_batch(&drafts),
+        Ok(()),
+        "the journal's batch rules, rule 253 among them, admit the batch"
+    );
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// A deployment under passkey step-up on a connection rule 201 admits (DEC-2128 item 3, DEC-2131
+/// item 3): `AgentDeployed` version 3, naming the connection and carrying the evidence judged,
+/// then its `StepUpAsserted` under §3.4's id for its own operation, in one batch the journal's
+/// batch rules (rule 253) admit.
+#[test]
+fn a_passkey_deploy_commits_agent_deployed_version_3_then_its_assertion() {
+    let w = passkeyed_with(true);
+    w.funded();
+    w.confirmed();
+    let issued = w.deploy_challenge();
+    let signed = w.signer.assert(&issued.bytes, 10);
+    let reply = deploy(
+        &w.f,
+        &w.cookie,
+        KEY_2,
+        &w.deploy_body(&issued, Some(signed.json(CREDENTIAL))),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let rows = control(&w.f);
+    let (deployed, assertion) = (&rows[rows.len() - 2], &rows[rows.len() - 1]);
+    assert_eq!(
+        (deployed.event_type.as_str(), assertion.event_type.as_str()),
+        ("AgentDeployed", "StepUpAsserted")
+    );
+    assert_eq!(deployed.event_id, derived("deploy", KEY_2));
+    assert_eq!(
+        assertion.event_id,
+        derived("deploy_step_up_asserted", KEY_2)
+    );
+    assert_eq!(deployed.schema_version, 3);
+    let deployment = payload(deployed);
+    assert_eq!(text(&deployment, &["connection_id"]), CONNECTION);
+    let evidence = format!(
+        r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"passkey"}}"#,
+        issued.id, issued.issued_at
+    );
+    assert_eq!(
+        deployment.get("step_up").map(to_canonical),
+        Some(to_canonical(&parse(evidence.as_bytes()).expect("JSON")))
+    );
+    let record = parse(&assertion.body).expect("JSON");
+    assert_eq!(
+        record.get("causation_id").and_then(Value::as_str),
+        Some(deployed.event_id.as_str())
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let drafts: Vec<Draft> = [deployed, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()));
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// [DEC-2133]: a deployment under passkey step-up on a connection rule 201 refuses has no version
+/// that carries its evidence, so it is refused `invalid` at `/mandate_version`, before step-up is
+/// judged: nothing is appended and the challenge is kept.
+///
+/// [DEC-2133]: ../../../docs/project/decisions/DEC-2133.md
+#[test]
+fn a_passkey_deploy_on_a_connection_rule_201_refuses_is_refused_and_keeps_its_challenge() {
+    let w = passkeyed();
+    w.funded();
+    w.confirmed();
+    let issued = w.deploy_challenge();
+    let signed = w.signer.assert(&issued.bytes, 10);
+    let reply = deploy(
+        &w.f,
+        &w.cookie,
+        KEY_2,
+        &w.deploy_body(&issued, Some(signed.json(CREDENTIAL))),
+    );
+    assert_eq!(
+        reply.status,
+        422,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert_eq!(
+        violations(&reply),
+        [(
+            "/mandate_version".to_owned(),
+            "connection_unrecorded".to_owned()
+        )]
+    );
+    assert!(events(&w.f, "AgentDeployed").is_empty());
+    assert!(
+        events(&w.f, "StepUpAsserted").len() == 1,
+        "the confirmation's alone"
+    );
+    assert!(w.held(&issued), "the challenge is kept");
+}
+
+/// DEC-2128 item 1 on a deploy: an assertion beside `cli_confirm` evidence, or beside none, is
+/// `invalid` with one violation at `/step_up_assertion`, before the port is asked, and nothing is
+/// deployed.
+#[test]
+fn an_assertion_beside_cli_confirm_or_no_evidence_on_a_deploy_is_invalid_and_deploys_nothing() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    f.asked.0.lock().expect("unpoisoned").clear();
+    let signed = Signer::es256().assert(b"any challenge", 9);
+    let cli = EVIDENCE.replace("\"passkey\"", "\"cli_confirm\"");
+    for evidence in [cli.as_str(), "null"] {
+        let body = with_assertion(
+            &deploy_body("agt_a", "v1", evidence),
+            Some(signed.json(CREDENTIAL)),
+        );
+        invalid_at_the_assertion(&deploy(&f, &cookie, KEY_2, &body));
+    }
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+    assert!(events(&f, "AgentDeployed").is_empty());
+}
+
+/// A passkey deploy repeated under its key answers as the first though its challenge is spent,
+/// and appends no second batch (§3.4 step 1, DEC-2128 item 3).
+#[test]
+fn a_replayed_passkey_deploy_answers_as_the_first_though_its_challenge_is_gone() {
+    let w = passkeyed_with(true);
+    w.funded();
+    w.confirmed();
+    let issued = w.deploy_challenge();
+    let signed = w.signer.assert(&issued.bytes, 10);
+    let body = w.deploy_body(&issued, Some(signed.json(CREDENTIAL)));
+    let first = deploy(&w.f, &w.cookie, KEY_2, &body);
+    assert_eq!(
+        first.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let committed = control(&w.f);
+    let again = deploy(&w.f, &w.cookie, KEY_2, &body);
+    assert_eq!(
+        again.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(control(&w.f).len(), committed.len(), "no second batch");
+}
+
+#[test]
+fn a_replayed_passkey_confirm_answers_as_the_first_though_its_challenge_is_gone() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let body = w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)));
+    let first = w.confirm(&body);
+    assert_eq!(
+        first.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let committed = control(&w.f);
+    assert!(!w.held(&issued));
+    let again = w.confirm(&body);
+    assert_eq!(
+        again.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(self::body(&again), self::body(&first), "the same answer");
+    assert_eq!(control(&w.f), committed, "nothing more is appended");
+}
+
+const GATE_ON: &str =
+    r#"{"decision":"DEC-2135","enabled":true,"operator":"01JAA3G0A000000000000000P1"}"#;
+const GATE_OFF: &str =
+    r#"{"decision":null,"enabled":false,"operator":"01JAA3G0A000000000000000P1"}"#;
+
+/// The three routes here that can name `live`, as [DEC-2134] item 1 lists them.
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
+const LIVE_ACTIONS: [&str; 3] = ["create_version", "deploy", "go_live"];
+
+/// `action`'s request naming `live`, under `key`; a deploy's live version is recorded first.
+fn live_attempt(f: &Fixture, cookie: &str, key: &str, action: &str) -> Reply {
+    match action {
+        "create_version" => create(f, cookie, key, "live"),
+        "deploy" => {
+            if events(f, "MandateConfirmed").is_empty() {
+                seed_version(f, "live");
+            }
+            deploy(f, cookie, key, &deploy_body("agt_a", "live", EVIDENCE))
+        }
+        _ => post(f, &ws("/agents/agt_a/go-live"), cookie, Some(key), b""),
+    }
+}
+
+/// Each `RealMoneyRefused` on the control stream, read from its body as the journal holds it.
+fn real_money_refusals(f: &Fixture) -> Vec<Value> {
+    events(f, "RealMoneyRefused")
+        .iter()
+        .map(|row| json(std::str::from_utf8(&row.body).expect("UTF-8")))
+        .collect()
+}
+
+/// Nothing a live attempt may never leave: no version, confirmation, deployment, or setting
+/// written by the API, and no step-up asked about.
+fn nothing_but_refusals(f: &Fixture, settings: usize) {
+    for event_type in ["MandateVersionCreated", "MandateConfirmed", "AgentDeployed"] {
+        let written = events(f, event_type)
+            .iter()
+            .filter(|row| {
+                json(std::str::from_utf8(&row.body).expect("UTF-8"))
+                    .get("actor")
+                    .is_some()
+            })
+            .count();
+        assert_eq!(written, 0, "the API wrote a {event_type}");
+    }
+    assert_eq!(events(f, "RealMoneyGateChanged").len(), settings);
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+}
+
+#[test]
+fn while_the_gate_is_off_a_live_request_is_journaled_as_refused_then_answered_live_unavailable() {
+    for setting in [None, Some(GATE_OFF)] {
+        let f = fixture();
+        if let Some(payload) = setting {
+            seed_control(&f, "RealMoneyGateChanged", GATE_ON);
+            seed_control(&f, "RealMoneyGateChanged", payload);
+        }
+        let cookie = signed_in(&f, alice());
+        for (n, action) in LIVE_ACTIONS.into_iter().enumerate() {
+            refused(
+                &live_attempt(&f, &cookie, KEY, action),
+                409,
+                ProblemCode::LiveUnavailable,
+            );
+            let refusals = real_money_refusals(&f);
+            assert_eq!(refusals.len(), n + 1, "{action}: one refusal per attempt");
+            let refusal = refusals.last().expect("one");
+            assert_eq!(text(refusal, &["payload", "action"]), action);
+            assert_eq!(text(refusal, &["payload", "requested"]), "live");
+            assert_eq!(text(refusal, &["payload", "principal"]), ALICE);
+            assert_eq!(text(refusal, &["payload", "reason"]), "gate_off");
+            assert_eq!(text(refusal, &["actor", "kind"]), "user");
+            assert_eq!(text(refusal, &["actor", "id"]), ALICE);
+            assert_eq!(text(refusal, &["environment"]), "paper");
+            assert_eq!(
+                text(refusal, &["event_id"]),
+                derived(&format!("real_money_refused_{action}"), KEY),
+                "{action}: the refusal's id is the key's (§3.4)"
+            );
+        }
+        nothing_but_refusals(&f, if setting.is_some() { 2 } else { 0 });
+    }
+}
+
+#[test]
+fn while_the_gate_is_on_a_live_request_passes_it_and_is_still_live_unavailable() {
+    let f = fixture();
+    seed_control(&f, "RealMoneyGateChanged", GATE_OFF);
+    seed_control(&f, "RealMoneyGateChanged", GATE_ON);
+    let cookie = signed_in(&f, alice());
+    for action in LIVE_ACTIONS {
+        refused(
+            &live_attempt(&f, &cookie, KEY, action),
+            409,
+            ProblemCode::LiveUnavailable,
+        );
+    }
+    assert!(real_money_refusals(&f).is_empty());
+    nothing_but_refusals(&f, 2);
+}
+
+#[test]
+fn a_retry_under_its_key_finds_its_refusal_and_a_new_key_records_another() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    for action in LIVE_ACTIONS {
+        let before = real_money_refusals(&f).len();
+        for key in [KEY, KEY, KEY_2] {
+            refused(
+                &live_attempt(&f, &cookie, key, action),
+                409,
+                ProblemCode::LiveUnavailable,
+            );
+        }
+        assert_eq!(real_money_refusals(&f).len(), before + 2, "{action}");
+    }
+}
+
+/// A refusal that cannot be recorded is still a refusal, never an admission ([DEC-2134] item 4).
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
+#[test]
+fn a_refusal_the_journal_cannot_take_is_journal_unavailable_and_admits_nothing() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_version(&f, "live");
+    for action in LIVE_ACTIONS {
+        for script in [
+            Scripted::Unavailable,
+            Scripted::Ambiguous,
+            Scripted::Conflict,
+        ] {
+            f.journal.script(&[script; 5]);
+            refused(
+                &live_attempt(&f, &cookie, KEY, action),
+                503,
+                ProblemCode::JournalUnavailable,
+            );
+            f.journal.script.lock().expect("unpoisoned").clear();
+        }
+    }
+    assert!(real_money_refusals(&f).is_empty());
+    nothing_but_refusals(&f, 0);
+}
+
+/// Every set of the workspace's roles, with no setting, with the gate turned off, and with it
+/// on: only the drafting and deploying role (identity spec §4.2's Op column) reaches the gate,
+/// every other set is the one 403, nothing is ever committed, and a refusal is journaled exactly
+/// when the gate is off and the role reached it. No role sets the gate.
+#[test]
+fn no_role_set_passes_a_live_request_and_none_sets_the_gate() {
+    const ROLES: [Role; 5] = [
+        Role::WorkspaceAdmin,
+        Role::Operator,
+        Role::Approver,
+        Role::Viewer,
+        Role::Auditor,
+    ];
+    for mask in 0_u32..(1 << ROLES.len()) {
+        let roles: Vec<Role> = ROLES
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, role)| *role)
+            .collect();
+        let reaches = roles.contains(&Role::Operator);
+        for settings in [&[][..], &[GATE_ON, GATE_OFF][..], &[GATE_OFF, GATE_ON][..]] {
+            let f = built_with(Port::Accepting, true, vec![activated(1, alice(), &roles)]);
+            seed_version(&f, "live");
+            for payload in settings {
+                seed_control(&f, "RealMoneyGateChanged", payload);
+            }
+            let off = settings.last() != Some(&GATE_ON);
+            let cookie = signed_in(&f, alice());
+            for action in LIVE_ACTIONS {
+                let reply = live_attempt(&f, &cookie, KEY, action);
+                let label = format!("{roles:?}, {settings:?}, {action}");
+                if reaches {
+                    refused(&reply, 409, ProblemCode::LiveUnavailable);
+                } else {
+                    refused(&reply, 403, ProblemCode::Forbidden);
+                }
+                let journaled = real_money_refusals(&f)
+                    .iter()
+                    .filter(|r| text(r, &["payload", "action"]) == action)
+                    .count();
+                assert_eq!(journaled, usize::from(reaches && off), "{label}");
+            }
+            nothing_but_refusals(&f, settings.len());
+        }
+    }
+}
+
+const KEY_3: &str = "k4Z-9_dddddddddd";
+
+impl Passkeyed {
+    /// `agt_a` deployed on `v1` under passkey step-up, so an owner command may name it.
+    fn deployed(&self) {
+        self.funded();
+        self.confirmed();
+        let issued = self.deploy_challenge();
+        let signed = self.signer.assert(&issued.bytes, 10);
+        let reply = deploy(
+            &self.f,
+            &self.cookie,
+            KEY_2,
+            &self.deploy_body(&issued, Some(signed.json(CREDENTIAL))),
+        );
+        assert_eq!(
+            reply.status,
+            202,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+    }
+
+    /// Alice's challenge of `kind` for `agt_a`'s command that `confirms`, bound to §3.5's object at
+    /// the control stream's head now (DEC-2102 item 4).
+    fn command_challenge(&self, kind: &str, confirms: &str) -> Issued {
+        let head = control(&self.f).last().expect("rows").seq;
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent":"agt_a","bid":null,"bid_size":null,"confirms":"{confirms}","control_head":"{head}","event":null,"floor":null,"instrument":null}}"#
+        ))));
+        self.challenge_for(kind, bound, "k5Z-9_eeeeeeeeee")
+    }
+
+    /// `method` evidence for `issued`.
+    fn evidence(issued: &Issued, method: &str) -> String {
+        format!(
+            r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"{method}"}}"#,
+            issued.id, issued.issued_at
+        )
+    }
+}
+
+/// A resume's body under `evidence`, with `assertion` beside it.
+fn resume_body(evidence: &str, assertion: Option<serde_json::Value>) -> String {
+    with_assertion(
+        &format!(r#"{{"record":null,"step_up":{evidence}}}"#),
+        assertion,
+    )
+}
+
+/// A Stop with release's body under `evidence`, naming the platform's warning, with `assertion`.
+fn stop_body(evidence: &str, assertion: Option<serde_json::Value>) -> String {
+    let warning = format!(
+        "sha256:{}",
+        Digest::of(mandate_api_server::commands::RELEASE_WARNING.as_bytes()).to_hex()
+    );
+    with_assertion(
+        &format!(
+            r#"{{"release":true,"warning_shown":"{warning}","record":null,"step_up":{evidence}}}"#
+        ),
+        assertion,
+    )
+}
+
+/// The last two control rows, which a command under passkey step-up appends together: its
+/// `OwnerCommandIssued`, then its `StepUpAsserted`, in one batch the journal's batch rules (rule
+/// 253) admit, the assertion caused by the command and naming the challenge (DEC-2128 item 3).
+fn asserted_command(w: &Passkeyed, issued: &Issued, command: &str) -> Value {
+    let rows = control(&w.f);
+    let (issued_row, assertion) = (&rows[rows.len() - 2], &rows[rows.len() - 1]);
+    assert_eq!(
+        (
+            issued_row.event_type.as_str(),
+            assertion.event_type.as_str()
+        ),
+        ("OwnerCommandIssued", "StepUpAsserted")
+    );
+    assert_eq!(issued_row.event_id, derived(command, KEY_3));
+    assert_eq!(
+        assertion.event_id,
+        derived(&format!("{command}_step_up_asserted"), KEY_3),
+        "the assertion's id is §3.4's under its own operation"
+    );
+    let record = parse(&assertion.body).expect("JSON");
+    assert_eq!(
+        record.get("causation_id").and_then(Value::as_str),
+        Some(issued_row.event_id.as_str())
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let drafts: Vec<Draft> = [issued_row, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()));
+    assert!(!w.held(issued), "the challenge is taken");
+    payload(issued_row)
+}
+
+/// A resume under passkey step-up records its evidence, which the runtime then judges, and commits
+/// its `StepUpAsserted` beside it (DEC-2128 items 1 to 3 applied to resume, DEC-2102 item 4).
+#[test]
+fn a_passkey_resume_records_its_evidence_then_its_assertion() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let evidence = Passkeyed::evidence(&issued, "passkey");
+    let reply = post(
+        &w.f,
+        &ws("/agents/agt_a/resume"),
+        &w.cookie,
+        Some(KEY_3),
+        resume_body(&evidence, Some(signed.json(CREDENTIAL))).as_bytes(),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let command = asserted_command(&w, &issued, "resume");
+    assert_eq!(text(&command, &["command"]), "resume");
+    assert_eq!(
+        command.get("step_up").map(to_canonical),
+        Some(to_canonical(&json(&evidence)))
+    );
+}
+
+/// A Stop with release under passkey step-up, bound to what it confirms, as the resume.
+#[test]
+fn a_passkey_stop_with_release_records_its_evidence_then_its_assertion() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("stop", "stop_release");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let evidence = Passkeyed::evidence(&issued, "passkey");
+    let reply = post(
+        &w.f,
+        &ws("/agents/agt_a/stop"),
+        &w.cookie,
+        Some(KEY_3),
+        stop_body(&evidence, Some(signed.json(CREDENTIAL))).as_bytes(),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let command = asserted_command(&w, &issued, "stop");
+    assert_eq!(text(&command, &["command"]), "stop");
+    assert_eq!(command.get("release"), Some(&Value::Bool(true)));
+    assert_eq!(
+        command.get("step_up").map(to_canonical),
+        Some(to_canonical(&json(&evidence)))
+    );
+}
+
+/// An assertion beside evidence that is not a passkey's is `invalid` at `/step_up_assertion`, and
+/// nothing is recorded (DEC-2128 item 1).
+#[test]
+fn an_assertion_beside_cli_confirm_evidence_on_a_resume_or_stop_is_invalid() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let before = control(&w.f).len();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let cli = Passkeyed::evidence(&issued, "cli_confirm");
+    for (path, body) in [
+        (
+            "/agents/agt_a/resume",
+            resume_body(&cli, Some(signed.json(CREDENTIAL))),
+        ),
+        (
+            "/agents/agt_a/stop",
+            stop_body(&cli, Some(signed.json(CREDENTIAL))),
+        ),
+        (
+            "/agents/agt_a/resume",
+            resume_body("null", Some(signed.json(CREDENTIAL))),
+        ),
+    ] {
+        let reply = post(&w.f, &ws(path), &w.cookie, Some(KEY_3), body.as_bytes());
+        invalid_at_the_assertion(&reply);
+    }
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// A passkey resume whose assertion the port refuses, here one signed over another challenge, or
+/// that carries none, is still recorded, with `null` evidence that the runtime refuses, and commits
+/// no `StepUpAsserted` (DEC-2102 item 4): the brake's record is never lost to its step-up.
+#[test]
+fn an_unverified_passkey_resume_is_recorded_with_null_evidence_and_no_assertion() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let evidence = Passkeyed::evidence(&issued, "passkey");
+    let forged = w.signer.assert(b"another challenge", 11);
+    for (key, assertion) in [
+        (KEY_3, Some(forged.json(CREDENTIAL))),
+        ("k6Z-9_ffffffffff", None),
+    ] {
+        let reply = post(
+            &w.f,
+            &ws("/agents/agt_a/resume"),
+            &w.cookie,
+            Some(key),
+            resume_body(&evidence, assertion).as_bytes(),
+        );
+        assert_eq!(
+            reply.status,
+            202,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let rows = control(&w.f);
+        let last = rows.last().expect("rows");
+        assert_eq!(last.event_type, "OwnerCommandIssued");
+        assert_eq!(payload(last).get("step_up"), Some(&Value::Null));
+    }
+    assert!(
+        events(&w.f, "StepUpAsserted").len() == 2,
+        "only the confirm's and the deploy's"
+    );
+    assert!(w.held(&issued), "the challenge is kept");
+}
+
+/// A passkey resume sent again under its key answers as the first did, though its challenge is
+/// gone, and appends nothing: no second command and no second `StepUpAsserted` (§3.4 step 1,
+/// DEC-2140 item 3).
+#[test]
+fn a_replayed_passkey_resume_answers_as_the_first_and_appends_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = resume_body(
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let send = || {
+        post(
+            &w.f,
+            &ws("/agents/agt_a/resume"),
+            &w.cookie,
+            Some(KEY_3),
+            body.as_bytes(),
+        )
+    };
+    let first = send();
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let after = control(&w.f).len();
+    let again = send();
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
 }

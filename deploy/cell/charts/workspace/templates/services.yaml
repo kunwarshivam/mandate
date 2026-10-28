@@ -1,7 +1,8 @@
 {{- /* One Deployment per long-running process whose image is built (§3.1, §3.2); the API server's
 is its own template, api.yaml, the deployment manager's deploy-manager.yaml, the role
-provisioner's role-provisioner.yaml, and the connect finish's connect-finish.yaml. A process the
-manager starts (the runtime and the executor, `started_by`) has no Deployment once the manager
+provisioner's role-provisioner.yaml, and the connect finish's connect-finish.yaml. The
+dispatcher mounts its configuration file, the ConfigMap dispatcher.yaml renders, read-only at
+/etc/mandate/dispatcher (DEC-2516). A process the manager starts (the runtime and the executor, `started_by`) has no Deployment once the manager
 renders: only the manager starts it, from its pod template (DEC-1170). Without the manager the
 executor is a Deployment on `default`, the fixture broker's alone: a paper executor, which reaches
 the vault for its connection's lease, needs the manager, and the render fails without it
@@ -32,17 +33,46 @@ spec:
     {{- end }}
     {{- $_ := set $launch "args" (concat ($launch.args | default list) (include "mandate.executorBroker" .root | fromJsonArray)) }}
     {{- end }}
+    {{- $volumes := "" }}
+    {{- if eq .p.name "dispatcher" }}
+    {{- $_ := set $launch "mounts" "- {name: dispatcher-config, mountPath: /etc/mandate/dispatcher, readOnly: true}" }}
+    {{- $volumes = "- {name: dispatcher-config, configMap: {name: dispatcher-config, defaultMode: 292, items: [{key: config.json, path: config.json}]}}" }}
+    {{- end }}
+    {{- $init := "" }}
+    {{- if and (eq .p.name "data") (eq .root.Values.data.source "alpaca-iex") }}
+    {{- $_ := set $launch "mounts" "- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $volumes = include "mandate.vaultVolumes" (dict "root" .root "role" "bars-reader") }}
+    {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "bars-reader") }}
+    {{- end }}
+    {{- if and (eq .p.name "model-gateway") .root.Values.modelGateway.registry }}
+    {{- $_ := set $launch "mounts" "- {name: model-gateway-registry, mountPath: /run/mandate/model-gateway, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $volumes = printf "- {name: model-gateway-registry, configMap: {name: model-gateway-registry, defaultMode: 292, items: [{key: registry.json, path: registry.json}]}}\n%s" (include "mandate.vaultVolumes" (dict "root" .root "role" "model-gateway")) }}
+    {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "model-gateway") }}
+    {{- end }}
     {{- with .p.probe }}
     {{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "readyz") | fromJsonArray) }}
     {{- $_ := set $launch "probe" $probe }}
     {{- end }}
     {{- $container := include "mandate.container" $launch }}
-    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container) | nindent 4 }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
 {{- end -}}
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
-{{- if and (not (has .name (list "api" "deploy-manager" "role-provisioner" "connect-finish"))) (not (include "mandate.startedElsewhere" (dict "root" $root "p" .))) }}
+{{- if and (not (has .name (list "api" "deploy-manager" "deploy-manager-research" "role-provisioner" "connect-finish"))) (not (include "mandate.startedElsewhere" (dict "root" $root "p" .))) }}
 ---
 {{ include "mandate.emit" (include "mandate.service" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}
+{{- /* The model gateway's in-cluster name, `model-gateway:8080`, which a researching runtime dials
+(DEC-2265 item 1, DEC-2397 item 6). A ClusterIP alone: nothing outside the cluster reaches it, and
+its ingress policy admits only the workspace's runtimes. */ -}}
+{{- range (include "mandate.rendered" (dict "root" $root "kind" "service") | fromJsonArray) }}
+{{- if eq .name "model-gateway" }}
+---
+{{ include "mandate.emit" (include "mandate.modelGatewayService" (dict "root" $root "p" .)) }}
+{{- if $root.Values.modelGateway.registry }}
+---
+{{ include "mandate.emit" (include "mandate.modelGatewayRegistry" (dict "root" $root "p" .)) }}
+{{- end }}
 {{- end }}
 {{- end }}

@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/alerts.schema.json",
+  "description": "GET /alerts (\u00a74.7, DEC-2141): the owner alerts about the workspace's agents and accounts that its control, agent and account streams record, most recent first, each with its notice and the asking member's own latest delivery per push channel. as_of names every stream read that holds a row.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "alerts",
+    "truncated"
+  ],
+  "properties": {
+    "alerts": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/Alert"
+      }
+    },
+    "truncated": {
+      "description": "Whether older alerts than the last served were left out by the limit.",
+      "type": "boolean"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Alert": {
+      "description": "One OwnerAlertSent (journal spec \u00a79.15) of a kind notifications spec \u00a73.2 sends to an agent's or an account's owners: never one of the nine kinds about members and access. kind is as journaled; class is \u00a73.2's for that kind. Nothing beyond the kind describes it: the client renders the kind from its own closed table (API-10).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alert_id",
+        "kind",
+        "class",
+        "raised_at",
+        "stream",
+        "subject",
+        "owner_command",
+        "notice"
+      ],
+      "properties": {
+        "alert_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "kind": {
+          "enum": [
+            "risk_limit",
+            "kill_switch",
+            "kill_switch_unapplied",
+            "agent_held",
+            "retirement_held",
+            "account_restriction",
+            "connection_unavailable",
+            "protection",
+            "protection_unattributed",
+            "attribution_deficit",
+            "exit_stalled",
+            "reconciliation",
+            "external_activity",
+            "account_state",
+            "data_feed_down",
+            "integrity_incident",
+            "version_risk_increasing",
+            "delegation_added",
+            "connection_added",
+            "went_live",
+            "daily_brief",
+            "delegation_ended",
+            "model_status",
+            "research_status",
+            "spend_cap",
+            "approval_closed"
+          ]
+        },
+        "class": {
+          "enum": [
+            "safety",
+            "info"
+          ]
+        },
+        "raised_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "stream": {
+          "$ref": "#/$defs/AlertStream"
+        },
+        "subject": {
+          "$ref": "#/$defs/Subject"
+        },
+        "owner_command": {
+          "description": "The OwnerCommandIssued a user's kill switch carries out (rule 120), else null.",
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/EventId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notice": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Notice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "daily_brief",
+                  "delegation_ended",
+                  "model_status",
+                  "research_status",
+                  "spend_cap",
+                  "approval_closed"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "class": {
+                "const": "info"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "class": {
+                "const": "safety"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "const": "kill_switch"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "owner_command": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "AlertStream": {
+      "description": "The stream the alert was recorded on: an agent stream names its agent, an account stream its account, the control stream neither.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "agent_id",
+        "account_ref"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "agent",
+            "account",
+            "control"
+          ]
+        },
+        "agent_id": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "account_ref": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "agent"
+            },
+            "agent_id": {
+              "type": "string"
+            },
+            "account_ref": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "account"
+            },
+            "agent_id": {
+              "type": "null"
+            },
+            "account_ref": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "control"
+            },
+            "agent_id": {
+              "type": "null"
+            },
+            "account_ref": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "Subject": {
+      "description": "The alert's subject event (rules 119 and 130): its id, and the event_type of the event with that id on the alert's own stream.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type"
+      ],
+      "properties": {
+        "event_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "event_type": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]{0,63}$"
+        }
+      }
+    },
+    "Notice": {
+      "description": "The NoticeIssued whose cause is the alert: when it was issued, and the asking member's own latest NoticeAttempted (highest notice-stream seq) on each push channel, matched by notifications spec \u00a75.9's recipient. Never another member's attempt, a recipient, an address, a provider message id, or the notice id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issued_at",
+        "delivery"
+      ],
+      "properties": {
+        "issued_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "delivery": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/Delivery"
+          }
+        }
+      }
+    },
+    "Delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel",
+        "status",
+        "attempt",
+        "recorded_at"
+      ],
+      "properties": {
+        "channel": {
+          "enum": [
+            "email",
+            "web_push",
+            "sms",
+            "telegram",
+            "slack",
+            "phone"
+          ]
+        },
+        "status": {
+          "enum": [
+            "delivered",
+            "failed",
+            "suppressed_quiet_hours",
+            "deferred_quiet_hours",
+            "abandoned"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "recorded_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    }
+  },
+  "unevaluatedProperties": false
+}

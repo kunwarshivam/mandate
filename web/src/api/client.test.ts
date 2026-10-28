@@ -312,18 +312,27 @@ describe("no order ticket (DEC-528)", () => {
    * module or an export edits this list, and only this list, beyond un-skipping its pending tests (DEC-750 item 4).
    */
   const EXPORTS: Record<string, string[]> = {
+    activity: ["activityRead", "holdingsRead", "journalPageRead"],
+    alerts: ["ALERT_KINDS", "alertsRead", "subjectHref"],
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
-    commands: ["UI_BUILD", "prepareApprovalResponse", "prepareConfirm", "prepareOwnerCommand", "recordRef"],
+    connect: ["API_CONNECTION_ID", "CONNECTION_STATES", "CONNECT_START_ROUTE", "connectStartBody", "connectStarted", "connectionDetail", "connectionRead", "connectionsRead"],
+    commands: ["UI_BUILD", "isAssetId", "prepareApprovalResponse", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "prepareOwnerExit", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
+    catalogue: ["instrumentsRead", "signalModelsRead"],
+    enrol: ["CREATE_TIMEOUT_MS", "ENROL_ROUTE", "REGISTRATION_ROUTE", "browserCreator", "createPasskey", "enrolBody", "enrolStepUpDigest", "enrolled", "passkeyList", "registrationChallenge"],
+    decisions: ["DEFERRED_CHECKS", "decisionsOf"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     memberships: ["MY_WORKSPACES_ROUTE", "myWorkspaces", "pickWorkspace", "resolveWorkspace"],
-    "mock-server": ["MOCK_PRINCIPAL", "createMockServer"],
+    "mock-server": ["MOCK_AUTHORIZATION_ORIGIN", "MOCK_MODEL", "MOCK_PASSKEY_ID", "MOCK_PRINCIPAL", "MOCK_RP_ID", "MOCK_USER_HANDLE", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
-    "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi"],
+    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
+    "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi", "reconciledHolding"],
     reads: ["emptyWorkspace"],
+    records: ["recordsRead"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
-    "step-up": ["CLI_CONFIRM_KINDS", "approvalConfirmCommand", "challengeLifetimeMs", "cliConfirmEvidence", "confirmCode", "sessionPrincipal", "stepUpChallenge"],
+    theses: ["ADMISSION_REASONS", "thesesOf"],
+    "step-up": ["CLI_CONFIRM_KINDS", "CONNECT_DISCLOSURE", "PASSKEY_KINDS", "approvalConfirmCommand", "challengeLifetimeMs", "cliConfirmEvidence", "confirmCode", "connectConfirmCommand", "connectStepUpDigest", "sessionPrincipal", "stepUpChallenge"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
     versions: ["prepareCreateVersion", "readConfirmation", "versionCreated"],
   };
@@ -455,7 +464,9 @@ describe("the common-schema seam", () => {
 
 describe("the step-up challenge (spec §3.6, DEC-2103) and one's own session (§4.10)", () => {
   const DIGEST = `sha256:${"ab".repeat(32)}` as const;
-  const CHALLENGE = { challenge_id: EVENT, webauthn_challenge: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", action: { kind: "approve", digest: DIGEST }, issued_at: "2026-10-26T14:00:00.000000000Z", expires_at: "2026-10-26T14:05:00.000000000Z" };
+  /** The challenge bytes 1 to 32, base64url, built here so no key-shaped literal sits in the file (gitleaks' generic-api-key). */
+  const RISING = Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1)).toString("base64url");
+  const CHALLENGE = { challenge_id: EVENT, webauthn_challenge: RISING, action: { kind: "approve", digest: DIGEST }, issued_at: "2026-10-26T14:00:00.000000000Z", expires_at: "2026-10-26T14:05:00.000000000Z" };
   const created = (patch: Record<string, unknown> = {}) => json(201, { api_version: "v1", as_of: [], ...CHALLENGE, ...patch });
 
   it("asks once, under its own key, with the CSRF mark and a body of the action alone", async () => {

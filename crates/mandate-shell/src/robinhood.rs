@@ -21,10 +21,8 @@ use mandate_accounting::{AccountType, InstrumentId};
 use mandate_alpaca::{AccountRules, DeclaredRegime};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    BrokerAccount, BrokerConnector, BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError,
-    Reconciliation,
+    BrokerConnector, BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError, Reconciliation,
 };
-use mandate_num::Usd;
 use mandate_robinhood::{
     AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, Tickers, Tools, robinhood_profile,
 };
@@ -212,49 +210,17 @@ pub fn robinhood_account_rules() -> AccountRules {
     }
 }
 
-/// The agentic account's snapshot as the executor's [`BrokerAccount`] (DEC-933 item 1, the
-/// recommendation of DEC-928's note to the founder, under DEC-929):
-///
-/// - `cash` is `get_portfolio`'s, and `buying_power` and `non_marginable_buying_power` are the
-///   lower of its cash and buying power (DEC-620 item 2), so no figure exceeds cash;
-/// - `status` is `ACTIVE` and no flag is set, because a snapshot exists only when every one of
-///   its reads found the recorded account listed `agentic_allowed` (DEC-875); any other answer
-///   refused the read;
-/// - every figure Robinhood does not publish reads as the value that adds no buying power and
-///   lifts no limit: `crypto_status` `INACTIVE` (no crypto opening), `multiplier` 1 (DEC-529
-///   item 11), `equity` the cash alone (never more than a long-only account's equity),
-///   `last_equity` zero (below every equity threshold, so §9.2's `legacy_pdt` budget would apply
-///   if the account were ever declared a margin account; as a cash account the gate's settled-cash
-///   rule binds instead),
-///   `maintenance_margin` the whole equity (no maintenance excess), and `accrued_fees` zero,
-///   which the gate's buying power, the lower of cash and the broker's figure, never adds to.
-#[must_use]
-pub fn robinhood_account(snapshot: &AccountSnapshot) -> BrokerAccount {
-    let cash = snapshot.cash;
-    let one_x = cash.min(snapshot.buying_power);
-    BrokerAccount {
-        status: "ACTIVE".to_owned(),
-        crypto_status: "INACTIVE".to_owned(),
-        trading_blocked: false,
-        account_blocked: false,
-        trade_suspended_by_user: false,
-        multiplier: 1,
-        equity: cash,
-        cash,
-        buying_power: one_x,
-        non_marginable_buying_power: one_x,
-        accrued_fees: Usd::ZERO,
-        last_equity: Usd::ZERO,
-        maintenance_margin: cash,
-    }
-}
+/// The agentic account's snapshot as the executor's [`BrokerAccount`] (DEC-933 item 1): the one
+/// mapping the shell and the executor process share, in `mandate-robinhood` (DEC-2386 item 2).
+pub use mandate_robinhood::broker_account as robinhood_account;
 
 impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
     /// The run's connector and the executor's requests are not used: the Robinhood connector
     /// offers none of the four reads they name, and the bridge's connector is the run's own.
     /// Robinhood publishes no account activity, so the snapshot leaves the executor's cursor
-    /// where it was, and its only fills are the ones an order record and the position imply on a
-    /// ledger flat in the instrument (DEC-1151, connections spec U-R8); the live run starts only
+    /// where it was, and its only fills are the ones an order record and the position imply: an
+    /// entry's on a ledger flat in the instrument (DEC-1151, connections spec U-R8), and a
+    /// risk-reducing sell's at its limit (DEC-2300, DEC-2395); the live run starts only
     /// on a flat, unspent account (DEC-529 item 3), so none is outstanding when it does.
     fn snapshot(
         &mut self,
@@ -270,11 +236,11 @@ impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
         let snapshot = read.map_err(|_| Cause::Absent {
             what: ACCOUNT_UNREAD,
         })?;
-        Ok(self.executor.without_activities(
+        self.executor.without_activities(
             snapshot.open_orders.clone(),
             snapshot.positions.clone(),
             robinhood_account(&snapshot),
-        ))
+        )
     }
 
     /// The executor's own reconciliation of the snapshot, as for every broker.

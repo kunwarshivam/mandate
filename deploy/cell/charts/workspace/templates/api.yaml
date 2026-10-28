@@ -61,7 +61,7 @@ its memory until they move to Postgres (item 6).
 {{- $a := .root.Values.api -}}
 {{- $j := .root.Values.journal -}}
 - name: MANDATE_API_DATABASE_URL
-  value: {{ printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt" .p.db_role $j.host $j.port $j.database | quote }}
+  value: {{ include "mandate.journalDsn" (dict "role" .p.db_role "journal" $j) | quote }}
 - name: MANDATE_API_ORG
   value: {{ required "api.org is required with images.api" $a.org | quote }}
 - name: MANDATE_API_WORKSPACE

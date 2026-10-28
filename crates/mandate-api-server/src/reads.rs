@@ -9,9 +9,11 @@
 //!
 //! Every function here is pure: rows in, values out.
 
+use mandate_accounting::Position;
 use mandate_canon::Value;
+use mandate_gate_context::{Positions, Protection, RiskMark, Row};
 use mandate_journal::StoredEvent;
-use mandate_num::{Qty, SignedQty};
+use mandate_num::Usd;
 
 /// How many resolved approvals the inbox lists, most recently requested first (DEC-979 item 5).
 pub const RESOLVED_LISTED: usize = 100;
@@ -60,6 +62,13 @@ pub struct ApprovalView {
     pub deadline: i64,
     pub content_hash: String,
     pub content: Value,
+    /// The `ApprovalRequested` version `content` comes from, which says which members it must
+    /// hold: version 3's `deferred_to_binding` among them (DEC-2518).
+    pub schema_version: u64,
+    /// The `deferred_to_binding` of the `DecisionMade` the request's `causation_id` names on the
+    /// agent stream, an empty list for a decision without one, or `null` when no such decision is
+    /// there: what lets a reader catch a request that hides its decision's deferrals (DEC-2519).
+    pub decision_deferred_to_binding: Value,
     /// The order the approval binds (DEC-1021).
     pub order: Value,
 }
@@ -142,6 +151,7 @@ pub fn mode(agent_rows: &[StoredEvent]) -> Option<String> {
 /// Every approval on `agent_id`'s stream, in request order, with its folded state. A request
 /// without a deadline, a content hash, or a content object is not served.
 pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView> {
+    let decisions = decision_deferrals(agent_rows);
     let mut views: Vec<ApprovalView> = Vec::new();
     for row in agent_rows {
         let Some(event) = envelope(row) else {
@@ -170,6 +180,8 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                     deadline,
                     content_hash: hash.to_owned(),
                     content: content.clone(),
+                    schema_version: row.schema_version,
+                    decision_deferred_to_binding: decided_for(&event, &decisions),
                     order: bound,
                 });
             }
@@ -242,6 +254,77 @@ pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
     }
 }
 
+/// Each `DecisionMade` on the stream by event id, with its `payload.deferred_to_binding` as
+/// journaled; an empty list when a version 1 or 2 decision names none, and `null` when a version 3
+/// one, which always carries the member (rule 269), does not, so it is never read as agreeing
+/// (DEC-2519).
+fn decision_deferrals(agent_rows: &[StoredEvent]) -> std::collections::BTreeMap<String, Value> {
+    agent_rows
+        .iter()
+        .filter(|row| row.event_type == "DecisionMade")
+        .filter_map(|row| {
+            let event = envelope(row)?;
+            let named = event
+                .get("payload")
+                .and_then(|p| p.get("deferred_to_binding"))
+                .cloned();
+            let deferred = match named {
+                Some(list) => list,
+                None if row.schema_version >= 3 => Value::Null,
+                None => Value::Array(Vec::new()),
+            };
+            Some((row.event_id.clone(), deferred))
+        })
+        .collect()
+}
+
+/// The deferred checks of the decision `event`'s `causation_id` names among `decisions`, or `null`
+/// when it names none there (DEC-2519).
+fn decided_for(event: &Value, decisions: &std::collections::BTreeMap<String, Value>) -> Value {
+    text(event, "causation_id")
+        .and_then(|id| decisions.get(id))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Whether `request`, an `ApprovalRequested` row among `agent_rows`, names exactly the deferred
+/// checks of the decision it names as its cause: version 3's non-empty list, or none for versions 1
+/// and 2, against the decision's list. A decision not on the stream, a version 3 decision without its
+/// list, a list that is not distinct check names, and any other request disagree, so a grant of it
+/// is refused (DEC-2521).
+pub fn deferrals_agree(request: &StoredEvent, agent_rows: &[StoredEvent]) -> bool {
+    let Some(event) = envelope(request) else {
+        return false;
+    };
+    let named = event
+        .get("payload")
+        .and_then(|p| p.get("content"))
+        .and_then(|c| c.get("deferred_to_binding"))
+        .cloned();
+    let requested = match (request.schema_version, named) {
+        (3, Some(Value::Array(list))) if !list.is_empty() && check_names(&list) => {
+            Value::Array(list)
+        }
+        (1 | 2, None) => Value::Array(Vec::new()),
+        _ => return false,
+    };
+    decided_for(&event, &decision_deferrals(agent_rows)) == requested
+}
+
+/// Whether `list` holds distinct check names as the journal writes them, a lower-case letter then
+/// lower-case letters, digits, and underscores, as the web app reads them (DEC-2519).
+fn check_names(list: &[Value]) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    list.iter().all(|item| {
+        item.as_str().is_some_and(|name| {
+            let mut chars = name.chars();
+            chars.next().is_some_and(|first| first.is_ascii_lowercase())
+                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && seen.insert(name)
+        })
+    })
+}
+
 /// The bound order of an `ApprovalRequested` payload (DEC-1021): `content.action`'s members, and
 /// version 2's `content.execution` time in force and protection, `null` without one.
 pub fn order(payload: &Value) -> Option<Value> {
@@ -308,13 +391,39 @@ pub fn account_ref(control: &[StoredEvent], connection_id: &str) -> Option<Strin
 /// `BrokerPositionObserved` per instrument, in instrument order, leaving out an instrument whose
 /// model and broker quantities are both zero.
 pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
-    let mut latest: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+    let mut fold = HoldingsFold::default();
     for row in account_rows {
+        fold.fold(row);
+    }
+    fold.finish()
+}
+
+/// A fold of an account stream's rows, one row at a time, so a reader can resume it from the last
+/// row it folded (DEC-2145 item 10).
+pub trait AccountFold: Clone + Send {
+    /// What the fold reads once its rows are folded.
+    type Out;
+    /// Folds one more row; `None` when the row cannot be read and nothing is served.
+    fn fold(&mut self, row: &StoredEvent) -> Option<()>;
+    /// What the rows folded so far read as.
+    fn finish(&self) -> Self::Out;
+}
+
+/// [`account_positions`]'s fold: the latest `BrokerPositionObserved` per instrument.
+#[derive(Debug, Clone, Default)]
+pub struct HoldingsFold {
+    latest: std::collections::BTreeMap<String, Value>,
+}
+
+impl AccountFold for HoldingsFold {
+    type Out = Vec<Value>;
+
+    fn fold(&mut self, row: &StoredEvent) -> Option<()> {
         if row.event_type != "BrokerPositionObserved" {
-            continue;
+            return Some(());
         }
         let Some(event) = envelope(row) else {
-            continue;
+            return Some(());
         };
         let member = |name: &str| event.get("payload").and_then(|p| p.get(name)).cloned();
         let (Some(Value::Str(instrument)), Some(qty), Some(broker), Some(mismatch)) = (
@@ -323,7 +432,7 @@ pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
             member("broker_qty"),
             member("mismatch"),
         ) else {
-            continue;
+            return Some(());
         };
         let held = [&qty, &broker].iter().any(|q| q.as_str() != Some("0"));
         let position = object(vec![
@@ -335,14 +444,18 @@ pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
         ]);
         match (held, position) {
             (true, Some(position)) => {
-                latest.insert(instrument, position);
+                self.latest.insert(instrument, position);
             }
             _ => {
-                latest.remove(&instrument);
+                self.latest.remove(&instrument);
             }
         }
+        Some(())
     }
-    latest.into_values().collect()
+
+    fn finish(&self) -> Vec<Value> {
+        self.latest.values().cloned().collect()
+    }
 }
 
 /// The agent's orders on its account stream (`read-models/orders`, DEC-2111 item 3), in the order
@@ -352,25 +465,56 @@ pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
 /// `OrderStateChanged`'s, `null` before any; `updated_at` is the order's last record's
 /// `recorded_at`. An order no companion names is no agent's, and is never listed.
 pub fn agent_orders(account: &[StoredEvent], agent_id: &str) -> Vec<Value> {
-    let mut companions: std::collections::BTreeMap<&str, Value> = std::collections::BTreeMap::new();
-    let mut orders: Vec<(String, Vec<(&'static str, Value)>)> = Vec::new();
+    let mut fold = OrdersFold::new(agent_id);
     for row in account {
+        fold.fold(row);
+    }
+    fold.finish()
+}
+
+/// [`agent_orders`]'s fold for one agent: its companions by event id, and its orders in the
+/// order first submitted.
+#[derive(Debug, Clone)]
+pub struct OrdersFold {
+    agent_id: String,
+    companions: std::collections::BTreeMap<String, Value>,
+    orders: Vec<(String, Vec<(&'static str, Value)>)>,
+}
+
+impl OrdersFold {
+    /// The fold of no rows for `agent_id`.
+    pub fn new(agent_id: &str) -> Self {
+        Self {
+            agent_id: agent_id.to_owned(),
+            companions: std::collections::BTreeMap::new(),
+            orders: Vec::new(),
+        }
+    }
+}
+
+impl AccountFold for OrdersFold {
+    type Out = Vec<Value>;
+
+    fn fold(&mut self, row: &StoredEvent) -> Option<()> {
         let Some(event) = envelope(row) else {
-            continue;
+            return Some(());
         };
         let payload = event.get("payload").cloned().unwrap_or(Value::Null);
         let member = |name: &str| payload.get(name).cloned().unwrap_or(Value::Null);
         let order_id = text(&event, "payload.client_order_id").map(str::to_owned);
         let known = order_id
             .as_deref()
-            .and_then(|id| orders.iter().position(|(known, _)| known == id));
+            .and_then(|id| self.orders.iter().position(|(known, _)| known == id));
         let recorded_at = Value::Str(row.recorded_at.clone());
         match (row.event_type.as_str(), known) {
-            ("OrderRequestRecorded", _) if text(&event, "payload.agent_id") == Some(agent_id) => {
-                companions.insert(&row.event_id, payload.clone());
+            ("OrderRequestRecorded", _)
+                if text(&event, "payload.agent_id") == Some(self.agent_id.as_str()) =>
+            {
+                self.companions
+                    .insert(row.event_id.clone(), payload.clone());
             }
             ("OrderSubmitted" | "OrderStateChanged", Some(at)) => {
-                if let Some((_, members)) = orders.get_mut(at) {
+                if let Some((_, members)) = self.orders.get_mut(at) {
                     if row.event_type == "OrderStateChanged" {
                         set(members, "state", member("state"));
                         set(members, "filled_qty", member("filled_qty"));
@@ -379,7 +523,7 @@ pub fn agent_orders(account: &[StoredEvent], agent_id: &str) -> Vec<Value> {
                 }
             }
             ("OrderSubmitted", None) => {
-                let companion = text(&event, "causation_id").and_then(|id| companions.get(id));
+                let companion = text(&event, "causation_id").and_then(|id| self.companions.get(id));
                 if let (Some(id), Some(companion)) = (order_id, companion) {
                     let request = |name: &str| companion.get(name).cloned().unwrap_or(Value::Null);
                     let members = vec![
@@ -398,16 +542,20 @@ pub fn agent_orders(account: &[StoredEvent], agent_id: &str) -> Vec<Value> {
                         ("submitted_at", recorded_at.clone()),
                         ("updated_at", recorded_at),
                     ];
-                    orders.push((id, members));
+                    self.orders.push((id, members));
                 }
             }
             _ => {}
         }
+        Some(())
     }
-    orders
-        .into_iter()
-        .filter_map(|(_, members)| object(members))
-        .collect()
+
+    fn finish(&self) -> Vec<Value> {
+        self.orders
+            .iter()
+            .filter_map(|(_, members)| object(members.clone()))
+            .collect()
+    }
 }
 
 /// Replaces `name`'s value in `members`.
@@ -418,48 +566,129 @@ fn set(members: &mut [(&'static str, Value)], name: &str, value: Value) {
 }
 
 /// The agent's net filled quantity per instrument (`read-models/positions`, DEC-2111 item 4): the
-/// `FillApplied` and `LateFillApplied` records of its own orders, as `agent_orders` attributes
-/// them, buys adding and sells subtracting, in instrument order, leaving out an instrument that
-/// nets to zero. `cost_basis`, `risk_mark` and `protection` are `null` (DEC-2111 item 5). `None`
-/// when a fill of its own cannot be read, so no position is served from part of its fills.
+/// `FillApplied` and `LateFillApplied` records of its own orders, buys adding and sells
+/// subtracting, in instrument order, leaving out an instrument that nets to zero. Its orders are
+/// those `mandate_gate_context::Positions` attributes to it (DEC-2138 item 1): its requests, their
+/// replacements, and the protective legs the broker created for its entries. Beside it, DEC-2138's
+/// figures from the same reading: the sub-ledger's §8.1 `cost_basis`, the latest counted
+/// `risk_mark`, §8.2's `market_value` and `unrealized_pnl` at that mark when it is sane and the
+/// position long, and the account's `protection`. `None` when a row the reading reads cannot be
+/// read, so no position is served from part of the journal.
 pub fn agent_positions(account: &[StoredEvent], agent_id: &str) -> Option<Vec<Value>> {
-    let owned: std::collections::BTreeSet<String> = agent_orders(account, agent_id)
-        .iter()
-        .filter_map(|order| order.get("client_order_id").and_then(Value::as_str))
-        .map(str::to_owned)
-        .collect();
-    let mut net: std::collections::BTreeMap<String, SignedQty> = std::collections::BTreeMap::new();
+    let mut fold = PositionsFold::new(agent_id);
     for row in account {
-        if !matches!(row.event_type.as_str(), "FillApplied" | "LateFillApplied") {
-            continue;
-        }
-        let event = envelope(row)?;
-        let owner = text(&event, "payload.client_order_id");
-        if !owner.is_some_and(|id| owned.contains(id)) {
-            continue;
-        }
-        let instrument = text(&event, "payload.instrument_id")?;
-        let qty = SignedQty::from(Qty::parse(text(&event, "payload.qty_gross")?).ok()?);
-        let signed = match text(&event, "payload.side")? {
-            "buy" => qty,
-            "sell" => qty.negated(),
-            _ => return None,
-        };
-        let held = net.entry(instrument.to_owned()).or_insert(SignedQty::ZERO);
-        *held = held.checked_add(signed).ok()?;
+        fold.fold(row)?;
     }
-    Some(
-        net.into_iter()
-            .filter(|(_, qty)| *qty != SignedQty::ZERO)
-            .filter_map(|(instrument, qty)| {
+    fold.finish()
+}
+
+/// [`agent_positions`]'s fold for one agent: `mandate_gate_context::Positions` over its account
+/// stream, begun at the stream's first row.
+#[derive(Debug, Clone)]
+pub struct PositionsFold {
+    agent_id: String,
+    read: Option<Positions>,
+}
+
+impl PositionsFold {
+    /// The fold of no rows for `agent_id`.
+    pub fn new(agent_id: &str) -> Self {
+        Self {
+            agent_id: agent_id.to_owned(),
+            read: None,
+        }
+    }
+}
+
+impl AccountFold for PositionsFold {
+    type Out = Option<Vec<Value>>;
+
+    fn fold(&mut self, row: &StoredEvent) -> Option<()> {
+        let agent_id = &self.agent_id;
+        let read = self
+            .read
+            .get_or_insert_with(|| Positions::new(&row.stream_id, agent_id));
+        let event = envelope(row)?;
+        read.fold(Row {
+            stream: &row.stream_id,
+            event_type: &row.event_type,
+            payload: event.get("payload")?,
+        })
+        .ok()
+    }
+
+    fn finish(&self) -> Option<Vec<Value>> {
+        let Some(read) = &self.read else {
+            return Some(Vec::new());
+        };
+        read.filled()
+            .map(|(instrument, qty)| {
+                let basis = read.cost_basis(instrument);
+                let mark = read.risk_mark(instrument);
+                let valued = valued(basis, mark)?;
                 object(vec![
-                    ("instrument_id", Value::Str(instrument)),
+                    ("instrument_id", Value::Str(instrument.to_owned())),
                     ("filled_qty", Value::Str(qty.to_string())),
-                    ("cost_basis", Value::Null),
-                    ("risk_mark", Value::Null),
-                    ("protection", Value::Null),
+                    ("cost_basis", basis.map_or(Some(Value::Null), cost_basis)?),
+                    ("risk_mark", mark.map_or(Some(Value::Null), risk_mark)?),
+                    ("market_value", decimal(valued.map(|(value, _)| value))),
+                    ("unrealized_pnl", decimal(valued.map(|(_, pnl)| pnl))),
+                    (
+                        "protection",
+                        protection_value(&read.protection(instrument))?,
+                    ),
                 ])
             })
-            .collect(),
-    )
+            .collect()
+    }
+}
+
+/// A decimal figure, or `null` when it is not served.
+fn decimal(figure: Option<impl std::fmt::Display>) -> Value {
+    figure.map_or(Value::Null, |figure| Value::Str(figure.to_string()))
+}
+
+/// §8.2's market value Q × bid and unrealized P&L Q × bid − B, exactly: `Some(None)` unless the
+/// basis is served, long or flat, and the mark is sane (DEC-2138 item 3; a short is marked at the
+/// ask, which a risk mark does not carry), `None` when the arithmetic overflows.
+fn valued(basis: Option<Position>, mark: Option<RiskMark>) -> Option<Option<(Usd, Usd)>> {
+    let long = basis.filter(|basis| !basis.qty().is_negative());
+    let (Some(basis), Some(bid)) = (long, mark.filter(|mark| mark.sane).and_then(|m| m.bid)) else {
+        return Some(None);
+    };
+    let value = basis.qty().value_at(bid).ok()?;
+    let pnl = value.checked_sub(basis.basis().to_usd()).ok()?;
+    Some(Some((value, pnl)))
+}
+
+fn cost_basis(position: Position) -> Option<Value> {
+    object(vec![
+        ("qty", Value::Str(position.qty().to_string())),
+        ("basis", Value::Str(position.basis().to_string())),
+    ])
+}
+
+fn risk_mark(mark: RiskMark) -> Option<Value> {
+    object(vec![
+        ("bid", decimal(mark.bid)),
+        ("sane", Value::Bool(mark.sane)),
+        ("session", Value::Str(mark.session.as_str().to_owned())),
+        ("marked_at", Value::Str(mark.at.to_string())),
+    ])
+}
+
+fn protection_value(protection: &Protection) -> Option<Value> {
+    object(vec![
+        (
+            "orders",
+            Value::Array(protection.orders.iter().cloned().map(Value::Str).collect()),
+        ),
+        (
+            "covered_qty",
+            Value::Str(protection.covered_qty.to_string()),
+        ),
+        ("stop", decimal(protection.stop)),
+        ("take_profit", decimal(protection.take_profit)),
+        ("unprotected_since", decimal(protection.unprotected_since)),
+    ])
 }

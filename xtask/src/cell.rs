@@ -80,6 +80,10 @@ const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
 const DEPLOY_MANAGER_DOCKERFILE: &str = "deploy/cell/images/deploy-manager.Dockerfile";
 /// The deployment manager's process name, which is also its image's key in the chart's values.
 const DEPLOY_MANAGER_PROCESS: &str = "deploy-manager";
+/// The local cell's second deployment manager, for the run's research workspace (DEC-2070).
+const RESEARCH_MANAGER_PROCESS: &str = "deploy-manager-research";
+/// The local cell's second scheduler, the research workspace's clock (DEC-2071).
+const RESEARCH_SCHEDULER_PROCESS: &str = "scheduler-research";
 /// The role provisioner's image (DEC-2350), built beside `mandate` from the same static build.
 const ROLE_PROVISIONER_DOCKERFILE: &str = "deploy/cell/images/role-provisioner.Dockerfile";
 /// The role provisioner's process name, which is also its image's key in the chart's values.
@@ -117,14 +121,36 @@ const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
 /// runtime image carries under `research/` in its context and at
 /// `/usr/local/share/mandate/research` in the image (DEC-2246). No release image carries it.
 const DEMO_RESEARCH: &str = "deploy/cell/demo/research";
-const DEMO_RESEARCH_FILES: [&str; 5] = [
+const DEMO_RESEARCH_FILES: [&str; 6] = [
     "research.json",
     "bars.json",
     "news.json",
     "filings.json",
     "instruments.json",
+    "feed.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
+/// The workspace scheduler's image (E21-29): the single writer of the hosted workspace's clock
+/// stream, whose ticks the runtime and the executor read.
+const SCHEDULER_DOCKERFILE: &str = "deploy/cell/images/scheduler.Dockerfile";
+const SCHEDULER_PROCESS: &str = "scheduler";
+const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
+/// The workspace notification dispatcher's image (X8, DEC-2500, DEC-2516): the single writer of
+/// the hosted workspace's notice stream, mailing only through the recorded transport.
+const DISPATCHER_DOCKERFILE: &str = "deploy/cell/images/dispatcher.Dockerfile";
+const DISPATCHER_PROCESS: &str = "dispatcher";
+const DISPATCHER_PACKAGE: &str = "mandate-dispatcher";
+/// The workspace data process's image (E21-29 lane SC): the deployed instrument's daily bars from
+/// the cell's recorded series, which the runtime reads read-only from the artifact store.
+const DATA_DOCKERFILE: &str = "deploy/cell/images/data.Dockerfile";
+const DATA_PROCESS: &str = "data";
+const DATA_PACKAGE: &str = "mandate-datad";
+/// The workspace model gateway's image (E21-62): the only caller of a model provider, serving the
+/// demo's recorded research bundle in the cell (DEC-2326 item 3), which it carries as the runtime
+/// image does.
+const MODEL_GATEWAY_DOCKERFILE: &str = "deploy/cell/images/model-gateway.Dockerfile";
+const MODEL_GATEWAY_PROCESS: &str = "model-gateway";
+const MODEL_GATEWAY_PACKAGE: &str = "mandate-gatewayd";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -140,6 +166,23 @@ const LIVE_TRADING_HOSTS: [&str; 3] = [
 ];
 /// An extra CA bundle the k3s node trusts, for a developer machine behind a TLS-inspecting proxy.
 const EXTRA_CA_ENV: &str = "MANDATE_CELL_CA_BUNDLE";
+/// Set on a host that refuses a process a negative `oom_score_adj`, even as root, as some
+/// sandboxed VMs do: kubelet asks one for every pod sandbox, so without this no pod starts there
+/// (`failed to update /proc/self/oom_score_adj: Permission denied`). The node's containerd then
+/// keeps each container's score at or above its own instead of lowering it.
+const RESTRICT_OOM_ENV: &str = "MANDATE_CELL_RESTRICT_OOM";
+/// The k3s containerd drop-in [`RESTRICT_OOM_ENV`] mounts, and where k3s imports it from.
+const RESTRICT_OOM_DROPIN: &str =
+    "[plugins.'io.containerd.cri.v1.runtime']\n  restrict_oom_score_adj = true\n";
+/// Set on a sandbox whose small disk allowance sits under the kubelet's default hard-eviction
+/// thresholds (free `nodefs` and `imagefs`): the node then takes a disk-pressure taint and evicts
+/// the cell's pods although the disk still has room. Lowers both thresholds to 1% on the cluster
+/// it creates; default off, for cloud sessions only, never CI or a laptop.
+const LOW_EVICTION_ENV: &str = "MANDATE_CELL_LOW_EVICTION";
+/// The kubelet's hard-eviction thresholds under [`LOW_EVICTION_ENV`].
+const LOW_EVICTION_ARG: &str =
+    "--kubelet-arg=eviction-hard=nodefs.available<1%,imagefs.available<1%@server:0";
+const CONTAINERD_DROPINS: &str = "/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d";
 /// Set by CI: a missing docker, k3d or helm fails the cell job instead of skipping it.
 pub const CELL_REQUIRED_ENV: &str = "MANDATE_CELL_REQUIRED";
 /// Polls of a Job, a pod or the journal cluster, two seconds apart.
@@ -182,9 +225,13 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
-    /// An agent deployed on a recorded paper connection, and the deployment manager starting that
-    /// account's executor until its pod runs and answers `livez`, not `readyz`, which needs a
-    /// scheduler tick the cell does not journal yet (E21-30, DEC-2035); see [`executor`].
+    /// The scheduler ticking a fresh workspace's clock stream once the chart names it the hosted
+    /// workspace: two exports of its `clock:` stream a few seconds apart, the second longer
+    /// (E21-29); see [`executor::ticks_drill`].
+    Ticks,
+    /// The scheduler ticking the run's workspace's clock stream (E21-29), then an agent deployed on
+    /// a recorded paper connection, and the deployment manager starting that account's executor
+    /// until its pod runs and answers `livez` (E21-30, DEC-2035); see [`executor`].
     Executor,
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
@@ -216,9 +263,9 @@ pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 /// DEC-2602).
 pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
-/// The executor drill (E21-30, DEC-2035), which `cargo xtask ci cell-executor` runs on a cell of
-/// its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
-pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
+/// The scheduler's ticks drill (E21-29) and the executor drill (E21-30, DEC-2035), which `cargo
+/// xtask ci cell-executor` runs on a cell of its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
+pub const EXECUTOR_DRILLS: [Drill; 2] = [Drill::Ticks, Drill::Executor];
 
 /// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-vault` runs on a cell of its
 /// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
@@ -240,6 +287,7 @@ impl Drill {
             Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Ticks => "ticks",
             Self::Executor => "executor",
             Self::Vault => "vault",
             Self::Exchange => "exchange",
@@ -284,6 +332,10 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Ticks => {
+                "the scheduler scaled to zero replicas once it ticks the run's workspace, so its \
+                 clock stream stops"
+            }
             Self::Executor => {
                 "the connect check skipped, so the connection is never recorded and the agent \
                  deploys at version 1"
@@ -312,6 +364,7 @@ impl Drill {
             Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Ticks => "the scheduler is not ticking",
             Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
             Self::Exchange | Self::ExchangeLate => "step_up_missing",
@@ -391,7 +444,10 @@ pub fn ci_upgrade() -> Result<()> {
 }
 
 /// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
-/// `ci cell-vault`: the cell, then `drills`, plain and seeded (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `ci cell-vault`: the cell, then `drills`, plain and seeded, or only the variant
+/// [`VARIANT_ENV`] names, and only the drill [`DRILL_ENV`] names (E21-41, DEC-2602, DEC-2615,
+/// DEC-2616, DEC-2641). The chart checks are `ci cell`'s.
+/// Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -400,9 +456,57 @@ pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
         eprintln!("    {job}: {reason}; skipping (see deploy/cell/README.md)");
         return Ok(());
     }
+    let (plain, seeded) = variants(env::var(VARIANT_ENV).ok().as_deref())?;
+    let drills = shard_drills(job, drills, env::var(DRILL_ENV).ok().as_deref())?;
     up()?;
-    drill(drills, false)?;
-    drill(drills, true)
+    if plain {
+        drill(&drills, false)?;
+    }
+    if seeded {
+        drill(&drills, true)?;
+    }
+    Ok(())
+}
+
+/// One drill of a drill job, by its name, when CI's matrix also splits the job by drill because
+/// one variant of all its drills still runs past DEC-464's ten minutes (DEC-2641); unset or empty,
+/// the job runs every drill of its list.
+pub const DRILL_ENV: &str = "MANDATE_CELL_DRILL";
+
+/// The drills a run of `job` takes: all of `drills`, or the one [`DRILL_ENV`] names, which must be
+/// one of the job's own, so a misspelt matrix entry is refused rather than running nothing.
+fn shard_drills(job: &str, drills: &[Drill], named: Option<&str>) -> Result<Vec<Drill>> {
+    match named.unwrap_or("") {
+        "" => Ok(drills.to_vec()),
+        name => drills
+            .iter()
+            .copied()
+            .find(|d| d.name() == name)
+            .map(|d| vec![d])
+            .with_context(|| {
+                let names: Vec<&str> = drills.iter().map(|d| d.name()).collect();
+                format!(
+                    "{DRILL_ENV}={name} is not one of {job}'s drills: {}",
+                    names.join(", ")
+                )
+            }),
+    }
+}
+
+/// Which of a drill job's variants this run takes, set by CI's matrix so each runs on its own
+/// runner inside DEC-464's ten minutes: `plain`, `seeded`, or, unset or empty, both, one after the
+/// other, as a local run does.
+pub const VARIANT_ENV: &str = "MANDATE_CELL_VARIANT";
+
+/// `(plain, seeded)` for [`VARIANT_ENV`]'s value; refused for any other value, so a misspelt
+/// matrix entry runs nothing silently.
+fn variants(value: Option<&str>) -> Result<(bool, bool)> {
+    match value.unwrap_or("") {
+        "" => Ok((true, true)),
+        "plain" => Ok((true, false)),
+        "seeded" => Ok((false, true)),
+        other => bail!("{VARIANT_ENV}={other} is neither plain nor seeded"),
+    }
 }
 
 /// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
@@ -640,15 +744,19 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 8] = [
+const BUILT_PACKAGES: [&str; 12] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
-    "mandate-daemon",
+    "mandate-runtime-models",
     "mandate-deployd",
     "mandate-executord",
     "mandate-provisionerd",
     EXCHANGE_PACKAGE,
+    SCHEDULER_PACKAGE,
+    DATA_PACKAGE,
+    DISPATCHER_PACKAGE,
+    MODEL_GATEWAY_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -661,7 +769,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 9] = [
+pub const IMAGE_PACKAGES: [&str; 13] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -670,6 +778,10 @@ pub const IMAGE_PACKAGES: [&str; 9] = [
     BUILT_PACKAGES[5],
     BUILT_PACKAGES[6],
     BUILT_PACKAGES[7],
+    BUILT_PACKAGES[8],
+    BUILT_PACKAGES[9],
+    BUILT_PACKAGES[10],
+    BUILT_PACKAGES[11],
     STUB_PACKAGE,
 ];
 
@@ -857,6 +969,57 @@ fn executor_image() -> Result<Option<String>> {
     local_tag("executor", &["mandate-executord"]).map(Some)
 }
 
+/// The cell's `scheduler` image (E21-29): this checkout's `mandate-scheduler`. `None` where the
+/// `mandate` image is pulled, as for the runtime and executor, whose ticks it writes.
+fn scheduler_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
+}
+
+/// The cell's `dispatcher` image (X8, DEC-2516): this checkout's `mandate-dispatcher`. `None`
+/// where the `mandate` image is pulled, as for the runtime and executor, whose alerts it sends.
+fn dispatcher_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DISPATCHER_PROCESS, &[DISPATCHER_PACKAGE]).map(Some)
+}
+
+/// The dispatcher's image and its configuration's `build`, the digest of the binary it holds
+/// (DEC-2500 item 7), or nothing where the cell does not build it.
+fn dispatcher_sets() -> Result<Vec<String>> {
+    let Some(image) = dispatcher_image()? else {
+        return Ok(Vec::new());
+    };
+    let digest = sha256(&static_binary(DISPATCHER_PACKAGE))?;
+    Ok(vec![
+        format!("images.{DISPATCHER_PROCESS}={image}"),
+        format!("{DISPATCHER_PROCESS}.build=sha256:{digest}"),
+    ])
+}
+
+/// The cell's `model-gateway` image (E21-62): this checkout's `mandate-gatewayd`, with the demo's
+/// recorded research bundle beside it. `None` where the `mandate` image is pulled, as for the
+/// runtime, whose research calls it serves.
+fn model_gateway_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    let files: Vec<String> = demo_research().into_iter().map(|(from, _)| from).collect();
+    local_tag_with(MODEL_GATEWAY_PROCESS, &[MODEL_GATEWAY_PACKAGE], &files).map(Some)
+}
+
+/// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
+/// `mandate` image is pulled, as for the runtime, which reads what it stores.
+fn data_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DATA_PROCESS, &[DATA_PACKAGE]).map(Some)
+}
+
 /// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
 /// without the deployment manager, the one process that starts it, as for the manager itself.
 fn exchange_image() -> Result<Option<String>> {
@@ -937,11 +1100,22 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(executor) = executor_image()? {
         sets.push(format!("images.executor={executor}"));
     }
+    if let Some(scheduler) = scheduler_image()? {
+        sets.push(format!("images.{SCHEDULER_PROCESS}={scheduler}"));
+    }
+    sets.extend(dispatcher_sets()?);
+    if let Some(data) = data_image()? {
+        sets.push(format!("images.{DATA_PROCESS}={data}"));
+    }
+    if let Some(gateway) = model_gateway_image()? {
+        sets.push(format!("images.{MODEL_GATEWAY_PROCESS}={gateway}"));
+    }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `deploy-manager` and
-/// `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`,
+/// `dispatcher`, `data`, `model-gateway`, `deploy-manager` and `role-provisioner` images from this
+/// checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
 /// the workspace chart, and wait until every pod is ready and the migration Job has finished.
@@ -956,6 +1130,10 @@ pub fn up() -> Result<()> {
     let provisioner = role_provisioner_image_tag()?;
     let runtime = runtime_image()?;
     let executor = executor_image()?;
+    let scheduler = scheduler_image()?;
+    let dispatcher = dispatcher_image()?;
+    let data = data_image()?;
+    let gateway = model_gateway_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -972,6 +1150,28 @@ pub fn up() -> Result<()> {
     }
     if let Some(executor) = &executor {
         build_image(executor, EXECUTOR_DOCKERFILE, "mandate-executord", &[])?;
+    }
+    if let Some(scheduler) = &scheduler {
+        build_image(scheduler, SCHEDULER_DOCKERFILE, SCHEDULER_PACKAGE, &[])?;
+    }
+    if let Some(dispatcher) = &dispatcher {
+        build_image(dispatcher, DISPATCHER_DOCKERFILE, DISPATCHER_PACKAGE, &[])?;
+    }
+    if let Some(data) = &data {
+        build_image(data, DATA_DOCKERFILE, DATA_PACKAGE, &[])?;
+    }
+    if let Some(gateway) = &gateway {
+        let research = demo_research();
+        let files: Vec<(&str, &str)> = research
+            .iter()
+            .map(|(from, name)| (from.as_str(), name.as_str()))
+            .collect();
+        build_image(
+            gateway,
+            MODEL_GATEWAY_DOCKERFILE,
+            MODEL_GATEWAY_PACKAGE,
+            &files,
+        )?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -1007,21 +1207,24 @@ pub fn up() -> Result<()> {
         create_cluster()?;
     }
     let built = (source == ImageSource::Build).then_some(&image);
-    for image in [
+    let images = [
         built,
         api.as_ref(),
         runtime.as_ref(),
         executor.as_ref(),
+        scheduler.as_ref(),
+        dispatcher.as_ref(),
+        data.as_ref(),
         stub.as_ref(),
         exchange.as_ref(),
         manager.as_ref(),
         provisioner.as_ref(),
+        gateway.as_ref(),
     ]
     .into_iter()
     .flatten()
-    {
-        import_image(image)?;
-    }
+    .collect::<Vec<_>>();
+    import_images(&images)?;
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -1197,7 +1400,16 @@ pub(super) fn api_diagnosis() {
         "jsonpath={range .items[*]}{.metadata.name}{range .status.containerStatuses[*]} {.name}: {.lastState.terminated.reason} {.lastState.terminated.exitCode} restarts {.restartCount}{end}{\"\\n\"}{end}",
     ];
     let current = logs("--previous=false");
-    let previous = logs("--previous=true");
+    let restarted = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}{range .status.initContainerStatuses[*]} {.name} {.restartCount}{end}{range .status.containerStatuses[*]} {.name} {.restartCount}{end}{\"\\n\"}{end}",
+    ];
     let events = [
         "get",
         "events",
@@ -1206,13 +1418,55 @@ pub(super) fn api_diagnosis() {
         "--sort-by",
         ".lastTimestamp",
     ];
-    let shown: [&[&str]; 5] = [&pods, &ended, &current, &previous, &events];
+    let shown: [&[&str]; 3] = [&pods, &ended, &current];
     for args in shown {
-        match kubectl(args) {
-            Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
-            Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
-        }
+        diagnose(args);
     }
+    let listing = kubectl(&restarted).unwrap_or_else(|e| {
+        eprintln!("    api diagnosis `kubectl {}`: {e:#}", restarted.join(" "));
+        String::new()
+    });
+    for (pod, container) in restarted_containers(&listing) {
+        diagnose(&[
+            "logs",
+            "--namespace",
+            NAMESPACE,
+            pod.as_str(),
+            "--container",
+            container.as_str(),
+            "--previous=true",
+            "--tail",
+            "40",
+        ]);
+    }
+    diagnose(&events);
+}
+
+/// Prints what `kubectl args` answers, or why it failed, under the API's diagnosis.
+fn diagnose(args: &[&str]) {
+    match kubectl(args) {
+        Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
+        Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
+    }
+}
+
+/// Each `(pod, container)` that has restarted, from a listing of one pod a line, its name then
+/// `<container> <restarts>` pairs, init containers first. Only those have logs from a run before: `kubectl logs
+/// --previous` over every container of a selector fails outright on the first one that has none,
+/// an init container among them, which hid the API's own last run (main's run 40254976469).
+fn restarted_containers(listing: &str) -> Vec<(String, String)> {
+    listing
+        .lines()
+        .flat_map(|line| {
+            let mut words = line.split_whitespace();
+            let pod = words.next().unwrap_or_default().to_owned();
+            let rest: Vec<&str> = words.collect();
+            rest.chunks(2)
+                .filter(|pair| pair.len() == 2 && pair[1] != "0")
+                .map(|pair| (pod.clone(), pair[0].to_owned()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// `cargo xtask cell down`: delete the cluster and everything in it.
@@ -1229,11 +1483,12 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172) and the executor's
-/// `mandate-executord` (DEC-2031) linked statically, so their images need no base (DEC-993 item
-/// 9), with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which
-/// the dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for
-/// the CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
+/// (DEC-1013, built by `mandate-runtime-models` since DEC-2383), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
+/// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
+/// process's `mandate-datad` linked statically, so their images need no base (DEC-993 item 9),
+/// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the
+/// dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for the
+/// CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let mut args = vec!["build", "--locked"];
     for package in BUILT_PACKAGES {
@@ -1334,6 +1589,29 @@ fn import_image(image: &str) -> Result<()> {
     bail!("{image} never reached {NODE} after {IMPORT_ATTEMPTS} imports")
 }
 
+/// Every image into the node in one `k3d image import`, which starts k3d's tools container once
+/// rather than once an image (about 30 seconds of `up` on a CI runner, DEC-2641), then each image
+/// the node does not yet hold through [`import_image`]'s own attempts.
+fn import_images(images: &[&String]) -> Result<()> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["image", "import", "--cluster", CLUSTER];
+    args.extend(images.iter().map(|image| image.as_str()));
+    if sh("k3d", &args).is_err() {
+        eprintln!(
+            "xtask: the batched image import failed; importing what the node lacks one by one"
+        );
+    }
+    api_server_ready()?;
+    for image in images {
+        if !node_holds(image) {
+            import_image(image)?;
+        }
+    }
+    Ok(())
+}
+
 /// Whether the node's containerd lists `image` by its exact reference; a node it cannot ask holds
 /// nothing.
 fn node_holds(image: &str) -> bool {
@@ -1372,6 +1650,38 @@ fn cluster_exists() -> Result<bool> {
 /// `cloudflared` pod (DEC-967 item 6), never a k3s add-on. On a cgroup v1 host k3s 1.35's
 /// kubelet must be told to start anyway.
 fn create_cluster() -> Result<()> {
+    let cgroup_v1 =
+        env::consts::OS == "linux" && !Path::new("/sys/fs/cgroup/cgroup.controllers").exists();
+    let mut args = cluster_args(cgroup_v1, env::var_os(LOW_EVICTION_ENV).is_some());
+    if let Some(bundle) = env::var_os(EXTRA_CA_ENV) {
+        let bundle = PathBuf::from(bundle);
+        args.push("--volume".into());
+        args.push(format!(
+            "{}:/etc/ssl/certs/ca-certificates.crt@server:0",
+            bundle.display()
+        ));
+    }
+    if env::var_os(RESTRICT_OOM_ENV).is_some() {
+        let written = state()?.join("containerd-restrict-oom.toml");
+        fs::write(&written, RESTRICT_OOM_DROPIN)
+            .with_context(|| format!("writing {}", written.display()))?;
+        let dropin = fs::canonicalize(&written)
+            .with_context(|| format!("resolving {}", written.display()))?;
+        args.push("--volume".into());
+        args.push(format!(
+            "{}:{CONTAINERD_DROPINS}/restrict-oom.toml@server:0",
+            dropin.display()
+        ));
+    }
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    sh("k3d", &args)?;
+    api_server_ready()
+}
+
+/// `k3d cluster create`'s arguments before the volumes: the cell's one-node cluster, told to start
+/// on a cgroup v1 host, and with the kubelet's hard-eviction thresholds lowered under
+/// [`LOW_EVICTION_ENV`].
+fn cluster_args(cgroup_v1: bool, low_eviction: bool) -> Vec<String> {
     let mut args: Vec<String> = [
         "cluster",
         "create",
@@ -1390,20 +1700,13 @@ fn create_cluster() -> Result<()> {
     ]
     .map(String::from)
     .to_vec();
-    if env::consts::OS == "linux" && !Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
+    if cgroup_v1 {
         args.extend(["--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0"].map(String::from));
     }
-    if let Some(bundle) = env::var_os(EXTRA_CA_ENV) {
-        let bundle = PathBuf::from(bundle);
-        args.push("--volume".into());
-        args.push(format!(
-            "{}:/etc/ssl/certs/ca-certificates.crt@server:0",
-            bundle.display()
-        ));
+    if low_eviction {
+        args.extend(["--k3s-arg", LOW_EVICTION_ARG].map(String::from));
     }
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    sh("k3d", &args)?;
-    api_server_ready()
+    args
 }
 
 /// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
@@ -1577,6 +1880,54 @@ fn vault_state(status: &str) -> Result<VaultState> {
     })
 }
 
+/// How long the cell waits, after unsealing, for the vault to answer as the active node (E21-32v):
+/// a raft node reports itself unsealed before it has won its election and loaded its token store,
+/// and refuses even the root token until then, so provisioning waits for it. A denial after that
+/// is a real one, never retried.
+const VAULT_ACTIVE_S: u64 = 60;
+/// How often the cell asks the vault's status while it waits for it to be active.
+const VAULT_ACTIVE_EVERY_S: u64 = 2;
+
+/// Whether a vault's `bao status -format=json` says it is unsealed, on raft, and the active node:
+/// HA off, or HA on with `is_self` true. A status missing either field is not active.
+fn vault_active(status: &str) -> Result<bool> {
+    if vault_state(status)? != VaultState::Unsealed {
+        return Ok(false);
+    }
+    let status: Value = serde_json::from_str(status).context("reading the vault's status")?;
+    Ok(match status["ha_enabled"].as_bool() {
+        Some(false) => true,
+        Some(true) => status["is_self"].as_bool() == Some(true),
+        None => false,
+    })
+}
+
+/// Asks `status` until the vault answers as active ([`vault_active`]), pausing
+/// [`VAULT_ACTIVE_EVERY_S`] between asks for no longer than [`VAULT_ACTIVE_S`] in all. A status
+/// that cannot be read or is not JSON, as `bao status` prints nothing on its standard output
+/// while it cannot find the leader, is asked again; one that names a dev server stops it at once.
+pub(crate) fn await_active(
+    mut status: impl FnMut() -> Result<String>,
+    mut pause: impl FnMut(Duration),
+) -> Result<()> {
+    let mut active = || -> Result<bool> {
+        match status() {
+            Ok(answer) if serde_json::from_str::<Value>(&answer).is_ok() => vault_active(&answer),
+            _ => Ok(false),
+        }
+    };
+    for _ in 0..VAULT_ACTIVE_S / VAULT_ACTIVE_EVERY_S {
+        if active()? {
+            return Ok(());
+        }
+        pause(Duration::from_secs(VAULT_ACTIVE_EVERY_S));
+    }
+    if active()? {
+        return Ok(());
+    }
+    bail!("the vault did not answer as the active node within {VAULT_ACTIVE_S} s of unsealing")
+}
+
 /// `bao` in the vault's pod, with `stdin` on its standard input, and its standard output, whatever
 /// its exit: `bao status` exits 2 for a sealed vault. Its output is never printed, since `operator
 /// init`'s holds the unseal key and the root token.
@@ -1721,7 +2072,11 @@ fn vault(kube_api: bool) -> Result<bool> {
         &format!("pod/{VAULT_POD}"),
         "--timeout=120s",
     ])?;
-    eprintln!("    vault: unsealed, on raft storage");
+    await_active(
+        || bao(&["status", "-format=json"], b"").map(|(_, status)| status),
+        sleep,
+    )?;
+    eprintln!("    vault: unsealed and active, on raft storage");
     Ok(fresh)
 }
 
@@ -1990,7 +2345,7 @@ const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
 /// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate:
 /// a connection's entries are under `x` and its id's hex (DEC-2060 item 3), `x64656d6f2d7061706572`
 /// for `demo-paper` and `x6472696c6c2d6f74686572` for `drill-other`.
-const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
+const VAULT_DRILL_READS: [(&str, &str, bool); 23] = [
     ("runtime", "connections/x64656d6f2d7061706572/token", false),
     (
         "runtime",
@@ -2035,6 +2390,24 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
         false,
     ),
     ("model-gateway", "platform/email-credential", false),
+    ("model-gateway", "platform/news-data-key", false),
+    ("news-reader", "platform/news-data-key", true),
+    ("news-reader", "platform/model-provider-key", false),
+    (
+        "news-reader",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
+    ("news-reader", "platform/alpaca-oauth-client-secret", false),
+    ("bars-reader", "platform/news-data-key", true),
+    ("bars-reader", "platform/model-provider-key", false),
+    ("bars-reader", "platform/email-credential", false),
+    ("bars-reader", "platform/alpaca-oauth-client-secret", false),
+    (
+        "bars-reader",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
     (
         "executor-demo-paper",
         "connections/x64656d6f2d7061706572/code",
@@ -2043,11 +2416,11 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
 ];
 
 /// How many `mandate-*` policies the drill's scan must have read: one per process type (the API,
-/// the connection manager, the runtime, the secret import, the model gateway and the email
-/// sender) and two per connection (its executor and its token exchange), for
+/// the connection manager, the runtime, the secret import, the model gateway, the news reader, the
+/// bars reader and the email sender) and two per connection (its executor and its token exchange), for
 /// [`VAULT_DRILL_CONNECTIONS`]. A scan that reads fewer, as one whose `bao policy list` failed,
 /// has proved nothing about wildcards.
-const VAULT_DRILL_POLICIES: usize = 10;
+const VAULT_DRILL_POLICIES: usize = 12;
 
 /// The only stanzas holding a wildcard that the vault drill admits, each in the one policy it may
 /// appear in: DEC-2349's one-segment `+` for a connection the web made after the vault was
@@ -2251,6 +2624,7 @@ fn vault_drill_script(seeded: bool) -> String {
         "platform/alpaca-oauth-client-secret",
         "platform/model-provider-key",
         "platform/email-credential",
+        "platform/news-data-key",
     ] {
         puts.push_str(&format!(
             "BAO_TOKEN=\"$op\" bao kv put -mount=mandate {path} value=ZHJpbGwtZmFrZQ== >/dev/null\n"
@@ -2565,6 +2939,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Ticks => executor::ticks_drill(seeded),
             Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
             Drill::Exchange => exchange::drill(seeded, false),
@@ -2686,6 +3061,34 @@ fn boot(seeded: bool) -> Result<Verdict> {
 fn run_id() -> Result<String> {
     let nanos = output("date", &["+%s%N"])?;
     Ok(nanos.trim().chars().rev().take(10).collect::<String>())
+}
+
+/// The customer journey's web/ part ([`web::journey_from_web`]) against a running cell, printing
+/// each step it reached.
+///
+/// # Errors
+/// As [`web::journey_from_web`].
+pub fn journey(workspace: &str, agent: &str) -> Result<()> {
+    eprintln!("==> the customer's journey from web/ (paper only; real money stays off, DEC-2134)");
+    for (name, value) in web::journey_from_web(workspace, agent)? {
+        eprintln!("    {name}: {value}");
+    }
+    Ok(())
+}
+
+/// The owner's set-up from web/ ([`web::setup_from_web`]) against a running cell, printing each
+/// step it reached.
+///
+/// # Errors
+/// As [`web::setup_from_web`].
+pub fn setup(workspace: &str) -> Result<()> {
+    eprintln!(
+        "==> the owner's set-up from web/ (paper only; confirm and deploy wait for the passkey's first 24 hours)"
+    );
+    for (name, value) in web::setup_from_web(workspace)? {
+        eprintln!("    {name}: {value}");
+    }
+    Ok(())
 }
 
 /// Opens a fresh control stream with the CLI in the cell, then exports and verifies it.
@@ -3360,15 +3763,34 @@ fn login_roles(all: &[Value]) -> Vec<String> {
     roles
 }
 
+/// The read-only group (DEC-2082): a process whose `db_access` is `read`, the data process alone,
+/// logs in as a member of it, which may only select the journal's tables, since its binary does
+/// not itself refuse a write.
+const JOURNAL_READER: &str = "mandate_journal_reader";
+
+/// The group `role` is a member of: [`JOURNAL_READER`] for a process whose `db_access` is
+/// `read`, else `mandate_journal_app`.
+fn role_group(all: &[Value], role: &str) -> &'static str {
+    let read = all
+        .iter()
+        .any(|p| p["db_role"].as_str() == Some(role) && p["db_access"] == "read");
+    if read {
+        JOURNAL_READER
+    } else {
+        "mandate_journal_app"
+    }
+}
+
 /// The journal's roles (journal spec §6.1, infrastructure §3.5), run once at bootstrap as the
 /// superuser in the journal database: CloudNativePG runs it from the journal-db chart, and the
 /// Compose file's Postgres runs the same file. `mandate_journal_owner` owns the tables and only
 /// the migration role may become it; each process type logs in as its own role, a member of
-/// `mandate_journal_app`. Passwords are set elsewhere, from mounted files.
+/// `mandate_journal_app`, or of [`JOURNAL_READER`] when it only reads. Passwords are set
+/// elsewhere, from mounted files.
 pub fn roles_sql(all: &[Value]) -> String {
     let mut sql = format!(
         "-- {GENERATED}.\n\
-         DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN\n    CREATE ROLE mandate_journal_owner NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN\n    CREATE ROLE mandate_journal_app NOLOGIN;\n  END IF;\nEND\n$$;\n\
+         DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN\n    CREATE ROLE mandate_journal_owner NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN\n    CREATE ROLE mandate_journal_app NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{JOURNAL_READER}') THEN\n    CREATE ROLE {JOURNAL_READER} NOLOGIN;\n  END IF;\nEND\n$$;\n\
          GRANT mandate_journal_owner TO mandate_migrator WITH INHERIT FALSE;\n\
          REVOKE ALL ON DATABASE mandate FROM PUBLIC;\n\
          REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;\n\
@@ -3376,11 +3798,13 @@ pub fn roles_sql(all: &[Value]) -> String {
          REVOKE ALL ON SCHEMA public FROM PUBLIC;\n\
          CREATE SCHEMA IF NOT EXISTS journal AUTHORIZATION mandate_journal_owner;\n\
          GRANT USAGE ON SCHEMA journal TO mandate_journal_app;\n\
+         GRANT USAGE ON SCHEMA journal TO {JOURNAL_READER};\n\
          CREATE SCHEMA IF NOT EXISTS deploy AUTHORIZATION mandate_migrator;\n"
     );
     for role in login_roles(all) {
+        let group = role_group(all, &role);
         sql.push_str(&format!(
-            "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN\n    CREATE ROLE {role} LOGIN IN ROLE mandate_journal_app;\n  END IF;\nEND\n$$;\n\
+            "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN\n    CREATE ROLE {role} LOGIN IN ROLE {group};\n  END IF;\nEND\n$$;\n\
              GRANT CONNECT ON DATABASE mandate TO {role};\n\
              ALTER ROLE {role} IN DATABASE mandate SET search_path = journal;\n"
         ));
@@ -3656,9 +4080,10 @@ fn compose_api(service: &mut Value) -> Result<()> {
     Ok(())
 }
 
-/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}` and the
-/// `runtime` values' placeholders become the variables the operator sets, each required, and
-/// `{probe}` becomes `probe`.
+/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}`, and
+/// `{hosted_workspace}`, which is the same one workspace there, and the `runtime` values'
+/// placeholders become the variables the operator sets, each required, and `{probe}` becomes
+/// `probe`.
 fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
     words
         .iter()
@@ -3666,6 +4091,10 @@ fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
             let word = w.as_str().context("a launch word is not a string")?;
             Ok(word
                 .replace("{workspace}", "${MANDATE_WORKSPACE:?set the workspace}")
+                .replace(
+                    "{hosted_workspace}",
+                    "${MANDATE_WORKSPACE:?set the workspace}",
+                )
                 .replace(
                     "{agent}",
                     "${MANDATE_RUNTIME_AGENT:?set the runtime's agent}",
@@ -5106,9 +5535,10 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
             name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
             skipped: if built("runtime") && built("executor") {
                 Some(
-                    "the executor runs on the fixture paper broker (DEC-2031), but the runtime \
-                     proposes no order on the deny-all wiring until the post-R0 hook (DEC-1013), \
-                     and the executor fills no paper order before slice X1b-3 (E21-30)"
+                    "the executor runs on the fixture paper broker (DEC-2031) and fills, books and \
+                     protects a deployed opening (#2624), and the runtime proposes an opening once \
+                     granted (#2538, #2637), but no gesture yet shows the paper fill in the cell \
+                     (E2E, E21-54)"
                         .to_string(),
                 )
             } else {
@@ -5610,6 +6040,99 @@ mod tests {
 
     use super::*;
 
+    /// The cluster's default arguments are exactly the ones before [`LOW_EVICTION_ENV`] existed, so
+    /// CI and a laptop create the same cluster; the switch adds only the kubelet's lowered
+    /// hard-eviction thresholds, and the cgroup v1 argument is independent of it.
+    #[test]
+    fn the_low_eviction_switch_is_off_by_default_and_adds_only_its_kubelet_arg() {
+        let base = [
+            "cluster",
+            "create",
+            "mandate-cell",
+            "--image",
+            K3S_IMAGE,
+            "--no-lb",
+            "--k3s-arg",
+            "--disable=traefik@server:0",
+            "--k3s-arg",
+            "--disable=servicelb@server:0",
+            "--kubeconfig-update-default=false",
+            "--wait",
+            "--timeout",
+            "180s",
+        ];
+        assert_eq!(
+            cluster_args(false, false),
+            base,
+            "the default cluster changed"
+        );
+        let cgroup_v1 = ["--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0"];
+        assert_eq!(
+            cluster_args(true, false),
+            [&base[..], &cgroup_v1[..]].concat()
+        );
+        let low = [
+            "--k3s-arg",
+            "--kubelet-arg=eviction-hard=nodefs.available<1%,imagefs.available<1%@server:0",
+        ];
+        assert_eq!(cluster_args(false, true), [&base[..], &low[..]].concat());
+        assert_eq!(
+            cluster_args(true, true),
+            [&base[..], &cgroup_v1[..], &low[..]].concat()
+        );
+        assert_eq!(LOW_EVICTION_ENV, "MANDATE_CELL_LOW_EVICTION");
+    }
+
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
+    #[test]
+    fn a_drill_job_runs_the_drills_its_matrix_names() -> Result<()> {
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, None)?,
+            EXECUTOR_DRILLS.to_vec()
+        );
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, Some(""))?,
+            EXECUTOR_DRILLS.to_vec()
+        );
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, Some("ticks"))?,
+            vec![Drill::Ticks]
+        );
+        for other in ["exchange", "boot", "Ticks", "nope"] {
+            assert!(
+                shard_drills("cell-executor", &EXECUTOR_DRILLS, Some(other)).is_err(),
+                "{other} is not one of cell-executor's drills"
+            );
+        }
+        Ok(())
+    }
+
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
+    #[test]
+    fn a_drill_job_runs_the_variants_its_matrix_names() {
+        assert_eq!(variants(None).unwrap(), (true, true));
+        assert_eq!(variants(Some("")).unwrap(), (true, true));
+        assert_eq!(variants(Some("plain")).unwrap(), (true, false));
+        assert_eq!(variants(Some("seeded")).unwrap(), (false, true));
+        assert!(variants(Some("both")).is_err());
+    }
+
+    /// The API's diagnosis asks for the logs of a run before only of the containers that restarted.
+    #[test]
+    fn only_restarted_containers_are_asked_for_their_previous_logs() {
+        let listing = "api-1 api 5\nconnect-finish-1 credentials 0 finish 0\npending-1\napi-2 api 0 sidecar 2\n";
+        assert_eq!(
+            restarted_containers(listing),
+            vec![
+                ("api-1".to_owned(), "api".to_owned()),
+                ("api-2".to_owned(), "sidecar".to_owned()),
+            ]
+        );
+        assert!(restarted_containers("").is_empty());
+    }
+
     /// The fixture's client secret is written at the client secret's own path in the `mandate`
     /// mount, from stdin alone: the root token is read as its first line and the value is the
     /// rest, already base64, so neither reaches an argument, and nothing is printed.
@@ -5784,8 +6307,18 @@ mod tests {
             "model-gateway connections/x64656d6f2d7061706572/token denied",
             "model-gateway platform/alpaca-oauth-client-secret denied",
             "model-gateway platform/email-credential denied",
+            "model-gateway platform/news-data-key denied",
+            "news-reader platform/news-data-key allowed",
+            "news-reader platform/model-provider-key denied",
+            "news-reader connections/x64656d6f2d7061706572/token denied",
+            "news-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader platform/news-data-key allowed",
+            "bars-reader platform/model-provider-key denied",
+            "bars-reader platform/email-credential denied",
+            "bars-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader connections/x64656d6f2d7061706572/token denied",
             "executor-demo-paper connections/x64656d6f2d7061706572/code denied",
-            "checked 10 mandate policies",
+            "checked 12 mandate policies",
         ];
         let probe = |lines: &[&str]| -> String {
             lines
@@ -5876,23 +6409,23 @@ mod tests {
             vault_drill_problems(&missing, VAULT_DRILL_POLICIES),
             ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
         );
-        let unscanned = held.replace("checked 10 mandate policies", "checked 0 mandate policies");
+        let unscanned = held.replace("checked 12 mandate policies", "checked 0 mandate policies");
         assert_eq!(
             vault_drill_problems(&unscanned, VAULT_DRILL_POLICIES),
-            ["want `checked 10 mandate policies`, got `checked 0 mandate policies`"]
+            ["want `checked 12 mandate policies`, got `checked 0 mandate policies`"]
         );
-        let scanned_twice = format!("{held}{}", probe(&["checked 10 mandate policies"]));
+        let scanned_twice = format!("{held}{}", probe(&["checked 12 mandate policies"]));
         assert_eq!(
             vault_drill_problems(&scanned_twice, VAULT_DRILL_POLICIES),
             [
-                "want `checked 10 mandate policies`, got `checked 10 mandate policies` and \
-                 `checked 10 mandate policies`"
+                "want `checked 12 mandate policies`, got `checked 12 mandate policies` and \
+                 `checked 12 mandate policies`"
             ]
         );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
             vault_drill_problems(&no_scan, VAULT_DRILL_POLICIES),
-            ["want `checked 10 mandate policies`, got `no scan`"]
+            ["want `checked 12 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
             "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
@@ -5929,11 +6462,11 @@ mod tests {
     }
 
     /// Once `cell up` provisions for the role provisioner, the drill must read its three policies
-    /// too: thirteen, and ten is a scan that missed some.
+    /// too: fifteen, and twelve is a scan that missed some.
     #[test]
     fn the_vault_drill_counts_the_provisioned_policies() {
-        assert_eq!(vault_drill_policies(false), 10);
-        assert_eq!(vault_drill_policies(true), 13);
+        assert_eq!(vault_drill_policies(false), 12);
+        assert_eq!(vault_drill_policies(true), 15);
         let scan = |n: usize| format!("[pod/vault-drill-1-x/probe] checked {n} mandate policies\n");
         let only_scan = |logs: &str, policies: usize| -> Vec<String> {
             vault_drill_problems(logs, policies)
@@ -5942,12 +6475,12 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            only_scan(&scan(13), vault_drill_policies(true)),
+            only_scan(&scan(15), vault_drill_policies(true)),
             Vec::<String>::new()
         );
         assert_eq!(
-            only_scan(&scan(10), vault_drill_policies(true)),
-            ["want `checked 13 mandate policies`, got `checked 10 mandate policies`"]
+            only_scan(&scan(12), vault_drill_policies(true)),
+            ["want `checked 15 mandate policies`, got `checked 12 mandate policies`"]
         );
     }
 
@@ -6152,6 +6685,174 @@ mod tests {
             .context("processes.json has no role provisioner")?;
         assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
         assert_eq!(process["built"], true);
+        Ok(())
+    }
+
+    /// The scheduler's image (E21-29): its package is built with the cell's others and is one the
+    /// cell jobs follow, its Dockerfile copies exactly that binary, its key is the chart's process
+    /// and image name, and `cell up` names it, so the clock stream the runtime and executor read
+    /// is ticked in the cell.
+    #[test]
+    fn the_cell_builds_the_schedulers_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&SCHEDULER_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&SCHEDULER_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(SCHEDULER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-scheduler /mandate-scheduler"),
+            "{dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("FROM scratch") && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == SCHEDULER_PROCESS)
+            .context("processes.json has no scheduler")?;
+        assert_eq!(process["image"], SCHEDULER_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-scheduler");
+        Ok(())
+    }
+
+    /// The dispatcher's image (X8, DEC-2516): its package is built with the cell's others and is
+    /// one the cell jobs follow, its Dockerfile copies exactly that binary on an empty base as
+    /// non-root, its key is the chart's process and image name, its probe is that binary's, and it
+    /// reads the configuration file the chart mounts.
+    #[test]
+    fn the_cell_builds_the_dispatchers_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&DISPATCHER_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&DISPATCHER_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(DISPATCHER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-dispatcher /mandate-dispatcher"),
+            "{dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("FROM scratch") && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == DISPATCHER_PROCESS)
+            .context("processes.json has no dispatcher")?;
+        assert_eq!(process["image"], DISPATCHER_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-dispatcher");
+        assert_eq!(process["db_role"], "mandate_dispatcher");
+        assert_eq!(process["egress"], json!(["postgres"]));
+        assert_eq!(process["args"][2], "/etc/mandate/dispatcher/config.json");
+        Ok(())
+    }
+
+    /// The model gateway's image (E21-62): built with the cell's others and followed by the cell
+    /// jobs, its Dockerfile copies exactly that binary and the recorded bundle on an empty base as
+    /// non-root, and its process serves the bundle's `research.json` with `--recorded` and never
+    /// names a live start (DEC-2326 item 3).
+    #[test]
+    fn the_cell_builds_the_model_gateways_image_over_the_recording() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&MODEL_GATEWAY_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&MODEL_GATEWAY_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(MODEL_GATEWAY_DOCKERFILE))?;
+        for line in [
+            "FROM scratch",
+            "COPY mandate-gatewayd /mandate-gatewayd",
+            "COPY research/ /usr/local/share/mandate/research/",
+            "USER 65532:65532",
+        ] {
+            assert!(dockerfile.contains(line), "{line}: {dockerfile}");
+        }
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == MODEL_GATEWAY_PROCESS)
+            .context("processes.json has no model gateway")?;
+        assert_eq!(process["image"], MODEL_GATEWAY_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-gatewayd");
+        let args: Vec<&str> = process["args"]
+            .as_array()
+            .context("the model gateway has no args")?
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let recorded = args.iter().position(|a| *a == "--recorded");
+        assert_eq!(
+            recorded.and_then(|i| args.get(i + 1)).copied(),
+            Some("/usr/local/share/mandate/research/research.json")
+        );
+        assert!(
+            !args.iter().any(|a| a.starts_with("--registry")),
+            "{args:?}"
+        );
+        assert!(
+            demo_research()
+                .iter()
+                .any(|(_, name)| name == "research/research.json")
+        );
+        Ok(())
+    }
+
+    /// Every image `cell up` builds is imported into the cluster: each `*_image()` or
+    /// `*_image_tag()` it binds is in the import list, so no process the chart names an image for
+    /// waits on a pull that cannot succeed (`IfNotPresent` on a `mandate.local/` tag).
+    #[test]
+    fn every_image_cell_up_builds_is_imported() -> Result<()> {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cell.rs"))?;
+        let up = source
+            .split_once("pub fn up() -> Result<()> {")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .map(|(body, _)| body)
+            .context("cell.rs has no up()")?;
+        let imported = up
+            .split_once("let images = [")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(list, _)| list)
+            .context("up() has no import list")?;
+        let bound: Vec<&str> = up
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("let "))
+            .filter(|line| line.contains("_image()?;") || line.contains("_image_tag()?;"))
+            .filter_map(|line| line.split_once(" = ").map(|(name, _)| name))
+            .collect();
+        assert!(bound.len() >= 8, "{bound:?}");
+        for name in bound {
+            assert!(
+                imported.contains(&format!("{name}.as_ref()")),
+                "{name} is built but never imported"
+            );
+        }
+        Ok(())
+    }
+
+    /// The data process's image (E21-29 lane SC): built with the cell's others and followed by the
+    /// cell jobs, its Dockerfile copies exactly that binary on an empty base as non-root, and its
+    /// key is the chart's process and image name.
+    #[test]
+    fn the_cell_builds_the_data_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&DATA_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&DATA_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(DATA_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-datad /mandate-datad")
+                && dockerfile.contains("FROM scratch")
+                && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == DATA_PROCESS)
+            .context("processes.json has no data process")?;
+        assert_eq!(process["image"], DATA_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(
+            process["db_role"], "mandate_data",
+            "the IEX source's own journal role, which the chart drops for the recorded source (DEC-2082)"
+        );
+        assert_eq!(process["probe"][0], "/mandate-datad");
         Ok(())
     }
 
@@ -6379,6 +7080,79 @@ mod tests {
         assert!(vault_state(&status(true, true, "inmem")).is_err());
         assert!(vault_state(r#"{"sealed": false, "storage_type": "raft"}"#).is_err());
         assert!(vault_state("not json").is_err());
+    }
+
+    /// The vault counts as active only unsealed, on raft, and the active node; the cell waits for
+    /// that, pausing between asks, for no longer than its bound, and a dev server stops the wait at
+    /// once.
+    #[test]
+    fn the_cell_waits_for_an_active_vault_within_its_bound() {
+        let status = |sealed: bool, ha: Option<bool>, is_self: Option<bool>, storage: &str| {
+            let mut status =
+                json!({"initialized": true, "sealed": sealed, "storage_type": storage});
+            if let Some(ha) = ha {
+                status["ha_enabled"] = json!(ha);
+            }
+            if let Some(is_self) = is_self {
+                status["is_self"] = json!(is_self);
+            }
+            status.to_string()
+        };
+        let standby = status(false, Some(true), Some(false), "raft");
+        let active = status(false, Some(true), Some(true), "raft");
+        assert!(vault_active(&active).unwrap());
+        assert!(vault_active(&status(false, Some(false), None, "raft")).unwrap());
+        assert!(!vault_active(&standby).unwrap());
+        assert!(!vault_active(&status(false, Some(true), None, "raft")).unwrap());
+        assert!(!vault_active(&status(false, None, Some(true), "raft")).unwrap());
+        assert!(!vault_active(&status(true, Some(true), Some(true), "raft")).unwrap());
+        assert!(vault_active(&status(false, Some(false), None, "inmem")).is_err());
+
+        let asks = |answers: Vec<Result<String>>| {
+            let mut answers = answers.into_iter();
+            let mut asked = 0_u32;
+            let mut waited = Duration::ZERO;
+            let outcome = await_active(
+                || {
+                    asked += 1;
+                    answers
+                        .next()
+                        .unwrap_or_else(|| Ok(status(false, Some(true), Some(false), "raft")))
+                },
+                |pause| waited += pause,
+            );
+            (outcome.is_ok(), asked, waited)
+        };
+        assert_eq!(
+            asks(vec![
+                Ok(standby.clone()),
+                Err(anyhow::anyhow!("the pod is restarting")),
+                Ok(String::new()),
+                Ok("Error checking leader status".to_owned()),
+                Ok(active.clone()),
+            ]),
+            (true, 5, Duration::from_secs(8)),
+            "standby, then unreadable, empty and not JSON, then active: provisioning goes on \
+             after four pauses"
+        );
+        assert_eq!(
+            asks(vec![Ok(active)]),
+            (true, 1, Duration::ZERO),
+            "an active vault is not waited on"
+        );
+        assert_eq!(
+            asks(Vec::new()),
+            (false, 31, Duration::from_secs(60)),
+            "a vault that never becomes active fails after sixty seconds, asked once more at the end"
+        );
+        assert_eq!(
+            asks(vec![
+                Ok(standby),
+                Ok(status(false, Some(false), None, "inmem"))
+            ]),
+            (false, 2, Duration::from_secs(2)),
+            "a dev server stops the wait at once"
+        );
     }
 
     /// The runtime image's context carries every file of the demo's research bundle and nothing
@@ -6706,8 +7480,8 @@ mod tests {
         assert_eq!(
             gaps.len(),
             2,
-            "every lane on main, the paper agent and research still wait on the post-R0 hook and \
-             X1b-3 (DEC-2031): {gaps:?}"
+            "every lane on main, the paper agent still waits on a gesture that shows its fill in \
+             the cell, and research on its gateway (DEC-2031): {gaps:?}"
         );
         assert!(gaps.contains(&RESEARCH_GATEWAY), "{gaps:?}");
         let no_stub = demo_parts(
@@ -6901,9 +7675,9 @@ mod tests {
         Ok(())
     }
 
-    /// Both images built still run no paper agent and no research: the runtime proposes nothing on
-    /// the deny-all wiring and the executor fills no paper order before X1b-3, so neither part is
-    /// called ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
+    /// Both images built still run no paper agent and no research: no gesture yet shows the paper
+    /// fill in the cell, so neither part is called ready, and the paper fill stays a named gap
+    /// rather than a faked one (DEC-2031).
     #[test]
     fn both_images_built_still_call_no_paper_agent_or_research_ready() {
         let list = [process("runtime", true), process("executor", true)];
@@ -6915,7 +7689,7 @@ mod tests {
                 .and_then(|p| p.skipped.clone())
         };
         assert!(
-            skipped("a paper agent").is_some_and(|why| why.contains("X1b-3")),
+            skipped("a paper agent").is_some_and(|why| why.contains("E21-54")),
             "{:?}",
             skipped("a paper agent")
         );

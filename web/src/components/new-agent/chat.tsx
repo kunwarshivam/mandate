@@ -7,9 +7,9 @@ import { Markdown } from "@/components/chat/markdown";
 import { OwnerSaid } from "@/components/chat/record-reply";
 import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
-import type { SetUp } from "@/lib/mock-runtime";
+import { type SetUp, useRuntime } from "@/lib/mock-runtime";
 import { type Conversation, type Entry, currentSummary, nextStep } from "./conversation";
-import { type Draft, MODELS, type ModelId } from "./draft";
+import { type Draft, type ModelChoice, type ModelId } from "./draft";
 import { StepHeading } from "./steps";
 import { SetUpSteps, isBound } from "./set-up-steps";
 import { Summary } from "./summary";
@@ -30,10 +30,11 @@ function Platform({ children, slot }: { children: ReactNode; slot?: string }) {
 const CHOICE =
   "press grid content-start gap-0.5 rounded-2xl border border-foreground/25 bg-card px-4 py-3 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-55 min-h-11";
 
-function ModelChoices({ busy, onChoose }: { busy: boolean; onChoose: (id: ModelId) => void }) {
+function ModelChoices({ models, busy, onChoose }: { models: readonly ModelChoice[]; busy: boolean; onChoose: (id: ModelId) => void }) {
+  if (models.length === 0) return <p className="text-sm text-muted-foreground">Your deployment lists no model this page can set up yet.</p>;
   return (
     <div role="group" aria-label="Models" className="grid gap-2 sm:grid-cols-2" data-slot="model-choices">
-      {MODELS.map((m) => (
+      {models.map((m) => (
         <button key={m.id} type="button" className={CHOICE} disabled={busy} onClick={() => onChoose(m.id)} data-slot="model-choice">
           <span className="font-semibold">{m.name}</span>
           <span className="text-sm text-pretty text-muted-foreground">{m.what}</span>
@@ -95,7 +96,7 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
       return (
         <Platform slot="said">
           <Markdown text={entry.lines.join("\n\n")} links="show" />
-          {last && entry.asks.kind === "model" && nextStep(c).kind === "model" ? <ModelChoices busy={busy} onChoose={actions.onChoose} /> : null}
+          {last && entry.asks.kind === "model" && nextStep(c).kind === "model" ? <ModelChoices models={c.models} busy={busy} onChoose={actions.onChoose} /> : null}
         </Platform>
       );
     case "summary": {
@@ -133,6 +134,12 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
 }
 
 /**
+ * Over the API no model reads the owner's words (the compiler is not served, spec §4.1), so the
+ * figures-only reader does, in this page; the words reach the deployment only in the version created.
+ */
+export const API_NOTE = "Your deployment doesn't serve a model to read your words yet, so figures are read exactly as written, in this page. Nothing is sent until you create the version.";
+
+/**
  * The conversation (brief A0 to A2 and A5, DEC-476, DEC-477): the log, then the composer. The
  * platform's replies are text, drawn from Markdown with their links shown but never opened, since a
  * model wrote part of them (DEC-481); only deterministic parts carry buttons (PX-18). The composer
@@ -153,6 +160,7 @@ export function Chat({
   actions: ChatActions;
   initialText?: string | null;
 }) {
+  const { source } = useRuntime();
   const composer = useRef<ComposerHandle>(null);
   const log = useRef<HTMLDivElement>(null);
   const { entries } = conversation;
@@ -203,12 +211,12 @@ export function Chat({
         status={busy ? "Reading your message…" : ""}
         onSend={onSend}
         className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) bg-card px-(--page-x) pt-1 pb-3 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1rem)]"
-        note={
+        note={source === "api" ? API_NOTE : (
           <>
             {conversation.figuresOnly ? "Reading without the model now: figures only, exactly as written." : "A model reads your words; it can't set anything you didn't say."} Here a fixture stands
             in for it, and nothing leaves this page.
           </>
-        }
+        )}
       />
     </div>
   );

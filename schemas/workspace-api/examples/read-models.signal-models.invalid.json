@@ -1,0 +1,384 @@
+[
+  {
+    "label": "no models member",
+    "remove": [
+      "/models"
+    ]
+  },
+  {
+    "label": "a model without its id",
+    "remove": [
+      "/models/0/model_id"
+    ]
+  },
+  {
+    "label": "a model id outside the mandate's families",
+    "set": {
+      "/models/0/model_id": "custom.thing"
+    }
+  },
+  {
+    "label": "a model version that is not semantic",
+    "set": {
+      "/models/0/model_version": "v1"
+    }
+  },
+  {
+    "label": "a model without its content hash",
+    "remove": [
+      "/models/0/content_hash"
+    ]
+  },
+  {
+    "label": "a content hash that is not a content reference",
+    "set": {
+      "/models/0/content_hash": "cf"
+    }
+  },
+  {
+    "label": "a model without its parameters",
+    "remove": [
+      "/models/0/params"
+    ]
+  },
+  {
+    "label": "a parameter named twice",
+    "set": {
+      "/models/0/params": [
+        "fast_periods",
+        "fast_periods"
+      ]
+    }
+  },
+  {
+    "label": "a parameter with a default value",
+    "set": {
+      "/models/0/params": [
+        {
+          "name": "fast_periods",
+          "default": 5
+        }
+      ]
+    }
+  },
+  {
+    "label": "admits_instruments as text",
+    "set": {
+      "/models/0/admits_instruments": "no"
+    }
+  },
+  {
+    "label": "a model without its content",
+    "remove": [
+      "/models/0/content"
+    ]
+  },
+  {
+    "label": "a model without registered_at",
+    "remove": [
+      "/models/0/registered_at"
+    ]
+  },
+  {
+    "label": "a scorecard beside a model",
+    "set": {
+      "/models/0/scorecard": {
+        "hit_rate": "0.6"
+      }
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/owner": "01JBH3BTZ8K2M4N6P8R0S2T4V0"
+    }
+  },
+  {
+    "label": "a prompt template in the content",
+    "set": {
+      "/models/0/content/system_template": "You are a research agent."
+    }
+  },
+  {
+    "label": "a model identity in the content",
+    "set": {
+      "/models/0/content/identity": {
+        "provider": "x",
+        "model": "y"
+      }
+    }
+  },
+  {
+    "label": "source paths in the content",
+    "set": {
+      "/models/0/content/code": [
+        {
+          "path": "crates/x.rs",
+          "sha256": "00"
+        }
+      ]
+    }
+  },
+  {
+    "label": "content as text",
+    "set": {
+      "/models/0/content": "methodology"
+    }
+  },
+  {
+    "label": "an input declaration in the content",
+    "set": {
+      "/models/0/content/inputs": {
+        "bars": "daily_close"
+      }
+    }
+  },
+  {
+    "label": "an output declaration in the content",
+    "set": {
+      "/models/0/content/output": {
+        "long": {}
+      }
+    }
+  },
+  {
+    "label": "an unprojected member of params_schema",
+    "set": {
+      "/models/0/content/params_schema/properties": {}
+    }
+  },
+  {
+    "label": "an unprojected member of a parameter",
+    "set": {
+      "/models/0/content/params_schema/params/0/default": 5
+    }
+  },
+  {
+    "label": "a model without its version",
+    "remove": [
+      "/models/0/model_version"
+    ]
+  },
+  {
+    "label": "a model without admits_instruments",
+    "remove": [
+      "/models/0/admits_instruments"
+    ]
+  },
+  {
+    "label": "a parameter name off the mandate schema's key pattern",
+    "set": {
+      "/models/0/params": [
+        "Fast-Periods"
+      ]
+    }
+  },
+  {
+    "label": "more than 32 parameters",
+    "set": {
+      "/models/0/params": [
+        "p0",
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+        "p5",
+        "p6",
+        "p7",
+        "p8",
+        "p9",
+        "p10",
+        "p11",
+        "p12",
+        "p13",
+        "p14",
+        "p15",
+        "p16",
+        "p17",
+        "p18",
+        "p19",
+        "p20",
+        "p21",
+        "p22",
+        "p23",
+        "p24",
+        "p25",
+        "p26",
+        "p27",
+        "p28",
+        "p29",
+        "p30",
+        "p31",
+        "p32"
+      ]
+    }
+  },
+  {
+    "label": "content with more than 32 parameters",
+    "set": {
+      "/models/0/content/params_schema/params": [
+        {
+          "name": "p0"
+        },
+        {
+          "name": "p1"
+        },
+        {
+          "name": "p2"
+        },
+        {
+          "name": "p3"
+        },
+        {
+          "name": "p4"
+        },
+        {
+          "name": "p5"
+        },
+        {
+          "name": "p6"
+        },
+        {
+          "name": "p7"
+        },
+        {
+          "name": "p8"
+        },
+        {
+          "name": "p9"
+        },
+        {
+          "name": "p10"
+        },
+        {
+          "name": "p11"
+        },
+        {
+          "name": "p12"
+        },
+        {
+          "name": "p13"
+        },
+        {
+          "name": "p14"
+        },
+        {
+          "name": "p15"
+        },
+        {
+          "name": "p16"
+        },
+        {
+          "name": "p17"
+        },
+        {
+          "name": "p18"
+        },
+        {
+          "name": "p19"
+        },
+        {
+          "name": "p20"
+        },
+        {
+          "name": "p21"
+        },
+        {
+          "name": "p22"
+        },
+        {
+          "name": "p23"
+        },
+        {
+          "name": "p24"
+        },
+        {
+          "name": "p25"
+        },
+        {
+          "name": "p26"
+        },
+        {
+          "name": "p27"
+        },
+        {
+          "name": "p28"
+        },
+        {
+          "name": "p29"
+        },
+        {
+          "name": "p30"
+        },
+        {
+          "name": "p31"
+        },
+        {
+          "name": "p32"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a content parameter without its name",
+    "set": {
+      "/models/0/content/params_schema/params": [
+        {
+          "type": "integer",
+          "min": 1,
+          "max": 10
+        }
+      ]
+    }
+  },
+  {
+    "label": "a content parameter name off the key pattern",
+    "set": {
+      "/models/0/content/params_schema/params": [
+        {
+          "name": "Fast-Periods"
+        }
+      ]
+    }
+  },
+  {
+    "label": "content with more than 32 constraints",
+    "set": {
+      "/models/0/content/params_schema/constraints": [
+        "p0 < p1",
+        "p1 < p2",
+        "p2 < p3",
+        "p3 < p4",
+        "p4 < p5",
+        "p5 < p6",
+        "p6 < p7",
+        "p7 < p8",
+        "p8 < p9",
+        "p9 < p10",
+        "p10 < p11",
+        "p11 < p12",
+        "p12 < p13",
+        "p13 < p14",
+        "p14 < p15",
+        "p15 < p16",
+        "p16 < p17",
+        "p17 < p18",
+        "p18 < p19",
+        "p19 < p20",
+        "p20 < p21",
+        "p21 < p22",
+        "p22 < p23",
+        "p23 < p24",
+        "p24 < p25",
+        "p25 < p26",
+        "p26 < p27",
+        "p27 < p28",
+        "p28 < p29",
+        "p29 < p30",
+        "p30 < p31",
+        "p31 < p32",
+        "p32 < p33"
+      ]
+    }
+  }
+]

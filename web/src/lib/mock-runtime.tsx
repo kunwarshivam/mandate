@@ -8,9 +8,15 @@ import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange
 import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
 import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
-import type { ApiView } from "@/api/read-models";
+import type { ApiView, ReadPosition } from "@/api/read-models";
+import type { Enrolled, ListedPasskey } from "@/api/enrol";
+import type { CatalogueAnswer } from "@/api/catalogue";
+import type { JournalRecord } from "@/api/records";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
+import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
+import type { ConnectionDetail } from "@/api/connect";
+import type { Alerts } from "@/api/alerts";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -42,6 +48,14 @@ export interface Command {
   sentAt: Iso;
   recordedAt?: Iso;
   record?: CommandRecord;
+  /** Over the API, a resume or Stop waits for the owner's passkey before anything is sent (DEC-2140). */
+  awaitingPasskey?: boolean;
+  /** Why it was not sent, as the passkey check or the deployment said; a code, never shown as one. */
+  reason?: string;
+  /** Where the runtime settled it once its status was read (§5.5); `unconfirmed` when the reads ran out first. */
+  settled?: "applied" | "refused" | "ended" | "unconfirmed";
+  /** Over the API, a resume or Stop shows its effect only once the runtime applied it (DEC-2102 item 4). */
+  awaitsRuntime?: boolean;
 }
 
 /**
@@ -59,8 +73,12 @@ export interface ApprovalRecord {
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  /** `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason in `reason`. */
-  phase: "sent" | "recorded" | "decided" | "undelivered" | "unknown";
+  /**
+   * `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason
+   * in `reason`. `refused`: recorded, and the runtime refused it (`ApprovalResponded` refused), for
+   * the reason in `reason`; nothing was approved, and the answer is not sent again.
+   */
+  phase: "sent" | "recorded" | "decided" | "refused" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
   reason?: string;
@@ -81,6 +99,8 @@ export interface SetUpStep {
   recordedAt?: Iso;
   reason?: string;
   rule?: string;
+  /** Over the API, while the owner's passkey check is open: nothing has been sent to the deployment yet. */
+  awaitingPasskey?: boolean;
 }
 
 /** Step 1, `MandateVersionCreated` (spec §4.1): the version, its base, its classification against it, and its validation. */
@@ -168,6 +188,8 @@ export interface MandateChangeRequest {
 export interface Runtime {
   /** Where the workspace comes from (DEC-975): the recorded fixtures, or a workspace deployment's API. */
   source: "fixtures" | "api";
+  /** The workspace the API runtime reads, which its stream ids name (§4.8.1); `null` over the fixtures. */
+  workspaceId: string | null;
   /** The workspace API's read models as served (DEC-1096); `null` over the fixtures, and until the reads answer. */
   view: ApiView | null;
   ws: Workspace;
@@ -181,6 +203,31 @@ export interface Runtime {
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord, challenge?: StepUpChallenge | null) => void;
   /** Asks the deployment for a `cli_confirm` challenge (DEC-2103, DEC-2104); `null` over the fixtures, whose step-up is the passkey stand-in. */
   stepUp: ((action: StepUpAction) => Promise<ChallengeAnswer>) | null;
+  /** The Alpaca paper connect over the API (§4.5, DEC-2623); `null` over the fixtures, which connect nothing. */
+  connect: ConnectPort | null;
+  /** The owner's request to move an agent to real money (DEC-2134); `null` over the fixtures, which have no deployment to ask. */
+  realMoney: RealMoneyPort | null;
+  /** Whether the owner accepted a disclosure on the host, read from the control stream (DEC-2134); `null` over the fixtures. */
+  disclosures: DisclosurePort | null;
+  /** An agent's orders and own positions over the API (§4.7 D3, DEC-2111); `null` over the fixtures, whose screens show their own. */
+  activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
+  /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
+  holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
+  /** The registered instruments and signal models a version may name (§4.1, DEC-2136); `null` over the fixtures, whose set-up uses the fixture catalogue. */
+  catalogue: (() => Promise<CatalogueAnswer>) | null;
+  /**
+   * The owner's exit from one instrument (`POST /agents/{id}/exits`, §5.4, rule 13), followed to its
+   * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
+   */
+  ownerExit: ((agentId: string, instrument: string, record: CommandRecord, onRecorded: () => void) => Promise<ExitOutcome>) | null;
+  /** A stream's latest `count` records with their bodies, each checked against its hash (§4.8.1), oldest first; `null` over the fixtures. */
+  streamRecords: ((streamId: string, count: number) => Promise<RecordsAnswer>) | null;
+  /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
+  streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
+  /** The owner alerts about the workspace's agents and accounts (`GET /alerts`, DEC-2141); `null` over the fixtures. */
+  alerts: (() => Promise<AlertsAnswer>) | null;
+  /** The member's workspace passkeys (§3.6); `null` over the fixtures. */
+  passkeys: PasskeyPort | null;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -197,6 +244,69 @@ export interface Runtime {
 
 /** A challenge to show, with what the host command names; or why there is none, and nothing was asked of the host. */
 export type ChallengeAnswer = { ok: true; shown: ShownChallenge; workspaceId: string; principalId: string } | { ok: false; reason: string };
+
+/** Where the start sends the browser, or why it does not, with whether anything may have been recorded. */
+export type StartAnswer = { ok: true; authorizationUrl: string; connectionId: string } | { ok: false; reason: string; effect: "none" | "recorded" | "unknown" };
+
+export type ConnectionAnswer = { ok: true; connection: ConnectionDetail } | { ok: false; reason: string };
+
+/** What a request for real money came to: refused with the deployment's code, or not known. */
+export type RealMoneyAnswer = { outcome: "refused"; code: string } | { outcome: "unknown" };
+
+/** Whether a disclosure's version is accepted: `unknown` when the journal could not be read (a role without the audit read, or no answer). */
+export type Acceptance = "accepted" | "not_accepted" | "unknown";
+
+export interface DisclosurePort {
+  accepted: (document: string, version: string) => Promise<Acceptance>;
+  /** The workspace and the signed-in principal the host command names; `null` when the session does not say. */
+  owner: () => Promise<{ workspaceId: string; principalId: string } | null>;
+}
+
+/** The real-money request (`POST /agents/{id}/go-live`, DEC-2134). It is always refused until counsel signs off. */
+export interface RealMoneyPort {
+  request: (agentId: string) => Promise<RealMoneyAnswer>;
+}
+
+export interface ConnectPort {
+  /** A `cli_confirm` challenge of kind `connection`, bound to this workspace and the disclosure shown (DEC-2621 item 4, DEC-2125). */
+  challenge: () => Promise<ChallengeAnswer>;
+  /** `POST /connections/oauth/start` with the confirmed challenge's evidence, retried with the same key while its answer is lost (DEC-2623 item 8). */
+  start: (challenge: StepUpChallenge) => Promise<StartAnswer>;
+  /** `GET /connections/{id}` (DEC-2620). */
+  read: (connectionId: string) => Promise<ConnectionAnswer>;
+  /** `GET /connections`. */
+  list: () => Promise<{ ok: true; connections: ConnectionDetail[] } | { ok: false; reason: string }>;
+}
+
+/**
+ * Where an owner exit came to: settled by the agent's runtime (`applied`, `refused`, `ended`), recorded
+ * with no settled outcome read yet, not delivered with the refusal's code, or not known.
+ */
+export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+
+/** The owner alerts the API served (DEC-2141), or why not. */
+export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: string };
+
+/** A stream's records with their bodies, and whether they reach back to the stream's first record; or why they were not read. */
+export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boolean } | { ok: false; reason: string };
+
+/** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
+export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
+
+/** The member's own workspace passkeys over the API (§3.6): the list, and adding one. */
+export interface PasskeyPort {
+  list: () => Promise<{ ok: true; passkeys: ListedPasskey[] } | { ok: false; reason: string }>;
+  /** Registers a new passkey; `unknown` when the enrolment may have been recorded without an answer. */
+  enrol: () => Promise<{ ok: true; enrolled: Enrolled } | { ok: false; reason: string; effect: "none" | "unknown" }>;
+}
+
+/** Each list as served, or not reported: a list that cannot be read is never shown as empty. */
+export interface ActivityAnswer {
+  orders: { ok: true; account_ref: string | null; items: AgentOrder[] } | { ok: false; reason: string };
+  holdings: { ok: true; account_ref: string | null; items: AgentHolding[] } | { ok: false; reason: string };
+  /** The agent stream's latest events, newest last; `forbidden` for a role that may not read records (§4.8.1). */
+  journal: { ok: true; items: JournalLine[] } | { ok: false; reason: string };
+}
 
 export const RuntimeContext = createContext<Runtime | null>(null);
 
@@ -596,7 +706,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

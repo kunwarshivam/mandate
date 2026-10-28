@@ -29,7 +29,9 @@
 //! latest connect check passed for, and waits while that connection is still connecting
 //! ([`mandate_executord::serve::wait`], DEC-2346); only then does it take the account stream. Each pass ticks the
 //! lease, a lost or rotated credential drains the process, and the lease is given back when it
-//! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening, behind
+//! stops ([`credential`]). A pod that mounts the artifact store (`MANDATE_ARTIFACTS`) reads its
+//! deployments' ports from the journal and the store ([`mandate_executord::deployment`]); any
+//! other runs the fixture wiring ([`fixture`]), which admits no opening. Either way it runs behind
 //! journal rule 68's gate: until its account stream holds its establishment's copy, which each pass
 //! writes once it is due, no opening reaches the binding gate. A connection refused or revoked
 //! before it, or a record that does not read, is reported once and keeps the gate shut, never
@@ -55,11 +57,12 @@ use mandate_executord::credential::{
     paper_account, paper_broker, paper_settings, paper_transport, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
+use mandate_executord::deployment::{self, Production};
 use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::serve::{self, Edge, Waited, wait};
 use mandate_executord::{Broker, Config, fixture, launch, run};
-use mandate_journal::Environment;
+use mandate_journal::{Environment, StreamId};
 use mandate_process::probe::{self, Probe, Status};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
@@ -187,10 +190,35 @@ fn run(
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
     if fixture {
-        return serve(MemoryStore::default(), named, socket, &terminate, paper);
+        let store = MemoryStore::default();
+        let reader = store.clone();
+        let production = deployment::production(
+            |name| std::env::var(name).ok(),
+            || {
+                Ok(Box::new(move |stream: &StreamId, start| {
+                    reader.rows_from(stream, start)
+                }))
+            },
+        )?;
+        return serve(store, named, socket, &terminate, (paper, production));
     }
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
-    serve(PgStore::connect(&dsn)?, named, socket, &terminate, paper)
+    let production = deployment::production(
+        |name| std::env::var(name).ok(),
+        || {
+            let reader = PgStore::connect(&dsn)?;
+            Ok(Box::new(move |stream: &StreamId, start| {
+                reader.rows_from(stream, start)
+            }))
+        },
+    )?;
+    serve(
+        PgStore::connect(&dsn)?,
+        named,
+        socket,
+        &terminate,
+        (paper, production),
+    )
 }
 
 /// The broker the run names, before the process takes the account stream: the fixture, or
@@ -202,7 +230,7 @@ fn serve<S: Store>(
     named: &launch::Named,
     socket: &Path,
     terminate: &AtomicBool,
-    paper: Option<&VaultMount>,
+    (paper, production): (Option<&VaultMount>, Option<Production>),
 ) -> Result<u8, &'static str> {
     let config = Config {
         scope: scope(named),
@@ -215,7 +243,14 @@ fn serve<S: Store>(
     let terminated = || terminate.load(Ordering::SeqCst);
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
-        let run = run::fixture(AlpacaBroker::new(FixturePaper::filling(host_now()))?)?;
+        let run = run::fixture(
+            AlpacaBroker::new(FixturePaper::filling(host_now()).quoting(host_now))?,
+            &config.scope,
+        )?;
+        let run = match production {
+            Some(production) => run.deployed(&config.scope, production),
+            None => run.undeployed(),
+        };
         let edge = Edge {
             now: &host_now,
             tick: &mut |_| None,
@@ -233,10 +268,20 @@ fn serve<S: Store>(
         account: |token| paper_transport(token).and_then(paper_account).ok(),
         random: &mut OsRandom,
     };
-    exchanged_start(&mut store, &fixture::Ids, &config.scope, start, host_now())?;
+    exchanged_start(
+        &mut store,
+        &fixture::Ids::of(&config.scope),
+        &config.scope,
+        start,
+        host_now(),
+    )?;
     own_checked_connection(&store, &config.scope, &connection)?;
     let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
-    let run = run::paper(broker, TokioPause)?;
+    let run = run::paper(broker, TokioPause, &config.scope)?;
+    let run = match production {
+        Some(production) => run.deployed(&config.scope, production),
+        None => run.undeployed(),
+    };
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {
         now: &host_now,
@@ -340,7 +385,7 @@ fn checked_on<S: Store, B: Broker>(
     let checked = connect_check(
         &mut store,
         &mut broker,
-        &fixture::Ids,
+        &fixture::Ids::of(&scope(named)),
         &scope(named),
         connection,
         pii,

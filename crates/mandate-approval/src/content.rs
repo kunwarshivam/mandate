@@ -124,6 +124,11 @@ pub struct RequestContent {
     /// `None` when the builder produced no plan: the content object is then version 1's, with no
     /// `execution` member, and a grant hands no plan, which the executor's sink refuses.
     pub execution: Option<ExecutionTerms>,
+    /// The checks the dry run deferred to the binding gate, by `DecisionMade` version 3's names in
+    /// byte order (journal spec v0.92, rules 291 and 292; DEC-2515). Empty for version 1's and 2's
+    /// content, which has no such member; otherwise it is the content's last member, under the
+    /// hash, so a grant approves the order knowing which checks are still to run.
+    pub deferred_to_binding: Vec<String>,
 }
 
 /// SHA-256 of the canonical content object (journal spec §4). A response must repeat it (EI-14).
@@ -230,8 +235,19 @@ pub fn content_object(content: &RequestContent) -> Result<Value, ApprovalError> 
             ),
         ]
         .into_iter()
-        .chain(execution),
+        .chain(execution)
+        .chain(deferred_member(&content.deferred_to_binding)),
     )
+}
+
+/// The content's `deferred_to_binding` member, absent when nothing was deferred (DEC-2515).
+fn deferred_member(deferred: &[String]) -> Option<(&'static str, Value)> {
+    (!deferred.is_empty()).then(|| {
+        (
+            "deferred_to_binding",
+            Value::Array(deferred.iter().map(|name| text(name)).collect()),
+        )
+    })
 }
 
 /// The content object's `execution` member: the plan exactly as the builder produced it, in the

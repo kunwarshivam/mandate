@@ -51,7 +51,7 @@ use mandate_alpaca::{
     AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TokioPause, TradingTransport,
 };
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_canon::{Key, Object, Value, to_canonical};
+use mandate_canon::Value;
 use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
     AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
@@ -59,7 +59,7 @@ use mandate_journal::{
 use mandate_journal_pg::PgJournal;
 use mandate_mcp::{McpClient, Tools};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
-use mandate_num::{Price, Usd};
+use mandate_num::Usd;
 use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
@@ -81,7 +81,7 @@ use mandate_shell::{
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
-use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+use mandate_time::{ExchangeCalendar, UtcNanos};
 
 pub use ask::{BrokerAsk, QuoteRead};
 pub use connect_check::{
@@ -277,7 +277,9 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
 /// How a run that refused nothing ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// `Flat` or `Undecided`: nothing stored, handed on or sent (DEC-157 item 4).
+    /// `Flat` or `Undecided`: nothing stored, handed on or sent (DEC-157 item 4). A pinned version
+    /// whose `Flat` is an exit output (`quant.ma_crossover` 1.1.0) ends here too, so the R0
+    /// runner, which DEC-2390 item 2 leaves as it is, runs either version as it runs 1.0.0.
     NoOutput(Signal),
     /// The cycle ran: what it submitted, or the order it would have placed (boxed: it is large),
     /// beside the exportable evidence its report names (DEC-914 item 6).
@@ -679,9 +681,11 @@ pub fn run<P: Ports>(
     let output =
         match evaluate(&pin, &registry, &calendar, &daily, now).map_err(PaperError::Model)? {
             Evaluation::Long(output) => *output,
+            Evaluation::Exit(_) => return Ok(Outcome::NoOutput(Signal::Flat)),
             Evaluation::NoOutput(signal) => return Ok(Outcome::NoOutput(signal)),
         };
-    let bytes = closes_object(&daily.closes, instrument.asset_id.as_str())?;
+    let bytes = mandate_bars::closes_object(&daily.closes, instrument.asset_id.as_str())
+        .map_err(|_| absent(Stage::Journal, "the observation's members"))?;
     let data_ref = store.put_artifact(&bytes).map_err(|_| PaperError::Store)?;
     let observation = Observation {
         source: SOURCE.to_owned(),
@@ -1110,27 +1114,6 @@ fn deployed_document(
     Mandate::parse(&document).ok()
 }
 
-/// The closes the host read as DEC-846 item 3's canonical object: `[session, close]` pairs,
-/// oldest first, and the pinned asset id.
-fn closes_object(closes: &[(Date, Price)], asset_id: &str) -> Result<Vec<u8>, PaperError> {
-    let pair = |(day, close): &(Date, Price)| {
-        Value::Array(vec![
-            Value::Str(day.to_string()),
-            Value::Str(close.to_string()),
-        ])
-    };
-    let mut object = Object::new();
-    for (name, value) in [
-        ("closes", Value::Array(closes.iter().map(pair).collect())),
-        ("instrument_id", Value::Str(asset_id.to_owned())),
-    ] {
-        let key =
-            Key::new(name).map_err(|_| absent(Stage::Journal, "the observation's members"))?;
-        object.insert(key, value);
-    }
-    Ok(to_canonical(&Value::Object(object)))
-}
-
 /// The binary's ports (DEC-846 item 1, DEC-937 item 1): the control stream read from the
 /// Postgres journal at `journal`, the session of the broker the connection chose — the paper
 /// credentials from the environment with the Alpaca paper client, or the Robinhood login only a
@@ -1242,14 +1225,15 @@ impl<T: Tools + 'static> Session for Connected<T> {
     }
 }
 
-/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`,
-/// and the stream and environment it was journaled on (DEC-957).
+/// One verified row as the control-stream fold reads it: its `seq`, its body's `event_time`, type
+/// and body's `payload`, and the stream and environment it was journaled on (DEC-957).
 fn control_record(row: &StoredEvent) -> Result<ControlRecord, PaperError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| PaperError::Control)?;
     let payload = body.get("payload").ok_or(PaperError::Control)?.clone();
     let origin = Origin::of(&row.stream_id, &row.environment).ok_or(PaperError::Control)?;
     Ok(ControlRecord {
         seq: row.seq,
+        event_time: ControlRecord::event_time_of(&body),
         event_type: row.event_type.clone(),
         payload,
         origin,

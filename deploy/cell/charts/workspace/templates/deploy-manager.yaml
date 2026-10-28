@@ -82,6 +82,12 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- $args := list "run" "--probe" "/tmp/process.sock" -}}
 {{- if and (eq .p.name "runtime") .root.Values.runtime.research -}}
 {{- $args = concat $args (list "--research" .root.Values.runtime.research) -}}
+{{- /* A researching runtime of the workspace the model gateway serves, the one its manager
+`workspace` serves, calls models through it (DEC-2397 items 5 and 6, DEC-2070 item 5); any other
+keeps its in-process recorded fake. */ -}}
+{{- if and (index .root.Values.images "model-gateway") .root.Values.modelGateway.workspace (eq .workspace .root.Values.modelGateway.workspace) -}}
+{{- $args = concat $args (list "--gateway" "model-gateway:8080") -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .p.name "executor" -}}
 {{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}
@@ -114,12 +120,12 @@ and the namespace has no Pod Security label, so a ValidatingAdmissionPolicy (GA 
 in this namespace that is not shaped like one of its templates. Every other client and pod is outside
 it (`matchConditions`). The allowed images, Secrets, processes and egress labels are list and map
 literals built from the rendered templates and processes.json, never written by hand (the claims
-only those a template mounts read-only, the artifact store's for the runtime); each is valid
+only those a template mounts read-only, the artifact stores' for the runtime); each is valid
 JSON as well as CEL, so the invariant tests read them back. It fails closed: an error evaluating it
 refuses the pod.
 */ -}}
 {{- define "mandate.deployManagerAdmissionName" -}}
-{{ printf "%s-%s-deploy-manager-pods" .root.Release.Namespace .root.Release.Name }}
+{{ printf "%s-%s-%s-pods" .root.Release.Namespace .root.Release.Name .p.name }}
 {{- end -}}
 {{- /* CEL: predicate `.` holds for every container and every init container (`c`). */ -}}
 {{- define "mandate.everyContainer" -}}
@@ -303,7 +309,7 @@ Which connection is open is the journal's, which CEL cannot read: the manager cr
 only from its record. It fails closed.
 */ -}}
 {{- define "mandate.deployManagerAccountsName" -}}
-{{ printf "%s-%s-deploy-manager-accounts" .root.Release.Namespace .root.Release.Name }}
+{{ printf "%s-%s-%s-accounts" .root.Release.Namespace .root.Release.Name .p.name }}
 {{- end -}}
 {{- define "mandate.deployManagerAccounts" -}}
 apiVersion: admissionregistration.k8s.io/v1
@@ -370,6 +376,15 @@ spec:
       matchLabels:
         kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
 {{- end -}}
+{{- /* The workspace manager `p` serves: the hosted one for the first, `deployManager.researchWorkspace`
+for the second (DEC-2070). */ -}}
+{{- define "mandate.managedWorkspace" -}}
+{{- if eq .p.name "deploy-manager-research" -}}
+{{- .root.Values.deployManager.researchWorkspace -}}
+{{- else -}}
+{{- required "api.workspace, the hosted workspace's ULID whose control stream the manager reads, is required with images.deploy-manager" .root.Values.api.workspace -}}
+{{- end -}}
+{{- end -}}
 {{- define "mandate.deployManager" -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -385,7 +400,7 @@ spec:
     matchLabels:
       {{- include "mandate.selector" . | nindent 6 }}
   template:
-    {{- $args := list "run" "--workspace" (required "api.workspace, the hosted workspace's ULID whose control stream the manager reads, is required with images.deploy-manager" .root.Values.api.workspace) "--probe" "/tmp/process.sock" "--templates" "/etc/mandate/templates" }}
+    {{- $args := list "run" "--workspace" (include "mandate.managedWorkspace" .) "--probe" "/tmp/process.sock" "--templates" "/etc/mandate/templates" }}
     {{- $mounts := "- {name: templates, mountPath: /etc/mandate/templates, readOnly: true}" }}
     {{- $probe := dict "livez" (list "/mandate-deployd" "probe" "livez" "--probe" "/tmp/process.sock") "readyz" (list "/mandate-deployd" "probe" "readyz" "--probe" "/tmp/process.sock") }}
     {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "mounts" $mounts "probe" $probe) }}
@@ -395,13 +410,13 @@ spec:
 {{- end -}}
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
-{{- if eq .name "deploy-manager" }}
-{{- $manager := . }}
+{{- if has .name (list "deploy-manager" "deploy-manager-research") }}
+{{- $served := include "mandate.managedWorkspace" (dict "root" $root "p" .) }}
 {{- $templates := dict }}
 {{- $egress := dict }}
 {{- range (include "mandate.processes" $root | fromJsonArray) }}
-{{- if and (eq (.started_by | default "") $manager.name) (index $root.Values.images .image) }}
-{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" .)) }}
+{{- if and (eq (.started_by | default "") "deploy-manager") (index $root.Values.images .image) }}
+{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" . "workspace" $served)) }}
 {{- $labels := list }}
 {{- range .egress }}
 {{- $labels = append $labels (printf "mandate.dev/egress-%s" .) }}

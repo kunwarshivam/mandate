@@ -135,7 +135,7 @@ describe("acting from a message", () => {
     expect(lines(interpret("pause it", ctx(AGENT_IDS.swing, "paused")))).toEqual(["Agent 2 is already paused."]);
   });
 
-  it("opens Stop for stopping, the kill switch and resuming, which need a passkey", () => {
+  it("opens Stop for stopping, the kill switch and resuming: Stop and resume need a passkey, the kill switch none (DEC-2410)", () => {
     expect(interpret("stop agent 2", ctx())).toEqual({ kind: "stop", agentId: AGENT_IDS.swing, resume: false });
     expect(interpret("kill everything", ctx())).toEqual({ kind: "stop", agentId: null, resume: false });
     expect(interpret("resume it", ctx(AGENT_IDS.swing, "paused"))).toEqual({ kind: "stop", agentId: AGENT_IDS.swing, resume: true });

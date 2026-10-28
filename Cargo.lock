@@ -636,9 +636,9 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.6"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0"
+checksum = "9c035cb64cba03dad2fb921f3e218785e8cf9a41790da5eb3a1400f62fa2be11"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -680,9 +680,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0"
+checksum = "fe3e9d21d39e6f39ff46e03d5b621424f88ee23d8a1672c6bfc9ccc7f2da4f6a"
 dependencies = [
  "cmov",
  "subtle",
@@ -1689,11 +1689,13 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "mandate-accounting",
  "mandate-api",
  "mandate-artifacts-fs",
  "mandate-authn",
  "mandate-canon",
  "mandate-connections",
+ "mandate-gate-context",
  "mandate-identity",
  "mandate-identity-seal",
  "mandate-identity-testkit",
@@ -1794,6 +1796,18 @@ dependencies = [
  "mandate-spec",
  "mandate-time",
  "mandate-version-backtest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-bars"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-liquidity",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-time",
  "thiserror",
 ]
 
@@ -1904,24 +1918,51 @@ dependencies = [
 name = "mandate-daemon"
 version = "0.0.0"
 dependencies = [
+ "mandate-accounting",
  "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-builder",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gate-context",
  "mandate-gateway",
+ "mandate-identity",
  "mandate-journal",
- "mandate-journal-pg",
+ "mandate-marketdata",
  "mandate-num",
+ "mandate-ports",
  "mandate-process",
  "mandate-research",
  "mandate-research-driver",
  "mandate-research-run",
+ "mandate-risk",
  "mandate-runtime",
  "mandate-spec",
  "mandate-store",
  "mandate-time",
  "proptest",
  "serde_json",
+]
+
+[[package]]
+name = "mandate-datad"
+version = "0.0.0"
+dependencies = [
+ "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-liquidity",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-process",
+ "mandate-time",
+ "mandate-vault",
+ "proptest",
+ "secrecy",
  "sqlx",
+ "thiserror",
  "tokio",
 ]
 
@@ -1980,6 +2021,7 @@ dependencies = [
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-notify",
+ "mandate-process",
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
@@ -2025,8 +2067,11 @@ dependencies = [
  "mandate-approval",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gate-context",
  "mandate-journal",
+ "mandate-notify",
  "mandate-num",
+ "mandate-research",
  "mandate-risk",
  "mandate-spec",
  "mandate-time",
@@ -2041,15 +2086,25 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
+ "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
  "mandate-connections",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-context",
+ "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-marketdata",
+ "mandate-mcp",
  "mandate-num",
+ "mandate-ports",
  "mandate-process",
+ "mandate-research",
  "mandate-risk",
+ "mandate-robinhood",
+ "mandate-spec",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
@@ -2064,8 +2119,31 @@ dependencies = [
 name = "mandate-gate-context"
 version = "0.0.0"
 dependencies = [
+ "mandate-accounting",
  "mandate-canon",
+ "mandate-journal",
  "mandate-num",
+ "mandate-risk",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-gate-inputs"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-gate-context",
+ "mandate-identity",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-runtime",
+ "mandate-spec",
  "mandate-time",
  "proptest",
  "thiserror",
@@ -2101,12 +2179,16 @@ dependencies = [
 name = "mandate-gatewayd"
 version = "0.0.0"
 dependencies = [
+ "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-connections",
  "mandate-gateway",
+ "mandate-gateway-http",
  "mandate-journal",
  "mandate-num",
+ "mandate-process",
  "mandate-research",
+ "mandate-research-run",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
@@ -2290,6 +2372,7 @@ dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
  "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
  "mandate-connections",
  "mandate-domain",
@@ -2548,6 +2631,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-runtime-models"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-canon",
+ "mandate-daemon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-marketdata",
+ "mandate-modelhost",
+ "mandate-process",
+ "mandate-research",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-scheduler"
 version = "0.0.0"
 dependencies = [
@@ -2568,10 +2677,12 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
+ "mandate-bars",
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-liquidity",

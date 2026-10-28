@@ -53,9 +53,12 @@ mod call;
 mod dispatch;
 mod entry;
 mod error;
+pub mod gate;
 mod item;
+pub mod live;
 mod output;
 mod plan;
+pub mod plane;
 mod ports;
 pub mod recorded;
 mod retrieve;
@@ -66,7 +69,7 @@ pub use backend::{
     Selection, recorded_reply, research_gateway, select,
 };
 pub use call::{
-    Answer, CallContext, CallInputs, CallPlan, MemoryThesis, ResearchCall, Treatment,
+    Answer, CallContext, CallInputs, CallPlan, MemoryThesis, ModelCalls, ResearchCall, Treatment,
     UntrustedItem, call, render_inputs, treatment,
 };
 pub use dispatch::{Dispatch, DispatchScope, Dispatched, dispatch};

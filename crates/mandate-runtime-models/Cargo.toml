@@ -1,0 +1,39 @@
+[package]
+name = "mandate-runtime-models"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The deployed runtime's model composer and process binary: mandate-modelhost behind mandate-daemon's Models port, over the confirmed mandate's pins, the model registrations and the stored daily closes (DEC-2383 item 7, DEC-503 item 2)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mandate-daemon"
+path = "src/main.rs"
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-artifacts-fs.workspace = true
+mandate-bars.workspace = true
+mandate-canon.workspace = true
+mandate-daemon.workspace = true
+mandate-domain.workspace = true
+mandate-journal.workspace = true
+mandate-modelhost.workspace = true
+mandate-process.workspace = true
+mandate-research.workspace = true
+mandate-runtime.workspace = true
+mandate-spec.workspace = true
+mandate-store.workspace = true
+mandate-time.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
+
+[dev-dependencies]
+mandate-journal-pg.workspace = true
+mandate-marketdata.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

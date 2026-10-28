@@ -15,6 +15,35 @@ runtime:
   # The recorded research bundle the interim runtime image carries (DEC-2246). Every runtime pod the
   # manager starts is handed it; only an agent whose confirmed envelope researches uses it.
   research: /usr/local/share/mandate/research
+# The model-gateway service, when `cargo xtask cell up` names its image (E21-62): it serves the
+# hosted workspace until the demo points it at the research agent's own (`cargo xtask cell demo`),
+# over the recorded bundle its image carries. Its budgets are the recorded bundle's own caps
+# (`deploy/cell/demo/research/research.json`), over a recording that reaches no provider and spends
+# nothing (DEC-2326 item 3).
+modelGateway:
+  workspace: 01KDEM0000000000000000000W
+  deployment: cell-local
+  workspaceMonthlyUsd: "50"
+  deploymentMonthlyUsd: "20"
+# The data process's recorded series, when `cargo xtask cell up` names its image: the demo's SPY,
+# under its Alpaca asset id, closing 150 on 2026-10-23, and QQQ (`demo/web-instrument.json`, a test
+# fixture now), closing 140, each 0.1 higher each session after, so a whole share fits the demo
+# mandate's 1000 USD order cap and the crossover's fast mean is above its slow one.
+data:
+  instruments:
+    - symbol: SPY
+      assetId: b28f4066-5c6d-479b-a2af-85dc1a8f16fb
+      anchor: 2026-10-23=150
+    - symbol: QQQ
+      assetId: eb82ffb0-efd6-4f4e-9307-8fead28e04f6
+      anchor: 2026-10-23=140
+# The notification dispatcher, when `cargo xtask cell up` names its image, which also sets its
+# binary's digest as `dispatcher.build`: the demo owner as its one email recipient, mailed only
+# through the recorded transport, which sends nothing (DEC-2516).
+dispatcher:
+  recipient: demo_owner
+  build: ""
+  subjects: []
 # The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
 # (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the
 # pod's loopback, which lane SI adds: until then no key set is fetched and every sign-in is refused,

@@ -1,7 +1,9 @@
 //! The event catalogue (journal spec §9): which streams may hold each event type, and the
 //! `config_refs` keys each requires at append.
 
-use crate::StreamType::{self, Account, Agent, Control, DeploymentMeter, Meter, Notice, Scheduler};
+use crate::StreamType::{
+    self, Account, Agent, Control, DeploymentMeter, Meter, News, Notice, Scheduler,
+};
 
 pub(crate) const FEE: &str = "fee_config";
 pub(crate) const CAL: &str = "trading_calendar";
@@ -35,10 +37,11 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 135] = [
+pub(crate) const EVENT_TYPES: [&str; 139] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
+    "NewsItemStored",
     "TradingDayStarted",
     "ClockAdvanced",
     "KillSwitchActivated",
@@ -46,6 +49,8 @@ pub(crate) const EVENT_TYPES: [&str; 135] = [
     "OwnerAcknowledgmentRequested",
     "OwnerCommandRefused",
     "StepUpConfirmed",
+    "RealMoneyGateChanged",
+    "RealMoneyRefused",
     "IntentReceived",
     "GateDecided",
     "FillApplied",
@@ -89,6 +94,7 @@ pub(crate) const EVENT_TYPES: [&str; 135] = [
     "ThesisProposed",
     "ThesisRevised",
     "ThesisInvalidated",
+    "RetirementHeld",
     "RunStarted",
     "ToolCallRecorded",
     "ToolResultRecorded",
@@ -190,15 +196,18 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
                 Notice,
                 Meter,
                 DeploymentMeter,
+                News,
             ],
             NONE,
         ),
         "MeterReserved" | "MeterSettled" => entry(&[Meter, DeploymentMeter], NONE),
+        "NewsItemStored" => entry(&[News], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
         "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" => entry(&[Account, Control], NONE),
         "OwnerCommandRefused" => entry(&[Account, Agent], NONE),
         "StepUpConfirmed" => entry(CONTROL, NONE),
+        "RealMoneyGateChanged" | "RealMoneyRefused" => entry(CONTROL, NONE),
 
         "IntentReceived" => entry(ACCOUNT, &[MAN]),
         "GateDecided" => entry(ACCOUNT, &[FEE, CAL, INS, RULE, MAN]),
@@ -238,7 +247,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
 
         "ModelInvocationRecorded" => entry(&[Agent, Control], &[MOD]),
         "ThesisProposed" | "ThesisRevised" => entry(AGENT, &[MAN, MOD]),
-        "ThesisInvalidated" => entry(AGENT, &[MAN]),
+        "ThesisInvalidated" | "RetirementHeld" => entry(AGENT, &[MAN]),
         "RunStarted" | "ToolCallRecorded" | "ToolResultRecorded" | "RunSummaryRecorded"
         | "RunEnded" => entry(AGENT, &[MOD]),
         "ModelOutputRecorded"
@@ -325,6 +334,7 @@ pub(crate) fn required_refs(
     match (event_type, schema_version) {
         ("ModelOutputRecorded", 2) => &[MAN, REG],
         ("DecisionMade", 2) => &[MAN, POL, REG],
+        ("FillApplied", 2) => &[FEE, CAL, SET],
         _ => historical,
     }
 }

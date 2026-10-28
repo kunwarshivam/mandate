@@ -233,16 +233,21 @@ impl TestIssuer {
     }
 }
 
-/// A clock the test moves.
-pub struct ManualClock(pub std::sync::Mutex<i64>);
+/// A clock the test moves: a Unix second, and the nanoseconds into it (0 unless set).
+pub struct ManualClock(pub std::sync::Mutex<i64>, pub std::sync::Mutex<u32>);
 
 impl ManualClock {
     pub fn at(secs: i64) -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self(std::sync::Mutex::new(secs)))
+        std::sync::Arc::new(Self(std::sync::Mutex::new(secs), std::sync::Mutex::new(0)))
     }
 
     pub fn set(&self, secs: i64) {
         *self.0.lock().expect("unpoisoned") = secs;
+    }
+
+    /// Moves the clock `nanos` into its current second.
+    pub fn set_nanos(&self, nanos: u32) {
+        *self.1.lock().expect("unpoisoned") = nanos;
     }
 
     pub fn secs(&self) -> i64 {
@@ -252,7 +257,7 @@ impl ManualClock {
 
 impl mandate_api_server::clock::Clock for ManualClock {
     fn now(&self) -> Option<mandate_time::UtcNanos> {
-        mandate_time::UtcNanos::from_parts(self.secs(), 0).ok()
+        mandate_time::UtcNanos::from_parts(self.secs(), *self.1.lock().expect("unpoisoned")).ok()
     }
 }
 
@@ -419,6 +424,26 @@ impl mandate_api_server::journal::Journal for MemJournal {
         })
     }
 
+    fn rows_from<'a>(
+        &'a self,
+        stream: &'a str,
+        start: mandate_journal::TrustedStart,
+    ) -> mandate_api_server::journal::Rows<'a> {
+        let failing = self.failing.lock().expect("unpoisoned").contains(stream);
+        let rows: Vec<_> = self
+            .rows_of(stream)
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        Box::pin(async move {
+            if failing {
+                Err(mandate_api_server::journal::JournalUnavailable)
+            } else {
+                Ok(rows)
+            }
+        })
+    }
+
     fn take_ownership<'a>(
         &'a self,
         stream: &'a str,
@@ -522,6 +547,44 @@ fn edited(
     mandate_canon::to_canonical(&value)
 }
 
+/// The checks a real `append` runs on a batch before it reads the stream (journal spec §5.1, as
+/// `mandate-journal`'s `MemoryJournal` and `mandate-journal-pg` run them): every draft parses,
+/// names `stream`, and has its own event id, then the batch rules ([`mandate_journal::check_batch`],
+/// rule 253 among them). `None` when the batch passes, so a route whose batch the real journal
+/// refuses is refused here too ([DEC-2131] item 5.3).
+///
+/// [DEC-2131]: ../../../../docs/project/decisions/DEC-2131.md
+fn checked(stream: &str, drafts: &[&[u8]]) -> Option<mandate_journal::AppendOutcome> {
+    use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason};
+    let invalid = |draft: usize, reason: InvalidReason, path: &str| AppendOutcome::Invalid {
+        draft,
+        error: Invalid {
+            reason,
+            path: path.to_owned(),
+        },
+    };
+    if drafts.is_empty() {
+        return Some(invalid(0, InvalidReason::EmptyBatch, ""));
+    }
+    let mut batch: Vec<Draft> = Vec::with_capacity(drafts.len());
+    for (i, bytes) in drafts.iter().enumerate() {
+        let draft = match Draft::parse(bytes) {
+            Ok(draft) => draft,
+            Err(error) => return Some(AppendOutcome::Invalid { draft: i, error }),
+        };
+        if draft.stream_id().as_str() != stream {
+            return Some(invalid(i, InvalidReason::StreamMismatch, "stream_id"));
+        }
+        if batch.iter().any(|d| d.event_id() == draft.event_id()) {
+            return Some(invalid(i, InvalidReason::DuplicateEventId, "event_id"));
+        }
+        batch.push(draft);
+    }
+    mandate_journal::check_batch(&batch)
+        .err()
+        .map(|(draft, error)| AppendOutcome::Invalid { draft, error })
+}
+
 impl MemJournal {
     /// Journal spec §5.1's order: idempotency by event id, then the epoch, then the head.
     fn protocol(
@@ -533,6 +596,9 @@ impl MemJournal {
         drafts: &[&[u8]],
     ) -> mandate_journal::AppendOutcome {
         use mandate_journal::AppendOutcome;
+        if let Some(refused) = checked(stream, drafts) {
+            return refused;
+        }
         let draft = drafts.first().copied().expect("a draft");
         let value = mandate_canon::parse(draft).expect("a JSON draft");
         let id = value

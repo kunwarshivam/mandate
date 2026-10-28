@@ -49,7 +49,7 @@ while a reducing purpose passes it.
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
   `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
-- **Tests:** `crates/mandate-risk/tests/hand.rs` (every MC-G and MC-F figure recomputed from the
+- **Tests:** `crates/mandate-risk/tests/deferring.rs` (the advisory `evaluate_deferring` of DEC-2378 item 11: with nothing deferred it is `evaluate`; each deferred check is skipped and named, and decides once not deferred; a check not deferred still denies; an exit defers nothing; DEC-2388 item 8's ten unseen parts are never skipped, still refuse with the binding reason, and read `Deferred` on their check, never `Passed`), and `xtask/src/deferring.rs` (the lint job's deferring guard: no crate but `mandate-risk`, `mandate-ports`, `mandate-daemon` and the guard itself names it, under any `allow`; DEC-2378 item 11 condition 3); `crates/mandate-risk/tests/hand.rs` (every MC-G and MC-F figure recomputed from the
   spec, the mode rule, the `Unknown`-order rule, the account states, the eligibility floor, and a
   check that every reason code the gate can emit is registered in the founder-owned case file),
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"

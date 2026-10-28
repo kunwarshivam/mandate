@@ -11,10 +11,13 @@
 //! | Runtime | — | — | — |
 //! | Secret import | — | the client secret, the platform's own secrets | — |
 //! | Model gateway | the model provider's key | — | — |
+//! | News reader | the news data key | — | — |
+//! | Bars reader | the news data key | — | — |
 //! | Email sender | the email credential | — | — |
 //!
-//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
-//! written only by the secret import; none is ever deleted, and a rotation writes over it.
+//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity,
+//! except the data key, which the news reader and the bars reader both read (DEC-2283 item 2);
+//! each is written only by the secret import, none is ever deleted, and a rotation writes over it.
 
 use mandate_connections::record::{AccountRef, ConnectionId};
 
@@ -39,6 +42,11 @@ pub enum Identity {
     SecretImport,
     /// The model gateway: reads the model provider's API key (DEC-2020).
     ModelGateway,
+    /// The Alpaca news reader: reads its own paper data key, and nothing else (DEC-2277).
+    NewsReader,
+    /// The workspace data process's IEX bars source: reads the same paper data key, and nothing
+    /// else (DEC-2283 item 2, the founder's F2).
+    BarsReader,
     /// The process that sends the platform's email: reads the email credential (DEC-2020).
     EmailSender,
     /// The role provisioner: makes each OAuth connect's two Kubernetes-auth roles and removes the
@@ -81,25 +89,34 @@ pub enum PlatformSecret {
     ModelProviderKey,
     /// The credential the platform's email is sent with.
     EmailCredential,
+    /// The platform's data-only key id and secret, of a paper account with no strategy, read for
+    /// news (DEC-2277) and for the data process's IEX bars (DEC-2283 item 2), never a trading
+    /// connection's token.
+    NewsDataKey,
 }
 
 impl PlatformSecret {
-    pub const ALL: [Self; 2] = [Self::ModelProviderKey, Self::EmailCredential];
+    pub const ALL: [Self; 3] = [
+        Self::ModelProviderKey,
+        Self::EmailCredential,
+        Self::NewsDataKey,
+    ];
 }
 
-/// Who holds a [`PlatformSecret`]: the one identity that reads it and the one that writes it.
-/// No identity deletes it; a rotation writes over it.
+/// Who holds a [`PlatformSecret`]: the identities that read it and the one that writes it. No
+/// identity deletes it; a rotation writes over it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Holders {
-    pub reads: Identity,
+    pub reads: Vec<Identity>,
     pub writes: Identity,
 }
 
-/// The holders of `secret` (DEC-2020 item 2).
+/// The holders of `secret` (DEC-2020 item 2, DEC-2283 item 2).
 pub fn holders(secret: PlatformSecret) -> Result<Holders, SourceError> {
     let reads = match secret {
-        PlatformSecret::ModelProviderKey => Identity::ModelGateway,
-        PlatformSecret::EmailCredential => Identity::EmailSender,
+        PlatformSecret::ModelProviderKey => vec![Identity::ModelGateway],
+        PlatformSecret::EmailCredential => vec![Identity::EmailSender],
+        PlatformSecret::NewsDataKey => vec![Identity::NewsReader, Identity::BarsReader],
     };
     Ok(Holders {
         reads,
@@ -153,7 +170,7 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
             SecretPath::AccountId(c, _) | SecretPath::Fingerprint(c, _),
         ) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
-            holders(*secret).is_ok_and(|h| h.reads == *identity)
+            holders(*secret).is_ok_and(|h| h.reads.contains(identity))
         }
         (identity, Access::Write, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.writes == *identity)
@@ -205,6 +222,8 @@ pub fn role_name(identity: &Identity) -> String {
         Identity::Runtime => "runtime".to_owned(),
         Identity::SecretImport => "secret-import".to_owned(),
         Identity::ModelGateway => "model-gateway".to_owned(),
+        Identity::NewsReader => "news-reader".to_owned(),
+        Identity::BarsReader => "bars-reader".to_owned(),
         Identity::EmailSender => "email-sender".to_owned(),
         Identity::Provisioner => "provisioner".to_owned(),
     }
@@ -250,6 +269,7 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
+        SecretPath::Platform(PlatformSecret::NewsDataKey) => "platform/news-data-key".to_owned(),
         SecretPath::Fingerprint(c, account) => format!(
             "personal/fingerprints/{}/{}",
             connection_segment(c)?,

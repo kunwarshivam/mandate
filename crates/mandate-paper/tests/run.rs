@@ -701,6 +701,7 @@ fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
     let (event_type, payload) = (event_type.to_owned(), json(payload));
     records.push(ControlRecord {
         seq,
+        event_time: None,
         event_type,
         payload,
         origin: Origin {
@@ -924,7 +925,7 @@ fn the_shipping_adapter_selects_no_product_value() {
     let source = include_str!("../src/lib.rs");
     let body = source
         .split_once("pub fn run<P: Ports>(")
-        .and_then(|(_, after)| after.split_once("\n}\n\n/// The closes the host read"))
+        .and_then(|(_, after)| after.split_once("\n}\n\n/// The binary's ports"))
         .map(|(body, _)| body)
         .expect("the run function's body is bounded by its doc successor");
     for forbidden in [
@@ -1179,11 +1180,13 @@ fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
 }
 
 /// #1369 review, DEC-938 item 1: a `FILL` naming a ticker the run never registered is external
-/// activity, whose `ExternalActivityIngested` has no registered schema. The journal refuses the
-/// batch, so the run stops at the journal, and nothing further reaches the broker: no request
-/// follows the activity read that found the fill.
+/// activity. Since DEC-2817 the journal accepts its batch: the `FillApplied` names the run's fee
+/// configuration and calendar and no instrument snapshot (journal spec §9.5 rule 300). The fill is
+/// external activity all the same, so the reconciliation that found it does not pass and the run
+/// stops there, and nothing further reaches the broker: no request follows the activity read that
+/// found the fill.
 #[test]
-fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_journal() {
+fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_reconciliation() {
     let mut scene = Scene::new("unregistered-fill", 231..256);
     scene.ports.broker.fills = true;
     scene.ports.broker.fill_symbol = Some("QQQ");
@@ -1192,10 +1195,7 @@ fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_journal() {
     assert!(
         matches!(
             outcome,
-            Err(PaperError::Shell(ShellError::Refused {
-                stage: mandate_shell::Stage::Journal,
-                ..
-            }))
+            Err(PaperError::Shell(ShellError::ReconciliationMismatch))
         ),
         "{}",
         refused_at(&outcome)

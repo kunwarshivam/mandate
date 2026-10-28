@@ -12,21 +12,24 @@ use mandate_gateway::meter::SharedMeter;
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
-    AdmissionChange, AdmissionDecision, AdmissionFacts, AssetClass, AssetId, AutonomyDecision,
-    GroupId, LineageId, LineageState, MandateEnvelope, PolicyOverlay, RefusalReason,
-    ResearchEnvelope, SourceAllowlist, ThesisId, UniverseEntry, ValidatedMandate, WorkingUniverse,
-    expire_theses,
+    AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
+    PolicyOverlay, ReplayError, ResearchEnvelope, SourceAllowlist, ThesisRecord, ValidatedMandate,
+    WorkingUniverse, replay_theses,
 };
-use mandate_research_run::{InstrumentFact, Symbol};
-use mandate_runtime::{ActiveThesis, JournalCatalog, Preconditions, RiskClock, RuntimeState};
+use mandate_research_run::{InstrumentFact, ItemKind, RetrievedItem, Symbol};
+use mandate_runtime::{
+    ActiveThesis, EventTriggers, JournalCatalog, Preconditions, RiskClock, RuntimeState,
+};
+use mandate_spec::Mandate;
+use mandate_spec::document::EventTrigger;
 use mandate_spec::risk::risk_day;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
 use crate::deployment;
 use crate::meter::CellMeter;
-use crate::recorded::Bundle;
-use crate::runtime::{ResearchParts, ResearchSource};
+use crate::recorded::{Bundle, FeedItem};
+use crate::runtime::{ContextUnread, ResearchParts, ResearchSource};
 
 /// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
 /// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
@@ -142,79 +145,29 @@ pub fn fold_research(
     instruments: &[InstrumentFact],
 ) -> Result<ResearchFold, FoldError> {
     let unreadable = |member| FoldError::Unreadable { member };
-    let mut lineages = LineageState::default();
-    let mut entries: BTreeMap<AssetId, UniverseEntry> = BTreeMap::new();
-    for row in agent {
-        let invalidation = row.event_type == "ThesisInvalidated";
-        if !invalidation && !matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised") {
-            continue;
-        }
-        let body = parse(&row.body).map_err(|_| unreadable("payload"))?;
-        let payload = body.get("payload").ok_or(unreadable("payload"))?;
-        let text = |member| {
-            payload
-                .get(member)
-                .and_then(Value::as_str)
-                .ok_or(unreadable(member))
-        };
-        let thesis = ThesisId::new(text("thesis_id")?).map_err(|_| unreadable("thesis_id"))?;
-        if invalidation {
-            for entry in entries.values_mut() {
-                if entry.thesis_id == thesis {
-                    entry.invalidated = true;
-                }
-            }
-            continue;
-        }
-        let lineage = LineageId::new(text("lineage_id")?).map_err(|_| unreadable("lineage_id"))?;
-        let instrument =
-            AssetId::new(text("instrument_id")?).map_err(|_| unreadable("instrument_id"))?;
-        let revision = payload
-            .get("revision")
-            .and_then(Value::as_int)
-            .and_then(|n| u32::try_from(n).ok())
-            .ok_or(unreadable("revision"))?;
-        let expires_at =
-            UtcNanos::parse_rfc3339(text("expires_at")?).map_err(|_| unreadable("expires_at"))?;
-        let admitted = match payload.get("admitted") {
-            Some(Value::Bool(admitted)) => *admitted,
-            _ => return Err(unreadable("admitted")),
-        };
-        let decision = match (admitted, payload.get("reason")) {
-            (true, Some(Value::Null)) => AdmissionDecision::Admitted {
-                change: AdmissionChange::Admitted,
-            },
-            (false, Some(Value::Str(code))) => AdmissionDecision::Refused {
-                reason: RefusalReason::parse(code).map_err(|_| unreadable("reason"))?,
-            },
-            _ => return Err(unreadable("reason")),
-        };
-        lineages.replay(&lineage, revision, &instrument, decision);
-        if admitted {
-            entries.insert(
-                instrument.clone(),
-                UniverseEntry {
-                    instrument,
-                    thesis_id: thesis,
-                    lineage_id: lineage,
-                    revision,
-                    expires_at,
-                    invalidated: false,
-                },
-            );
-        }
-    }
-    let entries: Vec<UniverseEntry> = entries.into_values().collect();
-    let expiry = expire_theses(at, &entries, &lineages).map_err(|_| unreadable("expires_at"))?;
-    let WorkingUniverse::Known {
-        instruments: kept, ..
-    } = &expiry.universe
-    else {
-        return Err(unreadable("expires_at"));
-    };
-    let active = entries
+    let records = agent
         .iter()
-        .filter(|entry| kept.contains(&entry.instrument))
+        .filter(|row| {
+            matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            )
+        })
+        .map(|row| {
+            let payload = parse(&row.body)
+                .ok()
+                .and_then(|body| body.get("payload").cloned())
+                .ok_or(ReplayError::Unreadable { member: "payload" })?;
+            Ok(ThesisRecord {
+                event_type: row.event_type.as_str(),
+                payload,
+            })
+        });
+    let replayed = replay_theses(records, at)
+        .map_err(|ReplayError::Unreadable { member }| unreadable(member))?;
+    let active = replayed
+        .active
+        .iter()
         .map(|entry| {
             let symbol = instruments
                 .iter()
@@ -232,8 +185,8 @@ pub fn fold_research(
         })
         .collect::<Result<Vec<_>, FoldError>>()?;
     Ok(ResearchFold {
-        universe: expiry.universe,
-        lineages,
+        universe: replayed.universe,
+        lineages: replayed.lineages,
         active,
     })
 }
@@ -246,6 +199,7 @@ pub struct CellSource {
     /// every pass no context.
     halted: Option<BTreeSet<AssetId>>,
     instruments: Vec<InstrumentFact>,
+    feed: Vec<FeedItem>,
     rows: Rc<dyn Rows>,
     documents: Box<dyn ArtifactSource>,
     meter: CellMeter,
@@ -292,6 +246,7 @@ impl CellSource {
                 .map(|id| AssetId::new(id.as_str()).ok())
                 .collect(),
             instruments: bundle.plane.instruments.clone(),
+            feed: bundle.feed.clone(),
             rows,
             documents,
             meter,
@@ -354,40 +309,109 @@ impl CellSource {
     }
 }
 
+impl CellSource {
+    /// The feed's items that have arrived by `clock` for this agent's latest deployment in this
+    /// environment, each at its arrival (DEC-2392), or `None` when that deployment's `event_time`
+    /// cannot be read.
+    fn arrived(&self, control: &[StoredEvent], clock: RiskClock) -> Option<Vec<RetrievedItem>> {
+        let mut deployed_at = None;
+        for row in control.iter().rev().filter(|row| {
+            row.environment == self.who.environment.as_str() && row.event_type == "AgentDeployed"
+        }) {
+            let body = parse(&row.body).ok()?;
+            if body
+                .get("payload")
+                .and_then(|payload| payload.get("agent_id"))
+                .and_then(Value::as_str)?
+                == self.who.agent
+            {
+                deployed_at = Some(
+                    body.get("event_time")
+                        .and_then(Value::as_str)
+                        .and_then(|text| UtcNanos::parse_rfc3339(text).ok())?,
+                );
+                break;
+            }
+        }
+        let deployed_at = deployed_at?;
+        Some(
+            self.feed
+                .iter()
+                .filter_map(|item| item.arrived(deployed_at))
+                .filter(|item| item.knowledge_at.secs() <= clock.secs())
+                .map(RetrievedItem::News)
+                .collect(),
+        )
+    }
+}
+
 impl ResearchSource for CellSource {
-    fn parts(&self, state: &RuntimeState) -> Option<ResearchParts> {
-        let control = StreamId::parse(&format!("ctl:{}", self.who.workspace))?;
-        let stream = StreamId::parse(&format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
-        let meter = StreamId::parse(&format!("meter:{}", self.who.workspace))?;
-        let control = self.rows.rows(&control)?;
-        let agent = self.rows.rows(&stream)?;
-        let last_reservation =
-            last_research_reservation(&self.rows.rows(&meter)?, &self.who.agent).ok()?;
+    fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
+        let named = |text: String| StreamId::parse(&text).ok_or(ContextUnread::StreamName);
+        let control = named(format!("ctl:{}", self.who.workspace))?;
+        let stream = named(format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
+        let meter = named(format!("meter:{}", self.who.workspace))?;
+        let control = self.rows.rows(&control).ok_or(ContextUnread::Control)?;
+        let agent = self.rows.rows(&stream).ok_or(ContextUnread::AgentStream)?;
+        let meter = self.rows.rows(&meter).ok_or(ContextUnread::Meter)?;
+        let last_reservation = last_research_reservation(&meter, &self.who.agent)
+            .map_err(|_| ContextUnread::Reservation)?;
         let (_, document) = deployment::document(
             &control,
             &self.who.agent,
             self.who.environment,
             self.documents.as_ref(),
         )
-        .ok()?;
-        let envelope = envelope(&document).ok()?;
-        if self.others_deployed(&control)? {
-            return None;
+        .map_err(|_| ContextUnread::Deployment)?;
+        let envelope = envelope(&document).map_err(|_| ContextUnread::Envelope)?;
+        let event_triggers = event_triggers(&document).map_err(|_| ContextUnread::EventTriggers)?;
+        if self
+            .others_deployed(&control)
+            .ok_or(ContextUnread::Deployments)?
+        {
+            return Err(ContextUnread::AnotherAgent);
         }
-        let clock = state.risk_clock()?;
-        let spend = self.spend(&agent, clock)?;
+        let clock = state.risk_clock().ok_or(ContextUnread::Clock)?;
+        let spend = self.spend(&agent, clock).ok_or(ContextUnread::Spend)?;
         let asset = |fact: &InstrumentFact| AssetId::new(fact.asset_id.as_str()).ok();
         let pinned = envelope.universe_pinned;
         let fold = fold_research(
             &agent,
-            UtcNanos::from_parts(clock.secs(), 0).ok()?,
+            UtcNanos::from_parts(clock.secs(), 0).map_err(|_| ContextUnread::Clock)?,
             &self.instruments,
         )
-        .ok()?;
+        .map_err(|_| ContextUnread::Theses)?;
         if pinned && (fold.lineages != LineageState::default() || !fold.active.is_empty()) {
-            return None;
+            return Err(ContextUnread::PinnedWithTheses);
         }
-        Some(ResearchParts {
+        let eligibility_failures = self
+            .instruments
+            .iter()
+            .filter(|fact| !fact.eligible)
+            .map(asset)
+            .collect::<Option<_>>()
+            .ok_or(ContextUnread::InstrumentFacts)?;
+        let instrument_groups = self
+            .instruments
+            .iter()
+            .filter_map(|fact| Some((asset(fact), GroupId::new(fact.group.as_ref()?).ok())))
+            .map(|(asset, group)| Some((asset?, group?)))
+            .collect::<Option<_>>()
+            .ok_or(ContextUnread::InstrumentFacts)?;
+        let halted_instruments = self.halted.clone().ok_or(ContextUnread::Halted)?;
+        let data_universe = self
+            .instruments
+            .iter()
+            .map(asset)
+            .collect::<Option<_>>()
+            .ok_or(ContextUnread::InstrumentFacts)?;
+        let events = if event_triggers.is_some() {
+            self.arrived(&control, clock)
+                .ok_or(ContextUnread::Arrivals)?
+        } else {
+            Vec::new()
+        };
+        Ok(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope),
             overlay: PolicyOverlay::internal_research_profile(),
@@ -401,22 +425,12 @@ impl ResearchSource for CellSource {
             },
             facts: AdmissionFacts {
                 allowlist: self.allowlist.clone(),
-                eligibility_failures: self
-                    .instruments
-                    .iter()
-                    .filter(|fact| !fact.eligible)
-                    .map(asset)
-                    .collect::<Option<_>>()?,
-                instrument_groups: self
-                    .instruments
-                    .iter()
-                    .filter_map(|fact| Some((asset(fact), GroupId::new(fact.group.as_ref()?).ok())))
-                    .map(|(asset, group)| Some((asset?, group?)))
-                    .collect::<Option<_>>()?,
+                eligibility_failures,
+                instrument_groups,
                 claimed_by_other_agents: BTreeSet::new(),
-                halted_instruments: self.halted.clone()?,
+                halted_instruments,
                 disclosures_accepted: BTreeSet::new(),
-                data_universe: Some(self.instruments.iter().map(asset).collect::<Option<_>>()?),
+                data_universe: Some(data_universe),
                 research_spend_usd_today: spend,
             },
             lineages: fold.lineages,
@@ -427,8 +441,37 @@ impl ResearchSource for CellSource {
                 .iter()
                 .map(|fact| fact.symbol.clone())
                 .collect::<BTreeSet<Symbol>>(),
+            events,
+            event_triggers,
         })
     }
+}
+
+/// The version's `behavior.research.event_triggers` (mandate spec v0.11 §8.4, DEC-2392) as the
+/// core reads it, `None` when the member is absent or `null`.
+///
+/// # Errors
+/// [`SourceError::Unreadable`] when the document does not parse as a mandate.
+pub fn event_triggers(document: &Value) -> Result<Option<EventTriggers>, SourceError> {
+    let mandate = Mandate::parse(document).map_err(|_| SourceError::Unreadable {
+        member: "event_triggers",
+    })?;
+    Ok(mandate
+        .behavior
+        .research
+        .and_then(|research| research.event_triggers)
+        .map(|triggers| EventTriggers {
+            kinds: triggers
+                .sources
+                .iter()
+                .map(|source| match source {
+                    EventTrigger::Filings => ItemKind::Filing,
+                    EventTrigger::News => ItemKind::News,
+                })
+                .collect(),
+            debounce_s: triggers.debounce_s,
+            max_runs_per_day: triggers.max_runs_per_day,
+        }))
 }
 
 /// The research envelope of a mandate `document` (mandate spec §8.5 and §8.6): the universe's

@@ -232,6 +232,25 @@ fn reply(
     record
 }
 
+/// The gateway's record of `turn`'s call carrying `output` as the gateway hands it on: a monitor
+/// run's call is checked there against the monitor schema, `invalidations` alone (the gateway's
+/// own `tests/agentic.rs` holds that check), and the core reads only the record's output. The test
+/// gateway here checks single calls only, so the record is made from an ideate-shaped reply and
+/// carries `output` as the monitor run's gateway would.
+fn monitor_reply(run: &Run, turn: &TurnRequest, world: &World, output: &str) -> CallRecord {
+    let mut record = reply(
+        run,
+        turn,
+        world,
+        Vec::new(),
+        Some(r#"{"theses":[],"invalidations":[]}"#),
+    );
+    assert_eq!(record.outcome, Outcome::Ok);
+    record.output =
+        Some(mandate_canon::parse(output.as_bytes()).unwrap_or_else(|e| panic!("{e:?}")));
+    record
+}
+
 fn answered(run: &mut Run, record: CallRecord, ports: &Ports<'_>, world: &World) -> ResearchStep {
     let input = ResearchInput::Called {
         run_id: run.run_id.clone(),
@@ -613,6 +632,50 @@ fn a_monitor_reply_carrying_a_thesis_uses_nothing_and_ends_the_run_error() {
     assert_eq!(
         payload_str(run.lp.events("RunEnded")[0], "reason"),
         Some("error")
+    );
+}
+
+/// §6.9: a `monitor` run's output is `invalidations` alone, the gateway's schema for the kind, and
+/// an invalidation of an active thesis is judged and journaled as `ThesisInvalidated`, so an event
+/// run can end the position its thesis holds (DEC-2391, DEC-2392). The run ends `done`.
+#[test]
+fn a_monitor_reply_of_invalidations_alone_invalidates_the_thesis() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let mut world = world();
+    world.active = vec![active_aapl()];
+    let (mut run, seed) = seeded_after(&ports, &world, exits_only);
+    let turn = turn_of(&seed);
+    assert_eq!(turn.kind, RunKind::Monitor);
+    let record = monitor_reply(
+        &run,
+        &turn,
+        &world,
+        r#"{"invalidations":[{"thesis_id":"01ACTIVE","evidence":[]}]}"#,
+    );
+    answered(&mut run, record, &ports, &world);
+    let invalidated = run.lp.events("ThesisInvalidated");
+    assert_eq!(invalidated.len(), 1, "{:?}", run.lp.types());
+    assert_eq!(payload_str(invalidated[0], "thesis_id"), Some("01ACTIVE"));
+    let invocation = run.lp.events("ModelInvocationRecorded");
+    let verdicts = invocation[invocation.len() - 1]
+        .payload
+        .get("verdicts")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    assert_eq!(verdicts.len(), 1);
+    assert_eq!(
+        verdicts[0].get("kind").and_then(Value::as_str),
+        Some("invalidation")
+    );
+    assert_eq!(
+        verdicts[0].get("result").and_then(Value::as_str),
+        Some("judged")
+    );
+    assert_eq!(
+        payload_str(run.lp.events("RunEnded")[0], "reason"),
+        Some("done")
     );
 }
 
@@ -1733,4 +1796,40 @@ fn the_journal_check_refuses_a_summary_that_names_a_symbol() {
     let run = Some("01J8Z3MC0000000000000000RN");
     assert!(parse_as_journal_draft(&summary(AAPL), run).is_ok());
     assert!(parse_as_journal_draft(&summary("AAPL"), run).is_err());
+}
+
+/// DEC-2397 item 3: a turn the model-gateway service never answered whole ends the run `error` as a
+/// refused turn does, alerts the operator once naming its `RunEnded`, and keeps the pin, so the
+/// next due run starts.
+#[test]
+fn a_lost_turn_ends_the_run_error_alerts_and_keeps_the_pin() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    turn_of(&seed);
+    let before = run.lp.types().len();
+    let lost = ResearchInput::Refused {
+        run_id: run.run_id.clone(),
+        at: clock(CUT_OFF + 20),
+        error: mandate_gateway::RequestError::GatewayUnreachable,
+    };
+    let step = go(&mut run.lp, lost, &ports, &world);
+    assert_eq!(run.lp.types()[before..], ["RunSummaryRecorded", "RunEnded"]);
+    let ended = run.lp.events("RunEnded")[0].event_id.clone();
+    let alerts: Vec<_> = step
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            mandate_runtime::Effect::Notify(reference) => {
+                Some((reference.kind.key(), reference.subject_event.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(alerts, [("research_gateway_unreachable", ended)]);
+    assert!(step.requests.is_empty(), "no turn follows: {step:?}");
+    let later = clock(CUT_OFF + 2 * i64::from(common::research::INTERVAL_S));
+    let next = go(&mut run.lp, ResearchInput::Poll(later), &ports, &world);
+    assert!(starts_a_run(&next), "the pin is kept: {next:?}");
 }

@@ -23,6 +23,8 @@ use mandate_runtime::{
 };
 use mandate_time::UtcNanos;
 
+use crate::approvers::ApproverSource;
+use crate::control::ControlRecord;
 use crate::envelope::{
     DraftFields, Envelope, IdSpace, Ids, Writer, account_stream, agent_stream, control_stream,
     draft_bytes, journal_environment,
@@ -173,7 +175,7 @@ fn open_asking<'s>(
     output: mandate_runtime::ModelOutput,
 ) -> Result<(Session<'s>, Option<ShellError>), ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
-    let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
+    let mut session = Session::open_governed(stages, setup, admitted)?;
     session.start()?;
     if session.cycle_open && !setup.new_cycle {
         return Err(ShellError::CycleAlreadyOpen);
@@ -496,7 +498,9 @@ impl AskedCycle for Session<'_> {
             .journal
             .read(&stream)
             .map_err(refused(Stage::Journal))?;
+        self.reresolve(&control);
         for event in tailed(&control)? {
+            self.reresolve_at(&control, event.seq.0);
             self.feed_asked(Input::Journal(event))?;
         }
         self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
@@ -550,6 +554,12 @@ pub(crate) struct Session<'s> {
     stages: &'s mut Stages,
     setup: &'s Setup,
     view: &'s MandateView,
+    /// What `view`'s approvers are resolved from again at each control-stream read (DEC-2384
+    /// item 6).
+    approvers: &'s ApproverSource,
+    /// `view` with its approvers narrowed to the latest control-stream read's, once one was
+    /// read: the view every step hands the runtime.
+    current: Option<MandateView>,
     /// The registered objects a governed run's version-2 agent records reference (DEC-484).
     governed: Option<GovernedRefs>,
     state: RuntimeState,
@@ -561,6 +571,9 @@ pub(crate) struct Session<'s> {
     recorded: BTreeSet<String>,
     /// The `client_order_id` of every `OrderSubmitted` committed **in this run** (TI-1).
     submitted_drafts: BTreeSet<String>,
+    /// The event id of every unprotected interval's record at its bound committed in this run, so
+    /// an alert naming one is reported under the interval's own key on every path (DEC-2514).
+    interval_limits: BTreeSet<String>,
     /// Whether the replayed agent stream already carries an intent (TI-12).
     pub(crate) cycle_open: bool,
     /// Whether an asked cycle's wait holds its released opening (DEC-940 item 2).
@@ -583,9 +596,9 @@ impl<'s> Session<'s> {
     pub(crate) fn open_governed(
         stages: &'s mut Stages,
         setup: &'s Setup,
-        view: &'s MandateView,
-        governed: Option<GovernedRefs>,
+        admitted: &'s Admitted,
     ) -> Result<Self, ShellError> {
+        let (view, governed) = (&admitted.view, admitted.governed);
         let deployment = &setup.deployment;
         let agent = agent_stream(&deployment.workspace.0, &deployment.agent.0);
         let account = account_stream(&deployment.workspace.0, &setup.account_ref);
@@ -594,6 +607,8 @@ impl<'s> Session<'s> {
             stages,
             setup,
             view,
+            approvers: &admitted.approvers,
+            current: None,
             governed,
             agent_stream: agent,
             account_stream: account,
@@ -601,6 +616,7 @@ impl<'s> Session<'s> {
             heads: BTreeMap::new(),
             recorded: BTreeSet::new(),
             submitted_drafts: BTreeSet::new(),
+            interval_limits: BTreeSet::new(),
             cycle_open: false,
             holding: false,
             held: None,
@@ -672,10 +688,39 @@ impl<'s> Session<'s> {
             .journal
             .read(&stream)
             .map_err(refused(Stage::Journal))?;
+        self.reresolve(&rows);
         for event in tailed(&rows)? {
+            self.reresolve_at(&rows, event.seq.0);
             self.feed(Input::Journal(event))?;
         }
         Ok(())
+    }
+
+    /// Narrows the approvers every later step hands the runtime to those `rows`, a fresh read
+    /// of the control stream, still resolve to (DEC-2384 item 6): a row the run cannot read
+    /// leaves no approver, so every grant is refused (`AGENTS.md` rule 3).
+    fn reresolve(&mut self, rows: &[StoredEvent]) {
+        let records: Option<Vec<ControlRecord>> = rows.iter().map(ControlRecord::of_row).collect();
+        let mut view = self.view.clone();
+        view.approval.approvers = match records {
+            Some(records) => self
+                .approvers
+                .current(&self.view.approval.approvers, &records),
+            None => BTreeSet::new(),
+        };
+        self.current = Some(view);
+    }
+
+    /// [`Self::reresolve`] over the rows of `rows`, read in `seq` order, up to and including `seq`:
+    /// each tailed event is judged against the roster as of its own record, so a membership record
+    /// later in the same read neither lends a grant a role its member lacked when it was made nor
+    /// takes one away (DEC-2384 item 6). A split that cannot be made reads no row, which resolves
+    /// no approver (`AGENTS.md` rule 3).
+    fn reresolve_at(&mut self, rows: &[StoredEvent], seq: u64) {
+        match rows.split_at_checked(rows.partition_point(|row| row.seq <= seq)) {
+            Some((judged, _)) => self.reresolve(judged),
+            None => self.reresolve(&[]),
+        }
     }
 
     /// Journals `mark` as the account stream's `MarkUpdated` for the pinned instrument (journal
@@ -1143,7 +1188,10 @@ impl<'s> Session<'s> {
             gate: &bridge,
             plan: &bridge,
             flatten: &bridge,
-            view: self.view,
+            view: match &self.current {
+                Some(current) => current,
+                None => self.view,
+            },
         };
         let effects = mandate_runtime::handle(&mut self.state, input, &ports)?;
         let findings = bridge.findings.into_inner();
@@ -1172,7 +1220,7 @@ impl<'s> Session<'s> {
                 }
                 Effect::Intent(handoff) => self.hand(&handoff)?,
                 Effect::Timer(_) => {}
-                Effect::Notify(notification) => self.report.alerts.push(notification.message_key),
+                Effect::Notify(notification) => self.report.alerts.push(notification.kind.key()),
                 Effect::NotifyApproval(_) => self.report.alerts.push("approval_needed"),
             }
         }
@@ -1223,7 +1271,12 @@ impl<'s> Session<'s> {
                 }
                 mandate_executor::Effect::Timer(_) => {}
                 mandate_executor::Effect::Notify(notification) => {
-                    self.report.alerts.push(notification.message_key);
+                    let key = if self.interval_limits.contains(&notification.subject_event.0) {
+                        INTERVAL_LIMIT_ALERT
+                    } else {
+                        notification.kind.key()
+                    };
+                    self.report.alerts.push(key);
                 }
             }
         }
@@ -1283,12 +1336,12 @@ impl<'s> Session<'s> {
     /// `model_registry` and `policy_set` beside `mandate_version`, at schema version 2 (journal
     /// spec v0.16, DEC-484 item 4). Every other record, and every record of an ungoverned run,
     /// stays at version 1 with `mandate_version` alone, except an `ApprovalRequested` whose
-    /// content binds the builder's plan, which is version 2 ([`planned_request_version`]).
+    /// content binds the builder's plan, which is version 2 (`EventDraft::schema_version`).
     fn agent_refs(&self, draft: &EventDraft) -> Result<(u64, Object), ShellError> {
         let event_type = draft.event_type.as_str();
         let mut refs = vec![("mandate_version", Value::Str(self.view.version.clone()))];
         let reference = |digest: Digest| Value::Str(format!("sha256:{digest}"));
-        let mut version = planned_request_version(draft);
+        let mut version = draft.schema_version();
         if let Some(governed) = self.governed {
             let decision = event_type == "DecisionMade";
             if decision || event_type == "ModelOutputRecorded" {
@@ -1370,6 +1423,9 @@ impl<'s> Session<'s> {
                 && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
             {
                 self.submitted_drafts.insert(id.to_owned());
+            }
+            if interval_limit_record(draft) {
+                self.interval_limits.insert(draft.event_id.0.clone());
             }
         }
         Ok(())
@@ -1526,16 +1582,21 @@ fn consecutive_executor_journals(
     drafts
 }
 
-/// `ApprovalRequested`'s schema version for the content it carries: 2 when the content binds the
-/// order builder's plan, which version 1's closed content refuses, and 1 otherwise (DEC-942
-/// item 2). Every other agent-stream draft starts at version 1.
-fn planned_request_version(draft: &EventDraft) -> u64 {
-    let planned = draft.event_type == "ApprovalRequested"
+/// The report's key for an owner alert about an unprotected interval that reached its bound: LT-10
+/// releases an uncovered run on it alone (`crate::lt10::watch_may_end`), and the alert's kind,
+/// `protection`, is shared with the stop watchdog's, so the key is read from the record the alert
+/// names (DEC-2514).
+pub(crate) const INTERVAL_LIMIT_ALERT: &str = "unprotected_interval_limit";
+
+/// Whether `draft` is the executor's record of an unprotected interval at its bound
+/// (`ProtectionChanged` with the action `interval_limit`, trading-domain spec §5.4).
+fn interval_limit_record(draft: &mandate_executor::EventDraft) -> bool {
+    draft.event_type == "ProtectionChanged"
         && draft
             .payload
-            .get("content")
-            .is_some_and(|content| content.get("execution").is_some());
-    if planned { 2 } else { 1 }
+            .get("action")
+            .and_then(mandate_canon::Value::as_str)
+            == Some("interval_limit")
 }
 
 #[cfg(test)]
@@ -1553,10 +1614,7 @@ mod tests {
     };
     use mandate_num::Qty;
 
-    use super::{
-        consecutive_executor_journals, entry_read, entry_status, planned_request_version,
-        with_environment,
-    };
+    use super::{consecutive_executor_journals, entry_read, entry_status, with_environment};
 
     fn entry() -> Result<ClientOrderId, String> {
         ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0").map_err(|e| e.to_string())
@@ -1652,13 +1710,51 @@ mod tests {
         }
     }
 
+    /// LT-10's release reads the interval's own record only (DEC-2514 item 5): a stop watchdog's
+    /// `ProtectionChanged`, which shares the alert's `protection` kind, and another record that
+    /// says `interval_limit` are not it.
+    #[test]
+    fn only_an_intervals_protection_record_at_its_bound_is_the_intervals_own() {
+        let with_action = |event_type: &str, action: &str| {
+            let mut members = Object::new();
+            if let Ok(key) = mandate_canon::Key::new("action") {
+                members.insert(key, Value::Str(action.to_owned()));
+            }
+            EventDraft {
+                payload: Value::Object(members),
+                ..draft("r", event_type, 2)
+            }
+        };
+        assert!(super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "interval_limit"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "watchdog"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "expiry_unreplaceable"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "GateDecided",
+            "interval_limit"
+        )));
+        assert!(!super::interval_limit_record(&draft(
+            "r",
+            "ProtectionChanged",
+            2
+        )));
+    }
+
     #[test]
     fn consecutive_executor_drafts_stay_in_one_append_run() {
         let companion = draft("companion", "OrderRequestRecorded", 1);
         let submitted = draft("submitted", "OrderSubmitted", 2);
         let boundary = Effect::Notify(NotificationRef {
             subject_event: EventId("submitted".to_owned()),
-            message_key: "submitted",
+            kind: mandate_executor::OwnerAlertKind::Protection,
         });
         let mut effects = VecDeque::from([Effect::Journal(submitted), boundary]);
         let drafts = consecutive_executor_journals(companion, &mut effects);
@@ -1686,22 +1782,10 @@ mod tests {
             causation_id: None,
             payload: payload.clone(),
         };
-        assert_eq!(
-            planned_request_version(&agent("ApprovalRequested", &with_plan)),
-            2
-        );
-        assert_eq!(
-            planned_request_version(&agent("ApprovalRequested", &without)),
-            1
-        );
-        assert_eq!(
-            planned_request_version(&agent("ApprovalDelivered", &with_plan)),
-            1
-        );
-        assert_eq!(
-            planned_request_version(&agent("ApprovalRequested", &Value::Null)),
-            1
-        );
+        assert_eq!(agent("ApprovalRequested", &with_plan).schema_version(), 2);
+        assert_eq!(agent("ApprovalRequested", &without).schema_version(), 1);
+        assert_eq!(agent("ApprovalDelivered", &with_plan).schema_version(), 1);
+        assert_eq!(agent("ApprovalRequested", &Value::Null).schema_version(), 1);
         Ok(())
     }
 

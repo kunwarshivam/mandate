@@ -19,7 +19,7 @@ use clap::Args;
 use mandate_journal::ArtifactSource;
 use mandate_num::{Price, Qty};
 
-use crate::agent::{self, Command, Confirmed, RELEASE_WARNING, Restriction, Status};
+use crate::agent::{self, Command, Confirmed, RELEASE_WARNING, Restriction, Status, Subject};
 use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted};
 use crate::inbox::InstantIds;
 use crate::postgres::{JournalArgs, PgControlJournal};
@@ -73,12 +73,17 @@ pub struct StopArgs {
 pub struct AcknowledgeArgs {
     /// The agent's id.
     pub agent: String,
-    /// The `event_id` of the account stream's `RiskLimitTriggered` to acknowledge.
+    /// The `event_id` of the account stream's record to acknowledge: a `RiskLimitTriggered`, or
+    /// with `--subject` the record that subject names.
     pub event: String,
     /// The `event_id` of the `OwnerAcknowledgmentRequested` another user recorded, where an
     /// independent user must acknowledge.
     #[arg(long, value_name = "ID")]
     pub request: Option<String>,
+    /// What `event` is: `limit`, `restriction`, or `reconciliation` (the executor's hold on a
+    /// reconciliation mismatch). Given, the acknowledgment is written as version 2 with it.
+    #[arg(long, value_enum)]
+    pub subject: Option<Subject>,
     /// The code `agent acknowledge` showed; without it, nothing is committed.
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
@@ -92,8 +97,12 @@ pub struct AcknowledgeArgs {
 pub struct RequestAckArgs {
     /// The agent's id.
     pub agent: String,
-    /// The `event_id` of the account stream's `RiskLimitTriggered` to ask another user to lift.
+    /// The `event_id` of the account stream's record to ask another user to lift: a
+    /// `RiskLimitTriggered`, or with `--subject` the record that subject names.
     pub event: String,
+    /// What `event` is, as `agent acknowledge --subject` takes it.
+    #[arg(long, value_enum)]
+    pub subject: Option<Subject>,
     /// The code `agent request-ack` showed; without it, nothing is committed.
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
@@ -184,6 +193,7 @@ impl AcknowledgeArgs {
         Command::Acknowledge {
             event: self.event.clone(),
             request: self.request.clone(),
+            subject: self.subject,
         }
     }
 }
@@ -200,6 +210,7 @@ impl RequestAckArgs {
     pub fn command(&self) -> Command {
         Command::RequestAcknowledgment {
             event: self.event.clone(),
+            subject: self.subject,
         }
     }
 }
@@ -298,7 +309,7 @@ pub fn answer(
         Command::Stop { .. } => format!("stop {agent}"),
         Command::Pause => format!("pause {agent}"),
         Command::Acknowledge { event, .. } => format!("acknowledge {agent} {event}"),
-        Command::RequestAcknowledgment { event } => format!("request-ack {agent} {event}"),
+        Command::RequestAcknowledgment { event, .. } => format!("request-ack {agent} {event}"),
     };
     Ok(vec![format!(
         "{named} committed as event {event_id} at seq {seq}"

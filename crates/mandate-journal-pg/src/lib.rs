@@ -129,6 +129,16 @@ impl PgJournal {
         Ok(Self::new(pool))
     }
 
+    /// [`Self::from_dsn`] for a writer that drives the journal from one thread, one call at a time,
+    /// as `mandate-store`'s `PgStore` does: a pool of one connection. A larger pool grows there to
+    /// its whole size, since a released connection returns only when its runtime next runs, after
+    /// the next call has already opened another; a long-running process holding several stores
+    /// then holds tens of idle connections and starves the journal of slots.
+    pub fn single_writer(dsn: &str) -> Result<Self, PgError> {
+        let pool = PgPoolOptions::new().max_connections(1).connect_lazy(dsn)?;
+        Ok(Self::new(pool))
+    }
+
     /// Increments the stream's writer epoch, fencing out the previous writer, and returns it.
     pub async fn take_ownership(&self, stream: &StreamId) -> Result<u64, PgError> {
         let epoch: i64 = sqlx::query_scalar(
@@ -266,6 +276,31 @@ impl PgJournal {
         .map(decode_event)
         .collect::<Result<Vec<_>, _>>()?;
         check(stream.as_str(), &rows, TrustedStart::GENESIS)?;
+        Ok(rows)
+    }
+
+    /// The events of `stream` from `start.from_seq` on, in `seq` order, after checking their chain
+    /// from `start` (journal spec §11 checks 1 to 5): a reader that verified the stream up to
+    /// `start.from_seq - 1` and holds that event's hash reads only what was appended since, as
+    /// soundly as [`Self::rows`] reads the whole stream. A first event whose `prev_hash` is not
+    /// `start.prev_hash` fails the chain.
+    pub async fn rows_from(
+        &self,
+        stream: &StreamId,
+        start: TrustedStart,
+    ) -> Result<Vec<StoredEvent>, PgError> {
+        let from = i64::try_from(start.from_seq).unwrap_or(i64::MAX);
+        let rows = sqlx::query(sql(format!(
+            "SELECT {COLUMNS} FROM events WHERE stream_id = $1 AND seq >= $2 ORDER BY seq"
+        )))
+        .bind(stream.as_str())
+        .bind(from)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(decode_event)
+        .collect::<Result<Vec<_>, _>>()?;
+        check(stream.as_str(), &rows, start)?;
         Ok(rows)
     }
 

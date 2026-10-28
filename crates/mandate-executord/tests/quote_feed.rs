@@ -75,6 +75,10 @@ impl QuoteFeed for Recorded {
             .filter(|quote| &quote.instrument == instrument)
             .ok_or("no_quote")
     }
+
+    fn feed(&self) -> &'static str {
+        "recorded"
+    }
 }
 
 /// The executor of a held exit beside its protection, its journal, its broker, and the count of
@@ -191,6 +195,58 @@ fn a_held_exit_beside_its_protection_is_priced_once_its_quote_is_read() -> Resul
     Ok(())
 }
 
+/// DEC-2359 item 4: a quote the feed reads but judges not sane is never handed to the core. The
+/// exit waiting on it is read, but the core holds no quote for its instrument afterwards, so the
+/// exit stays held for want of a price and sends no sell. The same quote judged sane is handed and
+/// prices the exit.
+#[test]
+fn a_quote_judged_not_sane_is_never_handed() -> Result<(), Error> {
+    let noon = at(NOON)?.secs();
+    let aapl = InstrumentId::new(AAPL)?;
+    let insane = Recorded {
+        quote: Some(MarketObservation {
+            sane: false,
+            ..observed("150", "150.2", noon)?
+        }),
+        asked: Rc::default(),
+    };
+    let asked = Rc::clone(&insane.asked);
+    let (journal, broker, process, sold) = exit_beside_its_protection(insane)?;
+    assert!(
+        asked.borrow().iter().any(|asked| asked == &aapl),
+        "the feed was asked about the waiting exit's instrument"
+    );
+    assert_eq!(
+        process.state().latest_quote(&aapl),
+        None,
+        "no insane quote reaches the core"
+    );
+    assert_eq!(sold, [0, 0, 0, 0], "no pass prices the exit");
+    assert!(exit_sells(&broker).is_empty());
+    let held = journal
+        .payloads("GateDecided")
+        .last()
+        .is_some_and(|decided| {
+            decided.get("verdict").and_then(Value::as_str) == Some("hold")
+                && decided.get("reason_code").and_then(Value::as_str) == Some("exit_unpriced")
+        });
+    assert!(held, "the exit falls back to waiting for a price");
+    let sane = Recorded {
+        quote: Some(observed("150", "150.2", noon)?),
+        asked: Rc::default(),
+    };
+    let (_, priced, process, _) = exit_beside_its_protection(sane)?;
+    assert!(
+        process
+            .state()
+            .latest_quote(&aapl)
+            .is_some_and(|quote| quote.sane),
+        "the control: a sane quote is handed"
+    );
+    assert_eq!(exit_sells(&priced).len(), 1, "and prices the exit");
+    Ok(())
+}
+
 /// While the exit waits, its instrument is read once when first wanted and then once per
 /// `exit_step_s`, five seconds here: not again a second short of the step, and again at it.
 #[test]
@@ -262,7 +318,7 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
     let now = at(NOON)?;
     let broker = AlpacaBroker::new(Quoting(now.to_string()))?;
     let aapl = InstrumentId::new(AAPL)?;
-    let read = paper_wiring(&broker, Fixed(now))?
+    let read = paper_wiring(&broker, Fixed(now), &quoted_scope())?
         .quotes
         .observe(&aapl, now)?;
     assert_eq!(
@@ -273,7 +329,22 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
             true
         )
     );
-    assert!(fixture::wiring()?.quotes.observe(&aapl, now).is_err());
+    assert!(
+        fixture::wiring(&quoted_scope())?
+            .quotes
+            .observe(&aapl, now)
+            .is_err()
+    );
+    assert_eq!(
+        (
+            paper_wiring(&broker, Fixed(now), &quoted_scope())?
+                .quotes
+                .feed(),
+            fixture::wiring(&quoted_scope())?.quotes.feed()
+        ),
+        ("iex", "none"),
+        "a mark names its feed (DEC-2380 item 3)"
+    );
     Ok(())
 }
 
@@ -281,7 +352,11 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
 #[test]
 fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
     let now = at(NOON)?;
-    let run = run::paper(AlpacaBroker::new(Quoting(now.to_string()))?, Fixed(now))?;
+    let run = run::paper(
+        AlpacaBroker::new(Quoting(now.to_string()))?,
+        Fixed(now),
+        &quoted_scope(),
+    )?;
     let read = run
         .wiring()
         .quotes
@@ -297,16 +372,60 @@ fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
     Ok(())
 }
 
-/// DEC-2359 item 9: the fixture run's wiring reads no quote.
+/// DEC-2359 item 9 as G2b-2 extends it: the fixture run's wiring reads the fixture's own quotes,
+/// over the fixture's data host, and nothing else. A fixture that does not quote answers none,
+/// and neither does a quoting fixture for a symbol it does not list.
 #[test]
-fn the_fixture_run_reads_no_quote() -> Result<(), Error> {
+fn the_fixture_run_reads_only_the_fixtures_own_quotes() -> Result<(), Error> {
     let now = at(NOON)?;
-    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?)?;
+    let silent = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?, &quoted_scope())?;
     assert_eq!(
-        run.wiring().quotes.observe(&InstrumentId::new(AAPL)?, now),
-        Err("no_quotes")
+        silent
+            .wiring()
+            .quotes
+            .observe(&InstrumentId::new("SPY")?, now),
+        Err("quote_unread")
+    );
+    let quoting = run::fixture(
+        AlpacaBroker::new(FixturePaper::new(now).quoting(host_clock))?,
+        &quoted_scope(),
+    )?;
+    assert_eq!(
+        quoting
+            .wiring()
+            .quotes
+            .observe(&InstrumentId::new(AAPL)?, now),
+        Err("quote_unread")
+    );
+    let spy = quoting
+        .wiring()
+        .quotes
+        .observe(&InstrumentId::new("SPY")?, now)?;
+    assert_eq!(
+        (spy.bid, spy.ask, spy.sane),
+        (
+            Some(Price::parse("580.11")?),
+            Some(Price::parse("580.13")?),
+            true
+        )
     );
     Ok(())
+}
+
+/// The host's clock, which the fixture run's quote feed judges age on.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the fixture run's feed judges a quote's age on the host clock, so its quotes are stamped by it"
+)]
+fn host_clock() -> UtcNanos {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    UtcNanos::from_parts(
+        i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+        since.subsec_nanos(),
+    )
+    .unwrap_or(UtcNanos::EPOCH)
 }
 
 /// Lane LV's case (DEC-2361), with `quotes` as the feed: the agent's ten AAPL bought and filled
@@ -378,7 +497,7 @@ fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Err
         .any(|payload| payload.get("action").and_then(Value::as_str) == Some("exit_unpriced"));
     assert!(unpriced, "the wait is journaled");
     assert_eq!(
-        alerted.iter().filter(|key| *key == "exit_unpriced").count(),
+        alerted.iter().filter(|key| *key == "exit_stalled").count(),
         1,
         "{alerted:?}"
     );
@@ -392,4 +511,12 @@ fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Err
         "{quoted:?}"
     );
     Ok(())
+}
+
+/// The account the quote tests' wirings are for; their quotes read no stream.
+fn quoted_scope() -> mandate_executor::AccountScope {
+    mandate_executor::AccountScope {
+        account: mandate_executor::AccountRef("acct-q".to_owned()),
+        workspace: mandate_executor::WorkspaceId("ws1".to_owned()),
+    }
 }

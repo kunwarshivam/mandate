@@ -36,8 +36,14 @@ fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
     result.unwrap_or_else(|e| panic!("{what} answers, not: {e}"))
 }
 
+/// The control stream's events but the owner alerts a kill switch commits beside its command
+/// (E8-9k), which `a_kill_switch_commits_its_owner_alert_in_its_batch` checks.
 fn control(fx: &Fixture) -> Vec<Value> {
-    fx.rows(CONTROL).iter().map(body).collect()
+    fx.rows(CONTROL)
+        .iter()
+        .filter(|row| row.event_type != "OwnerAlertSent")
+        .map(body)
+        .collect()
 }
 
 /// The one event a command committed, checked as the owner's on the control stream; and since
@@ -128,6 +134,7 @@ fn resume_stop_and_acknowledge_need_the_code() {
             Command::Acknowledge {
                 event: common::runtime_id(42),
                 request: None,
+                subject: None,
             },
             "OwnerAcknowledged",
             None,
@@ -380,6 +387,7 @@ fn a_code_is_bound_to_every_field_it_confirms() {
     let ack = |n: u64| Command::Acknowledge {
         event: common::runtime_id(n),
         request: None,
+        subject: None,
     };
     let base = of(AGENT, &exit_aapl(true), &fx);
     let changed = [
@@ -1070,7 +1078,7 @@ fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
         let first = answer("kill", switch(&mut fx, ASKED_AT));
         let second = answer("kill", switch(&mut fx, ASKED_AT + 1));
         assert_ne!(second.event_id, first.event_id, "{scope:?}");
-        assert_eq!(second.seq, 2, "{scope:?}");
+        assert_eq!(second.seq, 3, "{scope:?}: after the first and its alert");
         assert_eq!(control(&fx).len(), 2, "{scope:?}: committed twice");
 
         let mut fx = Fixture::new();
@@ -1082,7 +1090,10 @@ fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
         );
         fx.journal.recover();
         let again = answer("kill", switch(&mut fx, ASKED_AT + 5));
-        assert_eq!(again.seq, 2, "{scope:?}: the re-run is committed");
+        assert_eq!(
+            again.seq, 3,
+            "{scope:?}: the re-run is committed after the lost pair"
+        );
         assert_eq!(control(&fx).len(), 2, "{scope:?}");
     }
 }
@@ -1096,6 +1107,7 @@ fn a_repeated_acknowledgment_reports_the_first() {
     let ack = Command::Acknowledge {
         event: common::runtime_id(42),
         request: None,
+        subject: None,
     };
     let typed = code_for(&fx, AGENT, &ack);
     let acknowledge = |fx: &mut Fixture, ids: &mut FixedIds, second: i64| {

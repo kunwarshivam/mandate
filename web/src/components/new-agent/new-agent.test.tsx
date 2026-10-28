@@ -276,8 +276,16 @@ describe("one conversation, as in any chat", () => {
     await send("XYZ");
     expect(lastReply()).toEqual(["XYZ is already traded by Agent 2. One agent trades an instrument on an account; choose another."]);
     await send("msft, aapl");
-    expect(lastReply()[0]).toBe("Got it: AAPL, MSFT to trade.");
+    expect(lastReply()).toEqual(["An agent trades one instrument for now. Name one symbol; another instrument needs an agent of its own."]);
+    await send("msft");
+    expect(lastReply()[0]).toBe("Got it: MSFT to trade.");
     expect(screen.getByRole("group", { name: "Models" })).toBeInTheDocument();
+  });
+
+  it("proposes one instrument at most in the version, whatever was asked (DEC-2809)", async () => {
+    renderFlow();
+    await toSummary();
+    expect(row("Most instruments at once").querySelector("dd")?.textContent).toMatch(/^1(?!\d)/);
   });
 });
 
@@ -738,7 +746,7 @@ describe("each step's words, over either data source", () => {
     const base = confirmedSetUp();
     const refused = { ...base.confirmed!, phase: "undelivered" as const, recordedAt: undefined, reason: "step_up_required" };
     expect(words("confirm", { ...base, confirmed: refused })).toBe(
-      "Not recorded: your deployment needs a passkey check this browser can't send yet. Version 1 was created and is not confirmed, and no agent exists.",
+      "Not recorded: your deployment asked for a passkey check that was not sent. Version 1 was created and is not confirmed, and no agent exists.",
     );
     const other = words("confirm", { ...base, confirmed: { ...refused, reason: "stale_base" } });
     expect(other).toBe("Not recorded: your deployment refused it. Version 1 was created and is not confirmed, and no agent exists.");

@@ -1,7 +1,8 @@
 import { type Dec, div, mul } from "@/lib/decimal";
 import { percent, usd } from "@/lib/format";
 import type { Asked, CompilerInput, OwnerMessage, Reading, Turn } from "./compiler";
-import { type Draft, LOSS_CEILING, type Loss, MODELS, NO_STRATEGY, type Strategy, checkLoss, compile, lossCeilingUsd, readStated, readStrategy, readSymbols } from "./draft";
+import { type Draft, LOSS_CEILING, type Loss, MODELS, type ModelChoice, NO_STRATEGY, type Strategy, checkLoss, compile, constraintBroken, lossCeilingUsd, readStated, readStrategy, readSymbols } from "./draft";
+import type { InstrumentRef } from "@/fixtures/types";
 
 /**
  * Setting up an agent as one conversation (brief A0 to A2, DEC-476, DEC-477). The owner answers in
@@ -17,7 +18,8 @@ import { type Draft, LOSS_CEILING, type Loss, MODELS, NO_STRATEGY, type Strategy
  * anything but a stated `false`), under which no draft can be created here.
  */
 export interface Checks {
-  room: Dec;
+  /** The account's dollars no agent uses, or `null` where the deployment does not report them, so the deployment judges V-002 itself. */
+  room: Dec | null;
   claimedBy: (symbol: string) => string | null;
   independentApproval: boolean;
 }
@@ -56,6 +58,10 @@ export interface Conversation {
   /** Counts every change to the owner's values, so a summary shown before a change is never the one created. */
   revision: number;
   serial: number;
+  /** The models the owner may choose: the fixture catalogue's, or those the deployment registered (DEC-2136). */
+  models: readonly ModelChoice[];
+  /** The instruments the deployment registered, by symbol; `null` over the fixtures, which pin any symbol. */
+  instruments: Readonly<Record<string, InstrumentRef>> | null;
 }
 
 export function sameStep(a: Step, b: Step): boolean {
@@ -77,7 +83,7 @@ export function nextStep(c: Conversation): Step {
   if (!c.goal) return { kind: "goal" };
   if (!c.loss) return { kind: "loss" };
   if (!c.symbols) return { kind: "symbols" };
-  const model = MODELS.find((m) => m.id === c.strategy.model);
+  const model = c.models.find((m) => m.id === c.strategy.model);
   if (!model) return { kind: "model" };
   const unset = model.params.find((p) => !c.strategy.params[p.key]);
   return unset ? { kind: "param", key: unset.key } : { kind: "ready" };
@@ -129,7 +135,7 @@ export function question(step: Step, c: Conversation, checks: Checks): string {
     case "model":
       return "How should it decide? Pick a model, or name it. They're in alphabetical order, and Owlhead recommends none.";
     case "param":
-      return MODELS.flatMap((m) => m.params).find((p) => p.key === step.key)?.question ?? "";
+      return c.models.flatMap((m) => m.params).find((p) => p.key === step.key)?.question ?? "";
     case "ready":
       return readyLine(checks);
     default: {
@@ -185,8 +191,9 @@ function missedBefore(c: Conversation, step: Step): boolean {
   return false;
 }
 
-export function startConversation(): Conversation {
-  const empty: Conversation = { entries: [], messages: [], money: null, loss: null, goal: null, notes: [], symbols: null, strategy: NO_STRATEGY, figuresOnly: false, revision: 0, serial: 0 };
+/** A new conversation; `figuresOnly` where no model reads the owner's words, so only figures are read, exactly as written. */
+export function startConversation({ figuresOnly = false, models = MODELS, instruments = null }: { figuresOnly?: boolean; models?: readonly ModelChoice[]; instruments?: Readonly<Record<string, InstrumentRef>> | null } = {}): Conversation {
+  const empty: Conversation = { entries: [], messages: [], money: null, loss: null, goal: null, notes: [], symbols: null, strategy: NO_STRATEGY, figuresOnly, revision: 0, serial: 0, models, instruments };
   return push(empty, { kind: "said", lines: [INTRO], asks: { kind: "money" } });
 }
 
@@ -200,11 +207,22 @@ export function say(c: Conversation, text: string): [Conversation, CompilerInput
 /** The compiler's input for one of the owner's messages, again on a retry. */
 export function inputFor(c: Conversation, messageId: string): CompilerInput {
   const upTo = c.messages.findIndex((m) => m.id === messageId);
-  return { messages: c.messages.slice(0, upTo + 1), asked: askedFor(nextStep(c)), models: MODELS.map((m) => ({ id: m.id, name: m.name })) };
+  return { messages: c.messages.slice(0, upTo + 1), asked: askedFor(nextStep(c)), models: c.models };
 }
 
 function moneyRoom(value: Dec, checks: Checks): string | null {
+  if (checks.room === null) return null;
   return value > checks.room ? `Your paper account has ${usd(checks.room)} that no agent uses, less than the ${usd(value)} this agent would use. Write a smaller amount.` : null;
+}
+
+/** A symbol the deployment has not registered cannot be pinned (the create refuses it): it says which it lists. */
+function notRegistered(symbols: readonly string[], registered: Readonly<Record<string, InstrumentRef>>): string {
+  const listed = Object.keys(registered).sort();
+  const named = symbols.join(", ");
+  const is = symbols.length === 1 ? "is" : "are";
+  return listed.length === 0
+    ? `${named} ${is} not registered on your deployment, and it lists no instrument yet, so no agent can trade one here.`
+    : `${named} ${is} not registered on your deployment. It lists ${listed.join(", ")}.`;
 }
 
 function claimed(symbols: readonly string[], checks: Checks): string | null {
@@ -247,20 +265,27 @@ function apply(c: Conversation, r: Reading, messageId: string, checks: Checks): 
     case "symbols": {
       const read = readSymbols(r.symbols.join(" "));
       if (!read.ok) return [c, { refused: read.error }];
+      const unregistered = c.instruments ? read.value.filter((s) => !c.instruments![s]) : [];
+      if (unregistered.length > 0) return [c, { refused: notRegistered(unregistered, c.instruments!) }];
+      const otherClass = c.instruments ? read.value.filter((s) => c.instruments![s].asset_class !== "us_equity") : [];
+      if (otherClass.length > 0) return [c, { refused: `${otherClass.join(", ")} ${otherClass.length === 1 ? "is" : "are"} registered as crypto, which this set-up does not offer yet: it sets up agents that trade US stocks and ETFs. Choose another.` }];
       const taken = claimed(read.value, checks);
       if (taken) return [c, { refused: taken }];
       return [changed(c, { symbols: read.value }), { noted: `${read.value.join(", ")} to trade` }];
     }
     case "model": {
-      const model = MODELS.find((m) => m.id === r.model);
+      const model = c.models.find((m) => m.id === r.model);
       if (!model || c.strategy.model === model.id) return [c, null];
       return [chosen(c, model.id), { noted: `the ${model.name} model` }];
     }
     case "param": {
-      const param = MODELS.find((m) => m.id === c.strategy.model)?.params.find((p) => p.key === r.key);
+      const param = c.models.find((m) => m.id === c.strategy.model)?.params.find((p) => p.key === r.key);
       if (!param) return [c, null];
       const read = param.read(r.value);
       if (!read.ok) return [c, { refused: read.error }];
+      const model = c.models.find((m) => m.id === c.strategy.model);
+      const broken = model ? constraintBroken(model, { ...c.strategy.params, [r.key]: read.value }) : null;
+      if (broken) return [c, { refused: broken }];
       return [changed(c, { strategy: { ...c.strategy, params: { ...c.strategy.params, [r.key]: read.value } } }), { noted: `${param.label.split(",")[0].toLowerCase()} of ${read.value}` }];
     }
     default: {
@@ -343,13 +368,13 @@ export function readWithoutModel(c: Conversation): Conversation {
 }
 
 function chosen(c: Conversation, model: Strategy["model"]): Conversation {
-  const spec = MODELS.find((m) => m.id === model);
+  const spec = c.models.find((m) => m.id === model);
   const params = Object.fromEntries((spec?.params ?? []).filter((p) => c.strategy.params[p.key]).map((p) => [p.key, c.strategy.params[p.key]]));
   return changed(c, { strategy: { model, params } });
 }
 
 export function chooseModel(c: Conversation, model: Strategy["model"], checks: Checks): Conversation {
-  const spec = MODELS.find((m) => m.id === model);
+  const spec = c.models.find((m) => m.id === model);
   if (!spec || c.strategy.model === model) return c;
   return reply(c, chosen(push(c, { kind: "owner", text: spec.name }), model), [`Got it: the ${spec.name} model.`], checks);
 }
@@ -368,14 +393,14 @@ export function draftOf(c: Conversation): Draft | null {
     });
   const read = readStated({ money: c.money, loss: c.loss, goal: c.goal.quote, answers, notes: c.notes });
   if (!read.ok) return null;
-  const strategy = readStrategy(c.strategy);
+  const strategy = readStrategy(c.strategy, c.models);
   return compile(read.value, c.symbols ?? [], strategy.ok ? strategy.value : null);
 }
 
 /** Why the agent cannot be created as it stands, or null: the account may have changed since a value was said. The runtime repeats V-002 and V-006 when it deploys. */
 export function blocker(c: Conversation, checks: Checks): string | null {
   if (!c.money || !c.loss || !c.goal) return "Say how much money it can use, what it's for, and how much it could lose first.";
-  const strategy = readStrategy(c.strategy);
+  const strategy = readStrategy(c.strategy, c.models);
   if (!strategy.ok) return strategy.error;
   if (!c.symbols || c.symbols.length === 0) return "Add at least one symbol. Only you choose what it may trade.";
   return moneyRoom(c.money.value, checks) ?? claimed(c.symbols, checks);

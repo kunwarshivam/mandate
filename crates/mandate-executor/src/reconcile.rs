@@ -1,9 +1,10 @@
 //! Reconciliation: one pure function over a snapshot, the folded state, and the account ledger
 //! (E7-3, trading-domain spec §11).
 
+use mandate_notify::OwnerAlertKind;
 use std::collections::BTreeSet;
 
-use mandate_accounting::{InstrumentId, Side};
+use mandate_accounting::{AccountType, InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_num::{Fraction, Qty, SignedQty};
 
@@ -16,12 +17,13 @@ use crate::orders::{
     EXTERNAL, StateEvidence, account_fields, account_restriction, broker_id, every_agent_alerted,
     fill, record_state_change, status_mapping, transition,
 };
-use crate::payload::{int, text};
+use crate::payload::{broker_text, int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
-    Adopted, BrokerAccount, BrokerOrder, BrokerSnapshot, Difference, EventId, Mode, OrderState,
-    ReconcileReason, Reconciliation, ReconciliationVerdict, StatusMapping, Unexplained,
+    AccountDeclaration, Adopted, BrokerAccount, BrokerOrder, BrokerSnapshot, DeclaredRegime,
+    Difference, EventId, Mode, OrderState, ReconcileReason, Reconciliation, ReconciliationVerdict,
+    StatusMapping, Unexplained,
 };
 
 /// The order of the steps is part of the algorithm: **orders, then fills, then positions, then
@@ -188,15 +190,21 @@ fn orders(
         if ours {
             continue;
         }
-        let mut pairs = vec![
-            ("broker_order_id", text(open.broker_order_id.clone())),
+        let pairs = vec![
+            ("source", text("open_order")),
+            (
+                "broker_order_id",
+                broker_text(Some(open.broker_order_id.as_str())),
+            ),
+            ("fill_id", Value::Null),
+            (
+                "client_order_id",
+                broker_text(open.client_order_id.as_deref()),
+            ),
             ("instrument", text(open.instrument.as_str())),
             ("side", text(side_name(open.side))),
             ("qty", text(open.qty.to_string())),
         ];
-        if let Some(raw) = &open.client_order_id {
-            pairs.push(("client_order_id", text(raw.clone())));
-        }
         let ingested = batch.journal("ExternalActivityIngested", None, pairs)?;
         differences.push(Difference::unexplained(
             Unexplained::ExternalActivity,
@@ -210,7 +218,7 @@ fn orders(
             Mode::ExitsOnly,
             &restriction_for(EXTERNAL),
             first,
-            "external_activity",
+            OwnerAlertKind::ExternalActivity,
         )?;
     }
     Ok(())
@@ -466,7 +474,7 @@ fn positions(
         if mismatch {
             let holders = agents(&batch.view, Some(&instrument));
             restrict(batch, &holders, Mode::Paused, instrument.as_str())?;
-            batch.notify(observed, "reconciliation_mismatch");
+            batch.notify(observed, OwnerAlertKind::Reconciliation);
             differences.push(Difference::unexplained(
                 Unexplained::Position,
                 instrument.as_str(),
@@ -532,11 +540,11 @@ fn cash(
         .checked_add(batch.view.unposted_fees.abs())?;
     let drift = snapshot.account.cash.checked_sub(model)?.abs();
     let inside = drift <= band;
-    let mut fields = account_fields(&snapshot.account)?;
+    let (version, mut fields) = snapshot_fields(&snapshot.account, snapshot.declared)?;
     fields.push(("model_cash", text(model.to_string())));
     fields.push(("cash_band", text(band.to_string())));
     fields.push(("cash_in_band", Value::Bool(inside)));
-    let recorded = batch.journal("AccountSnapshotRecorded", None, fields)?;
+    let recorded = batch.journal_version("AccountSnapshotRecorded", version, None, fields)?;
     if !inside {
         differences.push(Difference::unexplained(Unexplained::Cash, "cash"));
         if batch.view.cash_out_of_band >= CASH_PERSISTENT_RUNS {
@@ -545,10 +553,10 @@ fn cash(
                 Mode::Paused,
                 &restriction_for("cash"),
                 recorded.clone(),
-                "reconciliation_cash",
+                OwnerAlertKind::Reconciliation,
             )?;
         } else {
-            batch.notify(recorded.clone(), "reconciliation_cash_drift");
+            batch.notify(recorded.clone(), OwnerAlertKind::Reconciliation);
         }
     }
     Ok(Some(recorded))
@@ -579,8 +587,11 @@ fn fees(
         Some(recorded) => Some(recorded),
         None => {
             let before = batch.view.clone();
-            let own = fee_step_snapshot_fields(&snapshot.account)
-                .and_then(|fields| batch.journal("AccountSnapshotRecorded", None, fields));
+            let own = fee_step_snapshot_fields(&snapshot.account, snapshot.declared).and_then(
+                |(version, fields)| {
+                    batch.journal_version("AccountSnapshotRecorded", version, None, fields)
+                },
+            );
             match own {
                 Ok(recorded) => Some(recorded),
                 Err(_) => {
@@ -595,11 +606,57 @@ fn fees(
     Ok(())
 }
 
+/// An `AccountSnapshotRecorded`'s schema version and its members, as [`snapshot_fields`] writes them.
+pub(crate) type SnapshotPayload = (u64, Vec<(&'static str, Value)>);
+
+/// An `AccountSnapshotRecorded`'s version and its members other than the cash comparison and
+/// `risk_clock`. Under a connector's declaration, version 2 (journal spec v0.89 §9.35, DEC-2398):
+/// version 1's account members ([`account_fields`]), then the declared `account_type` and
+/// `day_trading_regime`, and the broker's `last_equity` and `maintenance_margin` as decimal text,
+/// as it reported them. With no declaration, version 1, version 1's members alone: a connector
+/// that declares no account rules does not state the figures as the broker's (Robinhood's are
+/// placeholders, DEC-933), and §9.35's writer "that has not read a figure writes version 1, never
+/// a made-up value" (`AGENTS.md` rule 3).
+///
+/// # Errors
+/// [`ExecutorError::NonCanonicalPayload`] only for a member the canonical form cannot carry, as
+/// [`crate::orders::account_fields`].
+pub(crate) fn snapshot_fields(
+    account: &BrokerAccount,
+    declared: Option<AccountDeclaration>,
+) -> Result<SnapshotPayload, ExecutorError> {
+    let mut fields = account_fields(account)?;
+    let Some(declared) = declared else {
+        return Ok((1, fields));
+    };
+    fields.push((
+        "account_type",
+        text(match declared.account_type {
+            AccountType::Cash => "cash",
+            AccountType::Margin => "margin",
+        }),
+    ));
+    fields.push((
+        "day_trading_regime",
+        text(match declared.regime {
+            DeclaredRegime::IntradayMargin => "intraday_margin",
+            DeclaredRegime::LegacyPdt => "legacy_pdt",
+        }),
+    ));
+    fields.push(("last_equity", text(account.last_equity.to_string())));
+    fields.push((
+        "maintenance_margin",
+        text(account.maintenance_margin.to_string()),
+    ));
+    Ok((2, fields))
+}
+
 /// The fee step's own `AccountSnapshotRecorded` payload, the one step 5 records when step 4 had no
-/// base to record one against: every member journal spec v0.7 §9.2 closes, with `model_cash`,
+/// base to record one against: every member journal spec v0.89 §9.35 closes, with `model_cash`,
 /// `cash_band`, and `cash_in_band` present as `null` (§4.2), because a fee posting compares no
-/// cash and rule 24 makes all three `null` together. Each member has §9.2's type: the statuses
-/// text, the three flags booleans, `multiplier` an integer, and the five amounts decimal text. The
+/// cash and rule 24 makes all three `null` together. Each member has §9.35's type: the statuses
+/// text, the three flags booleans, `multiplier` an integer, the declaration's names or `null`, and
+/// the seven amounts decimal text ([`snapshot_fields`]). The
 /// vectors' `snapshot_fees` draft is that payload, and §9.1's absent-member rule refuses it with
 /// a member missing, so the reduced form (`orders::account_fields` alone) is refused at `append`
 /// (DEC-261 item 7, DEC-303). The batch stamps `risk_clock` beside these members (DEC-306). `fees`
@@ -610,12 +667,13 @@ fn fees(
 /// [`crate::orders::account_fields`].
 pub(crate) fn fee_step_snapshot_fields(
     account: &BrokerAccount,
-) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
-    let mut fields = account_fields(account)?;
+    declared: Option<AccountDeclaration>,
+) -> Result<SnapshotPayload, ExecutorError> {
+    let (version, mut fields) = snapshot_fields(account, declared)?;
     fields.push(("model_cash", Value::Null));
     fields.push(("cash_band", Value::Null));
     fields.push(("cash_in_band", Value::Null));
-    Ok(fields)
+    Ok((version, fields))
 }
 
 /// The fee step's answer to a fee difference: every agent paused under the fees restriction, and
@@ -645,7 +703,7 @@ pub(crate) fn fee_step_pause_and_alert(
             ("originated", Value::Bool(true)),
         ],
     )?;
-    batch.notify(recorded.unwrap_or(paused), "reconciliation_fees");
+    batch.notify(recorded.unwrap_or(paused), OwnerAlertKind::Reconciliation);
     Ok(())
 }
 
@@ -703,7 +761,8 @@ fn restrict(
 #[cfg(test)]
 pub(crate) mod tests {
     use mandate_accounting::{
-        AssetClass, Config, CryptoFees, EquityFees, FeeRounding, InstrumentId, Side, TafCapBasis,
+        AccountType, AssetClass, Config, CryptoFees, EquityFees, FeeRounding, InstrumentId, Side,
+        TafCapBasis,
     };
     use mandate_canon::{Value, to_canonical};
     use mandate_journal::Draft;
@@ -721,11 +780,12 @@ pub(crate) mod tests {
     use crate::state::{ExecutorState, ObservedAccount, fold};
     use crate::step::handle;
     use crate::types::{
-        AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount, BrokerFill,
-        BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate,
-        DifferenceKind, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId, FoldedEvent,
-        Input, IntentBody, IntentHandoff, MandateVersion, Mode, Order, OrderState,
-        ProtectionPrices, Purpose, ReconcileReason, Seq, TimeInForce, WorkspaceId, WriterEpoch,
+        AccountDeclaration, AccountRef, AccountScope, AccountState, ActivityCursor, AgentId,
+        BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest,
+        BrokerSnapshot, BrokerUpdate, DeclaredRegime, DifferenceKind, Effect, EventDraft, EventId,
+        ExecutorConfig, ExitTier, FillId, FoldedEvent, Input, IntentBody, IntentHandoff,
+        MandateVersion, Mode, Order, OrderState, ProtectionPrices, Purpose, ReconcileReason, Seq,
+        TimeInForce, WorkspaceId, WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does,
@@ -738,7 +798,7 @@ pub(crate) mod tests {
         }
     }
 
-    struct SchemaIds;
+    pub(crate) struct SchemaIds;
 
     impl IdGen for SchemaIds {
         fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
@@ -870,6 +930,7 @@ pub(crate) mod tests {
             fills: Vec::new(),
             cursor: ActivityCursor("cursor-1".to_owned()),
             reason,
+            declared: None,
             taken_at_head: Seq(0),
         })
     }
@@ -936,6 +997,70 @@ pub(crate) mod tests {
             Ok(())
         }
 
+        /// Hands the executor an owner's acknowledgment of the standing hold under `restriction`
+        /// (journal spec v0.104 §9.28, DEC-2830): version 2, `subject` `reconciliation`, naming the
+        /// executor's latest `AgentModeApplied` under it, with fresh step-up evidence at the
+        /// executor's clock.
+        pub(crate) fn acknowledge_hold(
+            &mut self,
+            restriction: &str,
+            ports: &Ports<'_>,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let hold = self
+                .journal
+                .iter()
+                .rev()
+                .find(|e| {
+                    e.event_type == "AgentModeApplied"
+                        && e.payload.get("restriction").and_then(Value::as_str) == Some(restriction)
+                })
+                .map(|e| e.event_id.0.clone())
+                .ok_or_else(|| ExecutorError::NotInterpreted {
+                    what: format!("no hold under {restriction}"),
+                    story: "E7-4b",
+                })?;
+            let at = self.state.clock();
+            let secs = crate::payload::int(u64::try_from(at.secs()).unwrap_or(0))?;
+            let original = FoldedEvent {
+                stream: "ctl:ws1".to_owned(),
+                seq: Seq(1),
+                event_id: EventId(format!("ctl-ack-{hold}")),
+                event_type: "OwnerAcknowledged".to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("agent", Value::Str("agent-a".to_owned())),
+                    ("event", Value::Str(hold)),
+                    ("subject", Value::Str("reconciliation".to_owned())),
+                    ("user", Value::Str("user-1".to_owned())),
+                    ("requested_by", Value::Str("user-1".to_owned())),
+                    ("independent_required", Value::Bool(false)),
+                    ("request", Value::Null),
+                    ("submitted_at", secs.clone()),
+                    ("risk_clock", crate::payload::risk_clock_stamp(at)?),
+                    (
+                        "step_up",
+                        object(vec![
+                            ("assertion_id", Value::Str("assertion-1".to_owned())),
+                            ("authenticated_at", secs),
+                            ("method", Value::Str("cli_confirm".to_owned())),
+                        ])?,
+                    ),
+                ])?,
+            };
+            self.run(
+                Input::Acknowledgment(crate::types::AcknowledgmentHandoff {
+                    original,
+                    schema_version: 2,
+                    processed_at: at,
+                    spent: std::collections::BTreeSet::new(),
+                    request_spent: None,
+                    independent_overlay: false,
+                    methods: std::collections::BTreeSet::from(["cli_confirm".to_owned()]),
+                }),
+                ports,
+            )
+        }
+
         /// Handles one input and commits at most `keep` of its drafts; `usize::MAX` commits all.
         fn run_keeping(
             &mut self,
@@ -943,7 +1068,27 @@ pub(crate) mod tests {
             ports: &Ports<'_>,
             keep: usize,
         ) -> Result<Vec<Effect>, ExecutorError> {
-            let effects = handle(&mut self.state, input, ports, &ALLOWING_BINDING_GATE)?;
+            self.run_binding(input, ports, keep, &ALLOWING_BINDING_GATE)
+        }
+
+        /// [`Self::run`] with `binding_gate` as the deployment's configuration.
+        pub(crate) fn run_with(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            self.run_binding(input, ports, usize::MAX, binding_gate)
+        }
+
+        fn run_binding(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            keep: usize,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let effects = handle(&mut self.state, input, ports, binding_gate)?;
             let mut kept = 0;
             for effect in &effects {
                 if let Effect::Journal(draft) = effect {
@@ -1190,13 +1335,15 @@ pub(crate) mod tests {
             .effects
             .iter()
             .filter_map(|effect| match effect {
-                Effect::Notify(reference) => Some(reference.message_key),
+                Effect::Notify(reference) => Some(reference.kind.key()),
                 _ => None,
             })
             .collect();
         assert_eq!(
             alerts,
-            vec!["reconciliation_cash_drift", "reconciliation_fees"]
+            vec!["reconciliation"],
+            "one alert for the snapshot both differences are about: one subject, one kind \
+             (journal spec rule 130)"
         );
         Ok(())
     }
@@ -1247,12 +1394,11 @@ pub(crate) mod tests {
     }
 
     /// DEC-140's slice-5 amendment: a stream slice 5 wrote may hold every agent `exits_only` under
-    /// `reconciliation:incomplete`. The cash slice completes those runs, and the owner's
-    /// acknowledgment of `incomplete`, with step-up evidence, lifts the hold (§11, interpretation
-    /// 14): openings are submitted again. A run that now completes lifts nothing by itself, and an
-    /// acknowledgment without step-up evidence lifts nothing either.
+    /// `reconciliation:incomplete`. The cash slice completes those runs, but a run that now
+    /// completes lifts nothing by itself: the owner's acknowledgment of the hold, with step-up
+    /// (§11, journal spec v0.104 §9.28, DEC-2830), lifts it, and openings are submitted again.
     #[test]
-    fn an_acknowledgment_of_incomplete_lifts_the_slice_5_hold() -> Result<(), ExecutorError> {
+    fn an_acknowledgment_of_the_slice_5_hold_lifts_it() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -1305,31 +1451,13 @@ pub(crate) mod tests {
         )?;
         assert_eq!(submitted(&held), 0, "the hold outlives a completed run");
 
-        let acknowledged = |step_up: &str| -> Result<Value, ExecutorError> {
-            object(vec![
-                ("subject", Value::Str("incomplete".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str(step_up.to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])
-        };
-        executor.commit_one("OwnerAcknowledged", acknowledged("")?)?;
+        executor.acknowledge_hold("reconciliation:incomplete", &ports)?;
         assert_eq!(
             executor
                 .state
                 .effective_mode(&AgentId("agent-a".to_owned())),
-            Mode::ExitsOnly,
-            "no step-up evidence, no lift"
-        );
-        executor.commit_one("OwnerAcknowledged", acknowledged("assertion-1")?)?;
-        assert_eq!(
-            executor
-                .state
-                .effective_mode(&AgentId("agent-a".to_owned())),
-            Mode::Normal
+            Mode::Normal,
+            "the owner's acknowledgment of the hold lifts it"
         );
         let opening = executor.run(
             intent(
@@ -1385,6 +1513,7 @@ pub(crate) mod tests {
             vec![
                 "BrokerPositionObserved",
                 "AgentModeApplied",
+                "OwnerAlertSent",
                 "ReconciliationRun",
                 "GateDecided"
             ],
@@ -1525,21 +1654,50 @@ pub(crate) mod tests {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 };
-                field("verdict").zip(field("reason_code"))
+                field("verdict").map(|verdict| (verdict, field("reason_code").unwrap_or_default()))
             }
             _ => None,
         })
     }
 
+    /// Ten AAPL bought and filled by `agent-a`'s order, so they are its lots (DEC-2849).
     fn filled_ten(executor: &mut Executor) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("agent", Value::Str("agent-a".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty", Value::Str("10".to_owned())),
+                ("limit", Value::Str("150".to_owned())),
+                ("purpose", Value::Str("open".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
         executor.commit_one(
             "FillApplied",
             object(vec![
                 ("fill_id", Value::Str("f-0".to_owned())),
+                ("client_order_id", Value::Str("md-ten".to_owned())),
                 ("instrument", Value::Str("AAPL".to_owned())),
                 ("side", Value::Str("buy".to_owned())),
                 ("qty_gross", Value::Str("10".to_owned())),
                 ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("state", Value::Str("filled".to_owned())),
                 (
                     "risk_clock",
                     crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
@@ -1556,6 +1714,263 @@ pub(crate) mod tests {
                 crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
             )])?,
         )
+    }
+
+    /// An unattributed fill of `qty` AAPL on `side`, the owner's own trade outside Mandate.
+    fn owners_fill(
+        executor: &mut Executor,
+        id: &str,
+        side: &str,
+        qty: &str,
+        at: i64,
+    ) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", Value::Str(id.to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str(side.to_owned())),
+                ("qty_gross", Value::Str(qty.to_owned())),
+                ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(at))?,
+                ),
+            ])?,
+        )
+    }
+
+    /// The `OwnerAlertSent` drafts in `effects`, each as its payload's members.
+    fn owner_alerts(effects: &[Effect]) -> Vec<(EventId, Option<EventId>, Value)> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OwnerAlertSent" => Some((
+                    draft.event_id.clone(),
+                    draft.causation_id.clone(),
+                    draft.payload.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The event id of the `GateDecided` in `effects`.
+    fn decided_id(effects: &[Effect]) -> Option<EventId> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "GateDecided" => {
+                Some(draft.event_id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// DEC-2855: the owner is alerted once per episode of openings held `attribution_deficit`. The
+    /// first held opening's `GateDecided` is the subject, and the alert carries only it, the kind
+    /// and a `null` command (`AGENTS.md` rule 6); a second opening held in the same episode raises
+    /// nothing. Once the owner buys the gap back the held openings go, the episode ends, and the
+    /// next deficit's first hold is alerted again. A replay of the journal reaches the same state.
+    #[test]
+    fn a_deficit_episode_alerts_the_owner_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let buy = |id: &str| intent(id, "agent-a", Side::Buy, Purpose::Open);
+        let first = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ3")?, &ports)?;
+        assert_eq!(
+            gate_decision(&first),
+            Some(("hold".to_owned(), "attribution_deficit".to_owned()))
+        );
+        let subject = decided_id(&first).ok_or_else(|| ExecutorError::NotInterpreted {
+            what: "no GateDecided".to_owned(),
+            story: "E6-15",
+        })?;
+        let raised = owner_alerts(&first);
+        assert_eq!(raised.len(), 1, "one alert for the episode's first hold");
+        let (_, cause, payload) = raised
+            .first()
+            .ok_or_else(|| ExecutorError::NotInterpreted {
+                what: "no alert".to_owned(),
+                story: "E6-15",
+            })?;
+        assert_eq!(
+            cause.as_ref(),
+            Some(&subject),
+            "rule 119: caused by its subject"
+        );
+        assert_eq!(
+            payload,
+            &object(vec![
+                ("subject", Value::Str(subject.0.clone())),
+                ("kind", Value::Str("attribution_deficit".to_owned())),
+                ("owner_command", Value::Null),
+            ])?,
+            "nothing about the instrument, a quantity or a price"
+        );
+        let second = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ4")?, &ports)?;
+        assert_eq!(
+            gate_decision(&second),
+            Some(("hold".to_owned(), "attribution_deficit".to_owned()))
+        );
+        assert!(
+            owner_alerts(&second).is_empty(),
+            "the same episode alerts once"
+        );
+
+        owners_fill(&mut executor, "f-owner-2", "buy", "5", 0)?;
+        let released = executor.run(Input::Tick(crate::types::RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            submitted(&released),
+            2,
+            "both openings go once the gap is bought back"
+        );
+        assert!(executor.state.hold_reasons.is_empty(), "the episode ended");
+
+        owners_fill(&mut executor, "f-owner-3", "sell", "5", 1)?;
+        let next = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ5")?, &ports)?;
+        assert_eq!(owner_alerts(&next).len(), 1, "a new episode alerts again");
+
+        let mut replayed = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        for event in &executor.journal {
+            fold(&mut replayed, event)?;
+        }
+        assert_eq!(replayed.hold_reasons, executor.state.hold_reasons);
+        assert_eq!(replayed.held, executor.state.held);
+        Ok(())
+    }
+
+    /// A buy of 5 `instrument` by `agent-a` to open, as intent `id`.
+    fn opening_in(id: &str, instrument: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(id.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new(instrument)?,
+                side: Side::Buy,
+                qty: Qty::parse("5")?,
+                limit: Some(Price::parse("150")?),
+                purpose: Purpose::Open,
+                protection: None,
+            },
+            confirmation: None,
+        }))
+    }
+
+    /// A protective leg resting in `instrument` that no agent can be named for (§5.4).
+    fn ownerless_leg(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+    ) -> Result<(), ExecutorError> {
+        let leg = crate::types::Order {
+            client_order_id: ClientOrderId::parse(id)?,
+            intent_id: None,
+            agent: None,
+            instrument: InstrumentId::new(instrument)?,
+            side: Side::Sell,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Accepted,
+            attempt: 1,
+            purpose: Purpose::Protective,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        executor
+            .state
+            .orders
+            .insert(leg.client_order_id.clone(), leg);
+        Ok(())
+    }
+
+    /// The kinds of the owner alerts in `effects`, each with the `GateDecided` it names.
+    fn alerted(effects: &[Effect]) -> Vec<(String, bool)> {
+        let subject = decided_id(effects).map(|id| Value::Str(id.0));
+        owner_alerts(effects)
+            .into_iter()
+            .map(|(_, _, payload)| {
+                (
+                    payload
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    payload.get("subject") == subject.as_ref(),
+                )
+            })
+            .collect()
+    }
+
+    /// DEC-2855 for `protection_unattributed`, and each reason and instrument its own episode: an
+    /// ownerless leg in AAPL holds a first opening, alerted once, and a second, not alerted. A
+    /// deficit in AAPL then holds an opening `attribution_deficit`, a new episode of its own reason,
+    /// and an ownerless leg in MSFT holds an opening there, a new episode of its own instrument:
+    /// each alerted once, its alert naming its own hold.
+    #[test]
+    fn each_reason_and_instrument_is_its_own_episode() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        ownerless_leg(&mut executor, "md-leg-aapl", "AAPL")?;
+        let held = |reason: &str| Some(("hold".to_owned(), reason.to_owned()));
+        let unattributed = || vec![("protection_unattributed".to_owned(), true)];
+        let first = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY10", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&first), held("protection_unattributed"));
+        assert_eq!(alerted(&first), unattributed());
+        let second = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY11", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&second), held("protection_unattributed"));
+        assert!(alerted(&second).is_empty(), "the same episode alerts once");
+
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let deficit = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY12", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&deficit), held("attribution_deficit"));
+        assert_eq!(
+            alerted(&deficit),
+            vec![("attribution_deficit".to_owned(), true)],
+            "another reason in the same instrument is another episode"
+        );
+
+        ownerless_leg(&mut executor, "md-leg-msft", "MSFT")?;
+        let other = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY13", "MSFT")?, &ports)?;
+        assert_eq!(gate_decision(&other), held("protection_unattributed"));
+        assert_eq!(
+            alerted(&other),
+            unattributed(),
+            "another instrument is another episode"
+        );
+        Ok(())
     }
 
     /// The coordinator's ruling on #174 (comment 5857742391), rule 3: on a stream that has
@@ -1762,7 +2177,7 @@ pub(crate) mod tests {
         effects
             .iter()
             .filter_map(|effect| match effect {
-                Effect::Notify(reference) => Some(reference.message_key),
+                Effect::Notify(reference) => Some(reference.kind.key()),
                 _ => None,
             })
             .collect()
@@ -1817,7 +2232,7 @@ pub(crate) mod tests {
                 alerts(&first),
                 drafted(&first).contains(&"AgentModeApplied")
             ),
-            (vec!["reconciliation_cash_drift"], false),
+            (vec!["reconciliation"], false),
             "run 1 out of the band alerts and pauses nobody"
         );
         assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
@@ -1826,7 +2241,7 @@ pub(crate) mod tests {
         let second = cash_run(&mut executor, "80000", &ports)?;
         assert_eq!(
             alerts(&second),
-            vec!["reconciliation_cash"],
+            vec!["reconciliation"],
             "run 2 out of the band, after the re-anchor and a restart, is persistent"
         );
         assert_eq!(
@@ -1845,7 +2260,7 @@ pub(crate) mod tests {
         let again = cash_run(&mut executor, "80000", &ports)?;
         assert_eq!(
             alerts(&again),
-            vec!["reconciliation_cash_drift"],
+            vec!["reconciliation"],
             "a run inside the band starts the count again"
         );
         assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
@@ -1921,7 +2336,8 @@ pub(crate) mod tests {
             [
                 "AccountStateObserved",
                 "AccountRestrictionChanged",
-                "AgentModeApplied"
+                "AgentModeApplied",
+                "OwnerAlertSent"
             ],
             "the complete account fact precedes its restriction and fail-closed mode effect"
         );
@@ -1964,7 +2380,7 @@ pub(crate) mod tests {
         ])?;
         assert!(
             executor.commit_one("OwnerAcknowledged", unnamed).is_err(),
-            "an acknowledgment with no user is refused"
+            "an acknowledgment copy that names no original is refused"
         );
         assert_eq!(
             executor
@@ -2331,6 +2747,741 @@ pub(crate) mod tests {
         Ok(executor)
     }
 
+    /// Everything's instruments, with the fill configuration a registered instrument carries, so a
+    /// fill of ours or of anyone's has the `config_refs` the journal requires (DEC-938 item 2).
+    struct Registered;
+
+    /// Instruments with no snapshot, on an account whose fill configuration is known: an
+    /// unattributed fill in any of them is accounted under the account's (DEC-2817).
+    struct AccountOnly;
+
+    impl InstrumentSnapshot for AccountOnly {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            Everything.asset_class(instrument)
+        }
+
+        fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Everything.increment(instrument)
+        }
+
+        fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier> {
+            Everything.exit_tier(instrument)
+        }
+
+        fn account_fill_refs(&self) -> Option<crate::ports::AccountFillRefs> {
+            let digest = |n: char| format!("sha256:{}", n.to_string().repeat(64));
+            Some(crate::ports::AccountFillRefs {
+                fee_config: digest('a'),
+                trading_calendar: digest('b'),
+                settlement_calendar: digest('c'),
+            })
+        }
+    }
+
+    impl InstrumentSnapshot for Registered {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            Everything.asset_class(instrument)
+        }
+
+        fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Everything.increment(instrument)
+        }
+
+        fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier> {
+            Everything.exit_tier(instrument)
+        }
+
+        fn fill_refs(&self, _instrument: &InstrumentId) -> Option<crate::ports::FillConfigRefs> {
+            let digest = |n: char| format!("sha256:{}", n.to_string().repeat(64));
+            Some(crate::ports::FillConfigRefs {
+                fee_config: digest('a'),
+                trading_calendar: digest('b'),
+                settlement_calendar: digest('c'),
+                instrument_snapshot: digest('d'),
+            })
+        }
+    }
+
+    /// `draft` through the journal's own `Draft::parse`, with its own `config_refs`, so a fill
+    /// drafted without the references its schema requires is refused here as the journal refuses it.
+    pub(crate) fn journal_accepts_with_refs(draft: &EventDraft) -> Result<(), ExecutorError> {
+        let causation = draft
+            .causation_id
+            .as_ref()
+            .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", id.0));
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{}",
+            "stream_id":"acct:ws1:acct-1","event_type":"{}","schema_version":{},
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":{causation},"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
+            "config_refs":{},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_id.0,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&to_canonical(&Value::Object(draft.config_refs.clone()))),
+            String::from_utf8_lossy(&to_canonical(&draft.payload))
+        );
+        Draft::parse(body.as_bytes()).map(|_| ()).map_err(|error| {
+            ExecutorError::NonCanonicalPayload {
+                field: format!("{}: {error}", draft.event_type),
+            }
+        })
+    }
+
+    fn external_fill(fill_id: &str) -> Result<BrokerFill, ExecutorError> {
+        Ok(BrokerFill {
+            fill_id: FillId(fill_id.to_owned()),
+            client_order_id: None,
+            broker_order_id: None,
+            instrument: aapl()?,
+            side: Side::Buy,
+            qty: Qty::parse("2")?,
+            price: Price::parse("150")?,
+            fees: Usd::ZERO,
+            trade_date: Date::new(2026, 9, 21)?,
+        })
+    }
+
+    /// The two cases DEC-2812 and DEC-2817 leave to DEC-2805: an external fill in an instrument with
+    /// no instrument snapshot on an account whose own fill configuration is not known either, so it
+    /// has no fill configuration to journal, and one whose fill id the broker sent empty. The
+    /// journal refuses the batch at its `FillApplied` alone, every other draft is one it would
+    /// accept, and DEC-2805 item 1's hold keeps the executor running.
+    #[test]
+    fn an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let unregistered = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let registered = Ports {
+            instruments: &Registered,
+            ..unregistered
+        };
+        for (ports, fill_id, at) in [
+            (&unregistered, "f-ext-1", "config_refs"),
+            (&registered, "", "payload.fill_id"),
+        ] {
+            let mut executor = Executor::opened(ports)?;
+            let run = executor.run_keeping(
+                Input::BrokerUpdate(BrokerUpdate::Fill(external_fill(fill_id)?)),
+                ports,
+                0,
+            )?;
+            assert_eq!(
+                drafted(&run),
+                vec![
+                    "ExternalActivityIngested",
+                    "FillApplied",
+                    "AgentModeApplied",
+                    "OwnerAlertSent"
+                ],
+                "{fill_id:?}"
+            );
+            for effect in &run {
+                match effect {
+                    Effect::Journal(draft) if draft.event_type == "FillApplied" => {
+                        let refused = journal_accepts_with_refs(draft).err();
+                        assert!(
+                            refused
+                                .as_ref()
+                                .is_some_and(|error| format!("{error:?}").contains(at)),
+                            "{fill_id:?}: refused at {at}: {refused:?}"
+                        );
+                    }
+                    Effect::Journal(draft) => journal_accepts_with_refs(draft)?,
+                    _ => {}
+                }
+            }
+            let held = executor.run(Input::BatchRefused, ports)?;
+            assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+            assert_eq!(
+                executor
+                    .state
+                    .effective_mode(&AgentId("agent-a".to_owned())),
+                Mode::ExitsOnly,
+                "every agent holds its openings"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2817: an external fill in an instrument with no snapshot is booked under the account's
+    /// fill configuration, naming the fee configuration and both calendars and no instrument
+    /// snapshot, in a batch the journal accepts whole. It moves the account's position in that
+    /// instrument, and every agent holds its openings until the owner acknowledges, as for any
+    /// external fill (trading spec §7.1).
+    #[test]
+    fn an_external_fill_in_an_instrument_with_no_snapshot_is_booked_on_the_accounts_refs()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &AccountOnly,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let run = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-6")?)),
+            &ports,
+        )?;
+        assert_eq!(
+            drafted(&run),
+            vec![
+                "ExternalActivityIngested",
+                "FillApplied",
+                "AgentModeApplied",
+                "OwnerAlertSent"
+            ]
+        );
+        let mut checked = false;
+        for effect in &run {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+                if draft.event_type == "FillApplied" {
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        ["fee_config", "settlement_calendar", "trading_calendar"],
+                        "the account's three, and no instrument snapshot"
+                    );
+                    checked = true;
+                }
+            }
+        }
+        assert!(checked, "the fill was drafted");
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?))
+        );
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::ExitsOnly
+        );
+        Ok(())
+    }
+
+    /// DEC-2812 (trading spec §6.1, §7.1): an external fill in a registered instrument is booked.
+    /// Its `FillApplied` is version 2's, naming no order (`null`), and the journal accepts the whole
+    /// batch. The fill moves the account's position and no order's filled quantity; every agent
+    /// holds its openings under `reconciliation:external_activity` until the owner acknowledges the
+    /// hold (DEC-2830); and the same fill read again is applied once.
+    #[test]
+    fn an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Registered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let before = executor.state.positions().get(&aapl()?).copied();
+        let run = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-5")?)),
+            &ports,
+        )?;
+        assert_eq!(
+            drafted(&run),
+            vec![
+                "ExternalActivityIngested",
+                "FillApplied",
+                "AgentModeApplied",
+                "OwnerAlertSent"
+            ]
+        );
+        for effect in &run {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+                if draft.event_type == "FillApplied" {
+                    assert_eq!(draft.schema_version, 2);
+                    assert_eq!(draft.payload.get("client_order_id"), Some(&Value::Null));
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        [
+                            "fee_config",
+                            "instrument_snapshot",
+                            "settlement_calendar",
+                            "trading_calendar"
+                        ],
+                        "a registered instrument's fill names its snapshot too (DEC-2817)"
+                    );
+                }
+            }
+        }
+        assert_eq!(before, None);
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?)),
+            "the account holds the 2 the owner bought"
+        );
+        assert!(
+            executor
+                .state
+                .orders
+                .values()
+                .all(|order| order.filled_qty == Qty::ZERO),
+            "no order of ours filled"
+        );
+        let agent = AgentId("agent-a".to_owned());
+        assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+
+        let again = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-5")?)),
+            &ports,
+        )?;
+        assert!(drafted(&again).is_empty(), "{:?}", drafted(&again));
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?)),
+            "applied once"
+        );
+
+        executor.acknowledge_hold("reconciliation:external_activity", &ports)?;
+        assert_eq!(
+            executor.state.effective_mode(&agent),
+            Mode::Normal,
+            "the owner's acknowledgment of the external activity's hold lifts it"
+        );
+        Ok(())
+    }
+
+    /// DEC-2821: a broker input the core could not apply holds every agent's openings under
+    /// `reconciliation:incomplete` and alerts the owner, once: with the hold in force, another
+    /// adds nothing. The owner's acknowledgment of the hold lifts it (DEC-2830).
+    #[test]
+    fn a_failed_broker_input_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let held = executor.run(Input::InputFailed, &ports)?;
+        assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+        for effect in &held {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+            }
+        }
+        let agent = AgentId("agent-a".to_owned());
+        assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+        assert_eq!(
+            drafted(&executor.run(Input::InputFailed, &ports)?),
+            Vec::<&str>::new(),
+            "the hold is already in force"
+        );
+        executor.acknowledge_hold("reconciliation:incomplete", &ports)?;
+        assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
+        Ok(())
+    }
+
+    /// DEC-2821: the failed input may have been the answer to a submission, which the core never
+    /// learns of. An order still awaiting its answer goes `Unknown` and is looked up by its own id,
+    /// as when the broker answers nothing, so its acceptance or fill is found and its protection
+    /// placed; it is never sent again.
+    #[test]
+    fn a_failed_broker_input_looks_up_the_order_awaiting_its_answer() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            submitted(&opening),
+            1,
+            "the opening is sent and awaits its answer"
+        );
+        let failed = executor.run(Input::InputFailed, &ports)?;
+        assert!(
+            drafted(&failed).contains(&"OrderStateChanged"),
+            "{:?}",
+            drafted(&failed)
+        );
+        assert!(
+            failed.iter().any(|effect| matches!(
+                effect,
+                Effect::Broker(BrokerRequest::GetOrderByClientId(_))
+            )),
+            "the order is looked up: {failed:?}"
+        );
+        assert_eq!(submitted(&failed), 0, "and never sent again");
+        assert!(
+            executor
+                .state
+                .orders
+                .values()
+                .all(|order| order.state != OrderState::Submitting),
+            "no order is left awaiting an answer that will not come"
+        );
+        Ok(())
+    }
+
+    /// DEC-2805: a refused batch leaves no tick of its own behind. The batch keeps `now` and
+    /// `previous_now` as they stood before its input, and a refusal puts them back, so the next
+    /// tick is judged against the last tick that committed and an edge it crosses still fires.
+    #[test]
+    fn a_refused_batch_leaves_the_clocks_as_its_input_found_them() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let tick = |at: i64| Input::Tick(crate::types::RiskClock::from_secs(at));
+        let clock = |at: i64| Some(crate::types::RiskClock::from_secs(at));
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(tick(10), &ports)?;
+        executor.run(tick(20), &ports)?;
+        assert_eq!(
+            (executor.state.now, executor.state.previous_now),
+            (clock(20), clock(10))
+        );
+        executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-4")?)),
+            &ports,
+            0,
+        )?;
+        assert_eq!(
+            executor.state.unresolved().map(|batch| batch.clocks),
+            Some((clock(20), clock(10))),
+            "the batch keeps the clocks its input found"
+        );
+
+        let found = executor
+            .state
+            .unresolved
+            .as_ref()
+            .map(|batch| batch.clocks)
+            .ok_or_else(|| missing("the refused batch"))?;
+        executor.state.now = clock(30);
+        executor.state.previous_now = clock(20);
+        executor.run(Input::BatchRefused, &ports)?;
+        assert_eq!(
+            (executor.state.now, executor.state.previous_now),
+            found,
+            "a refusal puts back the clocks its input found"
+        );
+        Ok(())
+    }
+
+    /// DEC-2805 item 1: a batch the journal refused leaves nothing committed. The core forgets it,
+    /// so later inputs are handled rather than refused as an unresolved append. It holds every
+    /// agent's openings under `reconciliation:incomplete` and alerts the owner, once: a second
+    /// refusal adds nothing. An opening is then held, and the owner's acknowledgment of the hold
+    /// lifts it as it lifts any incomplete run's (DEC-2830).
+    #[test]
+    fn a_refused_batch_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        let refused = executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-2")?)),
+            &ports,
+            0,
+        )?;
+        assert!(
+            !drafted(&refused).is_empty(),
+            "the refused batch drafted something"
+        );
+        assert!(executor.state.unresolved().is_some());
+
+        let held = executor.run(Input::BatchRefused, &ports)?;
+        assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+        let applied = held
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => Some(draft),
+                _ => None,
+            })
+            .ok_or_else(|| missing("AgentModeApplied"))?;
+        assert_eq!(
+            applied.payload.get("agent"),
+            Some(&Value::Str("*".to_owned()))
+        );
+        assert_eq!(
+            applied.payload.get("to"),
+            Some(&Value::Str("exits_only".to_owned()))
+        );
+        assert_eq!(
+            applied.payload.get("restriction"),
+            Some(&Value::Str("reconciliation:incomplete".to_owned()))
+        );
+        let alerted = held
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OwnerAlertSent" => Some(draft),
+                _ => None,
+            })
+            .ok_or_else(|| missing("OwnerAlertSent"))?;
+        assert_eq!(
+            alerted.payload.get("kind"),
+            Some(&Value::Str("reconciliation".to_owned()))
+        );
+        for effect in &held {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+            }
+        }
+        assert!(executor.state.unresolved().is_none(), "the hold committed");
+
+        let again = executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-3")?)),
+            &ports,
+            0,
+        )?;
+        assert!(!drafted(&again).is_empty());
+        assert_eq!(
+            drafted(&executor.run(Input::BatchRefused, &ports)?),
+            Vec::<&str>::new(),
+            "the hold is already in force: nothing more"
+        );
+        assert!(
+            executor.state.unresolved().is_none(),
+            "forgotten all the same"
+        );
+        assert_eq!(
+            drafted(&executor.run(Input::BatchRefused, &ports)?),
+            Vec::<&str>::new(),
+            "nothing refused, nothing to hold"
+        );
+
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(submitted(&opening), 0, "openings are held");
+        executor.acknowledge_hold("reconciliation:incomplete", &ports)?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::Normal,
+            "the owner's acknowledgment of `incomplete`'s hold lifts it"
+        );
+        Ok(())
+    }
+
+    /// X10 (DEC-2803): an open order of no order of ours is journaled as `ExternalActivityIngested`
+    /// with `source` `open_order`, every member present, and the broker's empty ids written as
+    /// `null`, in a draft the journal's own `Draft::parse` accepts.
+    #[test]
+    fn an_external_open_order_is_journaled_in_the_closed_schema() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for (broker_id, theirs, want_broker, want_theirs) in [
+            (
+                "b-ext",
+                Some("theirs-1"),
+                Value::Str("b-ext".to_owned()),
+                Value::Str("theirs-1".to_owned()),
+            ),
+            ("", Some(""), Value::Null, Value::Null),
+            ("b-ext", None, Value::Str("b-ext".to_owned()), Value::Null),
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            let mut taken = executor.snapshot(ReconcileReason::Scheduled)?;
+            taken.open_orders = vec![BrokerOrder {
+                broker_order_id: broker_id.to_owned(),
+                client_order_id: theirs.map(str::to_owned),
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("3")?,
+                filled_qty: Qty::ZERO,
+                limit_price: Some(Price::parse("170")?),
+                stop_price: None,
+                status: "new".to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            }];
+            let run = executor.run(Input::BrokerSnapshot(taken), &ports)?;
+            let ingested = run
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft) if draft.event_type == "ExternalActivityIngested" => {
+                        Some(draft)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| missing("ExternalActivityIngested"))?;
+            journal_accepts(ingested)?;
+            let member = |name: &str| ingested.payload.get(name).cloned();
+            assert_eq!(member("source"), Some(Value::Str("open_order".to_owned())));
+            assert_eq!(
+                member("broker_order_id"),
+                Some(want_broker),
+                "{broker_id:?}"
+            );
+            assert_eq!(member("client_order_id"), Some(want_theirs), "{theirs:?}");
+            assert_eq!(member("fill_id"), Some(Value::Null));
+            assert_eq!(member("instrument"), Some(Value::Str("AAPL".to_owned())));
+            assert_eq!(member("side"), Some(Value::Str("sell".to_owned())));
+            assert_eq!(member("qty"), Some(Value::Str("3".to_owned())));
+        }
+        Ok(())
+    }
+
+    /// X10 (DEC-2803): a broker reject is journaled as `RejectObserved` with every member present,
+    /// and a fill that names no order of ours as `ExternalActivityIngested` with `source` `fill`;
+    /// the broker's empty or missing text is `null`, and the journal's own `Draft::parse` accepts
+    /// both, so neither refuses the executor's batch.
+    #[test]
+    fn a_reject_and_an_external_fill_are_journaled_in_the_closed_schemas()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let drafted = |effects: &[Effect], event_type: &str| {
+            effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft) if draft.event_type == event_type => Some(draft.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| missing(event_type))
+        };
+        for (code, message, theirs) in [
+            (
+                Some("40310000"),
+                "insufficient buying power",
+                Some("theirs-1"),
+            ),
+            (None, "", None),
+            (Some(""), "x", Some("")),
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            let reject = crate::types::BrokerReject {
+                client_order_id: theirs.map(str::to_owned),
+                http_status: 422,
+                code: code.map(str::to_owned),
+                message: message.to_owned(),
+            };
+            let run = executor.run(Input::BrokerUpdate(BrokerUpdate::Reject(reject)), &ports)?;
+            let observed = drafted(&run, "RejectObserved")?;
+            journal_accepts(&observed)?;
+            let member = |name: &str| observed.payload.get(name).cloned();
+            let text_or_null = |raw: Option<&str>| match raw {
+                Some(t) if !t.is_empty() => Value::Str(t.to_owned()),
+                _ => Value::Null,
+            };
+            assert_eq!(member("code"), Some(text_or_null(code)));
+            assert_eq!(member("message"), Some(text_or_null(Some(message))));
+            assert_eq!(member("client_order_id"), Some(text_or_null(theirs)));
+        }
+        for fill_id in ["f-ext-1", ""] {
+            let mut executor = Executor::opened(&ports)?;
+            let fill = BrokerFill {
+                fill_id: FillId(fill_id.to_owned()),
+                client_order_id: None,
+                broker_order_id: None,
+                instrument: aapl()?,
+                side: Side::Buy,
+                qty: Qty::parse("2")?,
+                price: Price::parse("150")?,
+                fees: Usd::ZERO,
+                trade_date: Date::new(2026, 9, 21)?,
+            };
+            let run = executor.run(Input::BrokerUpdate(BrokerUpdate::Fill(fill)), &ports)?;
+            let ingested = drafted(&run, "ExternalActivityIngested")?;
+            journal_accepts(&ingested)?;
+            let member = |name: &str| ingested.payload.get(name).cloned();
+            assert_eq!(member("source"), Some(Value::Str("fill".to_owned())));
+            let want = if fill_id.is_empty() {
+                Value::Null
+            } else {
+                Value::Str(fill_id.to_owned())
+            };
+            assert_eq!(member("fill_id"), Some(want));
+            for name in [
+                "broker_order_id",
+                "client_order_id",
+                "instrument",
+                "side",
+                "qty",
+            ] {
+                assert_eq!(member(name), Some(Value::Null), "{name}");
+            }
+        }
+        Ok(())
+    }
+
     /// #258 round 1, the reviewer's probe (DEC-160 3(c)): a snapshot that lists an ownerless leg
     /// finds it **present**. It is not external activity, and nobody's mode changes; the leg stays
     /// no one's, since a reconciliation establishes presence and not ownership.
@@ -2410,7 +3561,8 @@ pub(crate) mod tests {
             vec![
                 "OrderStateChanged",
                 "ProtectionChanged",
-                "ProtectionChanged"
+                "ProtectionChanged",
+                "OwnerAlertSent"
             ],
             "and, a protective order, it leaves the instrument's protection (slice 3a); with no \
              prices to re-place it at, the shortfall is journaled and the owner alerted, never \
@@ -2419,7 +3571,7 @@ pub(crate) mod tests {
         assert!(
             confirmed.iter().any(|effect| matches!(
                 effect,
-                Effect::Notify(note) if note.message_key == "protection_expiring"
+                Effect::Notify(note) if note.kind.key() == "protection"
             )),
             "{confirmed:?}"
         );
@@ -2531,7 +3683,7 @@ pub(crate) mod tests {
         let text = std::fs::read_to_string(path).map_err(|_| non_canonical())?;
         let fixture: Json = serde_json::from_str(&text).map_err(|_| non_canonical())?;
         fixture
-            .pointer("/control_stream/drafts/snapshot_fees/payload")
+            .pointer("/snapshot_prior_close/drafts/snapshot_v2_fees/payload")
             .and_then(Json::as_object)
             .cloned()
             .ok_or_else(non_canonical)
@@ -2574,12 +3726,31 @@ pub(crate) mod tests {
             buying_power: Usd::parse(text("buying_power")?)?,
             non_marginable_buying_power: Usd::parse(text("non_marginable_buying_power")?)?,
             accrued_fees: Usd::parse(text("accrued_fees")?)?,
-            last_equity: Usd::parse(text("equity")?)?,
-            maintenance_margin: Usd::ZERO,
+            last_equity: Usd::parse(text("last_equity")?)?,
+            maintenance_margin: Usd::parse(text("maintenance_margin")?)?,
         })
     }
 
-    /// The fee step's snapshot is the vectors' `snapshot_fees` payload for the account it reads,
+    /// The connector's declaration the vector's snapshot journals, from its own names.
+    fn vector_declared(vector: &Map<String, Json>) -> Result<AccountDeclaration, ExecutorError> {
+        let account_type = match vector.get("account_type").and_then(Json::as_str) {
+            Some("cash") => AccountType::Cash,
+            Some("margin") => AccountType::Margin,
+            _ => return Err(non_canonical()),
+        };
+        let regime = match vector.get("day_trading_regime").and_then(Json::as_str) {
+            Some("intraday_margin") => DeclaredRegime::IntradayMargin,
+            Some("legacy_pdt") => DeclaredRegime::LegacyPdt,
+            _ => return Err(non_canonical()),
+        };
+        Ok(AccountDeclaration {
+            account_type,
+            regime,
+        })
+    }
+
+    /// The fee step's snapshot is the vectors' version-2 `snapshot_v2_fees` payload (journal spec
+    /// v0.89 §9.35) for the account and declaration it reads,
     /// member for member, each once, in the vector's own type and value: text as text, flags as
     /// booleans, `multiplier` as an integer, money as canonical decimal text, and `model_cash`,
     /// `cash_band`, and `cash_in_band` present as `null`, never absent (§4.2, rule 24: a fee
@@ -2605,15 +3776,19 @@ pub(crate) mod tests {
         closed.sort_unstable();
         assert_eq!(
             closed.len(),
-            14,
-            "§9.2 closes fifteen members, and the batch stamps risk_clock: {closed:?}"
+            18,
+            "§9.35 closes nineteen members, and the batch stamps risk_clock: {closed:?}"
         );
-        let written = super::fee_step_snapshot_fields(&vector_account(&vector)?)?;
+        let (version, written) = super::fee_step_snapshot_fields(
+            &vector_account(&vector)?,
+            Some(vector_declared(&vector)?),
+        )?;
+        assert_eq!(version, 2, "a declared snapshot is §9.35's version 2");
         let mut names: Vec<&str> = written.iter().map(|(name, _)| *name).collect();
         names.sort_unstable();
         assert_eq!(
             names, closed,
-            "every member §9.2 closes, each once, less the batch's risk_clock"
+            "every member §9.35 closes, each once, less the batch's risk_clock"
         );
         for (name, value) in &written {
             let carried: Json =
@@ -2632,8 +3807,9 @@ pub(crate) mod tests {
     /// types, so a writer that ignores its argument and answers the vector's values fails here
     /// (#441 round 2, m1). The expected payload is written out by hand from the account, not read
     /// back through the writer or `account_fields`. The account's `last_equity` and
-    /// `maintenance_margin` are set and differ from its equity, and the closed schema carries
-    /// neither, so a writer that journaled either fails here too (DEC-524 item 3).
+    /// `maintenance_margin` differ from its equity and from each other, and the declaration from
+    /// the vector's, so a writer that journaled equity for either figure, swapped them, or wrote a
+    /// fixed declaration fails here too (journal spec §9.35, DEC-2398).
     #[test]
     fn the_fee_steps_snapshot_reads_the_account_it_is_given() -> Result<(), ExecutorError> {
         let vector = vector_snapshot_fees()?;
@@ -2650,7 +3826,7 @@ pub(crate) mod tests {
             non_marginable_buying_power: Usd::parse("4321.09")?,
             accrued_fees: Usd::parse("1.23")?,
             last_equity: Usd::parse("29999.99")?,
-            maintenance_margin: Usd::parse("7500.25")?,
+            maintenance_margin: Usd::parse("7400.75")?,
         };
         let expected: Map<String, Json> = [
             ("status", Json::from("ACCOUNT_UPDATED")),
@@ -2664,6 +3840,10 @@ pub(crate) mod tests {
             ("buying_power", Json::from("62675")),
             ("non_marginable_buying_power", Json::from("4321.09")),
             ("accrued_fees", Json::from("1.23")),
+            ("account_type", Json::from("cash")),
+            ("day_trading_regime", Json::from("legacy_pdt")),
+            ("last_equity", Json::from("29999.99")),
+            ("maintenance_margin", Json::from("7400.75")),
             ("model_cash", Json::Null),
             ("cash_band", Json::Null),
             ("cash_in_band", Json::Null),
@@ -2681,19 +3861,49 @@ pub(crate) mod tests {
             Vec::<&str>::new(),
             "every reported member differs from the vector's, so the vector's values cannot pass"
         );
-        let written = super::fee_step_snapshot_fields(&other)?;
+        let declared = AccountDeclaration {
+            account_type: AccountType::Cash,
+            regime: DeclaredRegime::LegacyPdt,
+        };
+        let (version, written) = super::fee_step_snapshot_fields(&other, Some(declared))?;
+        assert_eq!(version, 2, "a declared snapshot is §9.35's version 2");
         let mut names: Vec<&str> = written.iter().map(|(name, _)| *name).collect();
         names.sort_unstable();
         let mut wanted: Vec<&str> = expected.keys().map(String::as_str).collect();
         wanted.sort_unstable();
-        assert_eq!(names, wanted, "every member §9.2 closes, each once");
+        assert_eq!(names, wanted, "every member §9.35 closes, each once");
+        let (undeclared_version, undeclared) = super::fee_step_snapshot_fields(&other, None)?;
+        assert_eq!(
+            undeclared_version, 1,
+            "a connector that declares nothing does not state the figures: version 1 (§9.35)"
+        );
+        let mut v1: Vec<&str> = undeclared.iter().map(|(name, _)| *name).collect();
+        v1.sort_unstable();
+        let mut wanted_v1: Vec<&str> = wanted
+            .iter()
+            .copied()
+            .filter(|name| {
+                ![
+                    "account_type",
+                    "day_trading_regime",
+                    "last_equity",
+                    "maintenance_margin",
+                ]
+                .contains(name)
+            })
+            .collect();
+        wanted_v1.sort_unstable();
+        assert_eq!(
+            v1, wanted_v1,
+            "version 1's members alone, no figure the connector did not state"
+        );
         for (name, value) in &written {
             let carried: Json =
                 serde_json::from_slice(&to_canonical(value)).map_err(|_| non_canonical())?;
             assert_eq!(
                 Some(&carried),
                 expected.get(*name),
-                "{name} carries the account's own value in §9.2's type"
+                "{name} carries the account's own value in §9.35's type"
             );
         }
         Ok(())
@@ -2746,7 +3956,7 @@ pub(crate) mod tests {
                 Effect::Notify(alert) => {
                     answer
                         .alerts
-                        .push((at, alert.subject_event.clone(), alert.message_key));
+                        .push((at, alert.subject_event.clone(), alert.kind.key()));
                 }
                 Effect::Broker(_) | Effect::Timer(_) => {}
             }
@@ -2806,7 +4016,7 @@ pub(crate) mod tests {
                 .iter()
                 .map(|(_, subject, key)| (subject.clone(), *key))
                 .collect::<Vec<_>>(),
-            vec![(recorded, "reconciliation_fees")],
+            vec![(recorded, "reconciliation")],
             "and alerts the owner once, naming the snapshot that recorded"
         );
 
@@ -2824,7 +4034,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(
             subjects,
-            vec![(Some("AgentModeApplied".to_owned()), "reconciliation_fees")],
+            vec![(Some("AgentModeApplied".to_owned()), "reconciliation")],
             "and the owner is still alerted once, about the pause it journaled: {:?}",
             answer.alerts
         );
@@ -2870,15 +4080,12 @@ pub(crate) mod tests {
         let fee_alerts: Vec<(Option<String>, &str)> = answer
             .alerts
             .iter()
-            .filter(|(_, _, key)| key.starts_with("reconciliation_fee"))
+            .filter(|(_, _, key)| *key == "reconciliation")
             .map(|(at, subject, key)| (journaled_before(&answer, subject, *at), *key))
             .collect();
         assert_eq!(
             fee_alerts,
-            vec![(
-                Some("AccountSnapshotRecorded".to_owned()),
-                "reconciliation_fees"
-            )],
+            vec![(Some("AccountSnapshotRecorded".to_owned()), "reconciliation")],
             "and alerts the owner once, about the fee step's own snapshot: {:?}",
             answer.alerts
         );
@@ -2909,25 +4116,35 @@ pub(crate) mod tests {
         state.started = true;
         let mut differing = snapshot(ReconcileReason::FeePosting)?;
         differing.account.accrued_fees = Usd::parse("3")?;
+        differing.account.last_equity = Usd::parse("9876.5")?;
+        differing.account.maintenance_margin = Usd::parse("1234.25")?;
         let mut payloads = Vec::new();
-        for observed in [
-            None,
-            Some(ObservedAccount {
-                state: AccountState::Active,
-                multiplier: 1,
-                equity: Usd::ZERO,
-                cash: Usd::ZERO,
-                buying_power: Usd::ZERO,
-                non_marginable_buying_power: Usd::ZERO,
-                accrued_fees: Usd::ZERO,
-                complete: true,
-            }),
+        let margin = AccountDeclaration {
+            account_type: AccountType::Margin,
+            regime: DeclaredRegime::IntradayMargin,
+        };
+        for (observed, declared) in [
+            (None, None),
+            (
+                Some(ObservedAccount {
+                    state: AccountState::Active,
+                    multiplier: 1,
+                    equity: Usd::ZERO,
+                    cash: Usd::ZERO,
+                    buying_power: Usd::ZERO,
+                    non_marginable_buying_power: Usd::ZERO,
+                    accrued_fees: Usd::ZERO,
+                    complete: true,
+                }),
+                Some(margin),
+            ),
         ] {
             state.observed = observed;
+            differing.declared = declared;
             let run = reconcile(&state, &differing, &ports)?;
             payloads.extend(run.effects.into_iter().filter_map(|effect| match effect {
                 Effect::Journal(draft) if draft.event_type == "AccountSnapshotRecorded" => {
-                    Some(draft.payload)
+                    Some((draft.schema_version, draft.payload))
                 }
                 _ => None,
             }));
@@ -2937,14 +4154,21 @@ pub(crate) mod tests {
             2,
             "the fee step's own snapshot, then a cash comparison's"
         );
-        for payload in &payloads {
+        let versions: Vec<u64> = payloads.iter().map(|(version, _)| *version).collect();
+        assert_eq!(
+            versions,
+            vec![1, 2],
+            "undeclared, version 1; declared, §9.35's version 2"
+        );
+        for (version, payload) in &payloads {
             let draft = format!(
                 r#"{{"envelope_version":1,"environment":"paper","event_id":"01J8Z3N0A000000000000000R1",
-                "stream_id":"acct:ws1:acct-1","event_type":"AccountSnapshotRecorded","schema_version":1,
+                "stream_id":"acct:ws1:acct-1","event_type":"AccountSnapshotRecorded","schema_version":{},
                 "event_time":"2026-09-21T21:00:00.000000000Z","clock_source":"broker",
                 "causation_id":null,"correlation_id":null,
                 "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
                 "config_refs":{{}},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+                version,
                 "3".repeat(64),
                 String::from_utf8_lossy(&to_canonical(payload))
             );
@@ -2956,12 +4180,47 @@ pub(crate) mod tests {
         }
         let nulled: Vec<bool> = payloads
             .iter()
-            .map(|payload| payload.get("model_cash") == Some(&Value::Null))
+            .map(|(_, payload)| payload.get("model_cash") == Some(&Value::Null))
             .collect();
         assert_eq!(
             nulled,
             vec![true, false],
             "the fee step's own snapshot writes `model_cash` as null; a cash comparison's compares"
+        );
+        let figures: Vec<Vec<Option<&Value>>> = payloads
+            .iter()
+            .map(|(_, payload)| {
+                [
+                    "account_type",
+                    "day_trading_regime",
+                    "last_equity",
+                    "maintenance_margin",
+                ]
+                .iter()
+                .map(|name| payload.get(name))
+                .collect()
+            })
+            .collect();
+        let text = |t: &str| Value::Str(t.to_owned());
+        let (margin_text, intraday, last, maintenance) = (
+            text("margin"),
+            text("intraday_margin"),
+            text("9876.5"),
+            text("1234.25"),
+        );
+        assert_eq!(
+            figures,
+            vec![
+                vec![None, None, None, None],
+                vec![
+                    Some(&margin_text),
+                    Some(&intraday),
+                    Some(&last),
+                    Some(&maintenance)
+                ],
+            ],
+            "the undeclared snapshot carries no figure; the declared cash step's carries its \
+             declaration and its own account's figures, each in its place (§9.35)"
         );
         Ok(())
     }

@@ -32,6 +32,8 @@ fn identities() -> Vec<Identity> {
         Identity::Runtime,
         Identity::SecretImport,
         Identity::ModelGateway,
+        Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
     ]
 }

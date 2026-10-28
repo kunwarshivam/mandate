@@ -359,13 +359,15 @@ pub async fn after_revoke_the_session_takes_no_lease<H: Harness>(h: &H) {
     );
 }
 
-/// The oracle for the platform's own secrets (DEC-2020 item 2), written out by hand: the model
-/// gateway reads the model provider's key, the email sender the email credential, and only the
-/// secret import writes either.
+/// The oracle for the platform's own secrets (DEC-2020 item 2, DEC-2277, DEC-2283 item 2), written
+/// out by hand: the model gateway reads the model provider's key, the email sender the email
+/// credential, the news reader and the bars reader the data key, and only the secret import writes
+/// any.
 pub fn platform_holders(secret: PlatformSecret) -> Holders {
     let reads = match secret {
-        PlatformSecret::ModelProviderKey => Identity::ModelGateway,
-        PlatformSecret::EmailCredential => Identity::EmailSender,
+        PlatformSecret::ModelProviderKey => vec![Identity::ModelGateway],
+        PlatformSecret::EmailCredential => vec![Identity::EmailSender],
+        PlatformSecret::NewsDataKey => vec![Identity::NewsReader, Identity::BarsReader],
     };
     Holders {
         reads,
@@ -393,6 +395,8 @@ async fn every_session<H: Harness>(h: &H, now: UtcNanos) -> Vec<H::Source> {
         h.source(Identity::Runtime, now).await,
         h.source(Identity::SecretImport, now).await,
         h.source(Identity::ModelGateway, now).await,
+        h.source(Identity::NewsReader, now).await,
+        h.source(Identity::BarsReader, now).await,
         h.source(Identity::EmailSender, now).await,
     ]
 }
@@ -415,7 +419,7 @@ pub async fn a_platform_secret_is_written_by_import_and_read_by_its_one_process<
         for s in PlatformSecret::ALL {
             let path = SecretPath::Platform(s);
             let read = session.read(&path).await;
-            if identity == platform_holders(s).reads {
+            if platform_holders(s).reads.contains(&identity) {
                 assert_eq!(
                     text(&read.unwrap().unwrap()),
                     value(s, 1),
@@ -464,23 +468,25 @@ pub async fn no_debug_or_refusal_shows_a_platform_secret<H: Harness>(h: &H) {
     for s in PlatformSecret::ALL {
         let path = SecretPath::Platform(s);
         import.put(&path, &secret(CANARY)).await.unwrap();
-        let reader = h.source(platform_holders(s).reads, now).await;
-        let held = reader.read(&path).await.unwrap().unwrap();
-        assert_eq!(text(&held), CANARY);
-        let refusals = [
-            import.read(&path).await.map(|v| v.is_some()).unwrap_err(),
-            reader.put(&path, &secret(CANARY)).await.unwrap_err(),
-            h.source(Identity::Runtime, now)
-                .await
-                .read(&path)
-                .await
-                .map(|v| v.is_some())
-                .unwrap_err(),
-        ];
-        outputs.push(format!("{reader:?}"));
-        outputs.push(format!("{held:?}"));
-        outputs.push(format!("{refusals:?}"));
-        outputs.extend(refusals.iter().map(ToString::to_string));
+        for holder in platform_holders(s).reads {
+            let reader = h.source(holder, now).await;
+            let held = reader.read(&path).await.unwrap().unwrap();
+            assert_eq!(text(&held), CANARY);
+            let refusals = [
+                import.read(&path).await.map(|v| v.is_some()).unwrap_err(),
+                reader.put(&path, &secret(CANARY)).await.unwrap_err(),
+                h.source(Identity::Runtime, now)
+                    .await
+                    .read(&path)
+                    .await
+                    .map(|v| v.is_some())
+                    .unwrap_err(),
+            ];
+            outputs.push(format!("{reader:?}"));
+            outputs.push(format!("{held:?}"));
+            outputs.push(format!("{refusals:?}"));
+            outputs.extend(refusals.iter().map(ToString::to_string));
+        }
     }
     for output in outputs {
         assert!(!output.contains(&CANARY[..16]), "{output}");

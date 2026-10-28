@@ -13,14 +13,22 @@
  * mandate version from the document (DEC-2101 item 3), serves that version's confirmation screen as a
  * new mandate's (item 4), with a new `screen_digest` at each read. A confirm that does not carry the
  * digest it last served is `classification_changed`; one that does, without step-up, is
- * `step_up_required`, as the server does until E9-4 binds its step-up port (item 2); a version it
- * never created is `not_found`. A backtest
+ * `step_up_required`; a version it never created is `not_found`. A confirm and a deployment take
+ * passkey step-up (DEC-2128): the mock serves its member's passkeys at `GET /passkeys` and judges a
+ * `passkey` evidence and its assertion against the challenge it issued for the action, the
+ * assertion's client data naming that challenge as a `webauthn.get`. It checks no signature, which
+ * only the server's verifier can; a test's authenticator stands in for the member's. A deployment
+ * needs a version the mock recorded as confirmed and an agent id it has not deployed. A backtest
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
 import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
+import { CONNECT_START_ROUTE } from "./connect";
+import { deployStepUpDigest } from "./passkey";
+import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
+import { INSTRUMENTS } from "@/fixtures/mandates";
 import type { Agent, Approval, ApprovalStatus, Health, Mandate, Scenario } from "@/fixtures/types";
 import { dec, mul, toDecimalString } from "@/lib/decimal";
 import { mandateVersion } from "@/lib/fixture-journey";
@@ -35,7 +43,22 @@ export interface MockServerOptions {
    * so an approve with that challenge's evidence is `step_up_missing`.
    */
   hostConfirms?: boolean;
+  /**
+   * `DisclosureAccepted` records on the workspace's control stream, in order, which its audit reads
+   * serve with their bodies (journal spec §9.2, DEC-2134). Without it the control stream is not served.
+   */
+  acceptances?: ReadonlyArray<{ document: string; version: string; user: string; method: string | null }>;
+  /** The member's passkeys `GET /passkeys` serves; one past its cool-off by default. */
+  passkeys?: ReadonlyArray<{ passkey_id: string; cool_off_ends: string | null }>;
 }
+
+/** The mock deployment's RP ID, as the server derives it from the app's origin. */
+export const MOCK_RP_ID = "app.owlhead.ai";
+/** The mock member's user handle: 16 bytes as unpadded base64url. */
+export const MOCK_USER_HANDLE = "AAECAwQFBgcICQoLDA0ODw";
+
+/** The mock member's one passkey id: 16 bytes as unpadded base64url. */
+export const MOCK_PASSKEY_ID = "bW9jay1wYXNza2V5LWlkLTE";
 
 export interface RecordedCommand {
   event_id: string;
@@ -52,7 +75,16 @@ export interface MockServer {
   servedDigests(): string[];
   /** Every step-up challenge the mock has issued, in order. */
   challenges(): IssuedChallenge[];
+  /** The agent ids a deployment recorded, in order. */
+  deployed(): string[];
+  /** The connects the mock has started, by key, in order. */
+  started(): Array<{ idempotency_key: string; connection_id: string }>;
+  /** Every agent a real-money request named, in order; the mock refuses each `live_unavailable` (DEC-2134). */
+  goLives(): string[];
 }
+
+/** Where the mock's start sends the browser: no real authorization server is ever named. */
+export const MOCK_AUTHORIZATION_ORIGIN = "https://paper-oauth.mock.invalid";
 
 export interface IssuedChallenge {
   challenge_id: string;
@@ -62,6 +94,31 @@ export interface IssuedChallenge {
   expires_at: string;
   used: boolean;
 }
+
+/**
+ * The one signal model the mock registers, as `GET /signal-models` serves the host's
+ * `quant.ma_crossover` (`mandate-modelhost`): its version, a stand-in content hash, and the projection
+ * of its content object, methodology and parameter bounds included.
+ */
+export const MOCK_MODEL = {
+  model_id: "quant.ma_crossover",
+  model_version: "1.0.0",
+  content_hash: `sha256:${"cf".repeat(32)}`,
+  params: ["fast_periods", "slow_periods"],
+  admits_instruments: false,
+  content: {
+    authorship: "platform",
+    methodology: "Long when the mean of the last fast_periods daily closes is strictly above the mean of the last slow_periods daily closes, compared by cross-multiplying the window sums; otherwise no output.",
+    params_schema: {
+      constraints: ["fast_periods < slow_periods"],
+      params: [
+        { max: 1000, min: 1, name: "fast_periods", type: "integer" },
+        { max: 1000, min: 2, name: "slow_periods", type: "integer" },
+      ],
+    },
+  },
+  registered_at: "2026-09-28T13:00:00.000000000Z",
+} as const;
 
 /** The mock's one principal, as `GET /v1/me/session` serves it. */
 export const MOCK_PRINCIPAL = "01JBR2C4D6E8F0G2H4J6K8M0P3";
@@ -113,7 +170,18 @@ const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
 
 export function createMockServer(options: MockServerOptions): MockServer {
   const { workspaceId, scenario = "normal", hostConfirms = true } = options;
+  /** The member's passkeys, which an enrolment here adds to. */
+  const passkeys: Array<{ passkey_id: string; cool_off_ends: string | null }> = [...(options.passkeys ?? [{ passkey_id: MOCK_PASSKEY_ID, cool_off_ends: null }])];
+  /** Registration challenges held, by id (§3.6): each is dropped by the submit that names it. */
+  const registrations = new Map<string, { bytes: string; step_up_needed: boolean }>();
+  /** Versions a passkey confirm recorded, and agents a deployment recorded, by id. */
+  const confirmedVersions = new Set<string>();
+  const deployedAgents = new Map<string, string>();
   const issued: IssuedChallenge[] = [];
+  /** Connects started, each read `connecting` once and `established` after, as a completed paper connect would be. */
+  const connects: Array<{ idempotency_key: string; body: string; connection_id: string; reads: number }> = [];
+  /** Every agent a real-money request named, each refused (DEC-2134). */
+  const goLives: string[] = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -125,7 +193,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function asOf(): Watermark[] {
     const seq = commands.length;
-    return [{ stream_id: "control", seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
+    return [{ stream_id: `ctl:${workspaceId}`, seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
   }
 
   const servedAt = canonical(workspace.now);
@@ -163,10 +231,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
-  /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`). */
+  /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`), every agent's, as one account's are. */
   function agentDetail(agent: Agent) {
-    const positions = agent.positions.map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
-    return { ...agentRow(agent), account_positions: positions };
+    const positions = workspace.agents.flatMap((a) => a.positions).map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
+    return { ...agentRow(agent), account_positions: positions, openings_held: null };
   }
 
   /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
@@ -189,16 +257,141 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
+  /** The control stream, when the options name acceptances: its opening, then each `DisclosureAccepted` with its body, base64. */
+  function controlStream(streamId: string) {
+    if (streamId !== `ctl:${workspaceId}` || !options.acceptances) return null;
+    const body = (payload: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({ event_type: "DisclosureAccepted", payload }))));
+    const accepted = options.acceptances.map(({ document, version, user, method }) => ({
+      type: "DisclosureAccepted",
+      body: body({ document, version, user, step_up: method === null ? null : { assertion_id: "cli-1", authenticated_at: workspace.now, method } }),
+    }));
+    return [{ type: "StreamOpened", body: "e30=" }, ...accepted].map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: servedAt, prev_hash: "0".repeat(64), hash: "0".repeat(64), body: e.body }));
+  }
+
+  /**
+   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, each gate
+   * decision the fixtures hold with its `DecisionMade` payload (journal spec §9.1), and each order
+   * submitted and filled, in time order. Each body is `{event_type, payload}`, hashed.
+   */
+  function agentStream(streamId: string) {
+    if (streamId === `ctl:${workspaceId}`) return controlStream(streamId);
+    if (streamId === `acct:${workspaceId}:${workspace.connection.connection_id}`) return accountStream(streamId);
+    const match = streamId.match(/^agent:([^:]+):(.+)$/);
+    const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
+    if (!agent) return null;
+    const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const decided = workspace.decisions
+      .filter((d) => d.agent_id === agent.agent_id)
+      .map((d) => ({
+        type: "DecisionMade",
+        at: d.at,
+        payload: {
+          instrument_id: d.action.symbol,
+          side: d.action.side,
+          type: "limit",
+          tif: "day",
+          qty: canon(d.action.qty),
+          limit_price: canon(d.action.limit_price),
+          purpose: d.action.purpose,
+          exit_origin: null,
+          dry_run: d.verdict,
+          reason_code: d.reason_code,
+          autonomy: d.verdict === "allow" ? (d.approval_id ? "ask" : "auto") : null,
+          ask_suppressed: null,
+          decided_by: d.verdict === "allow" ? "default" : null,
+          delegation_id: null,
+          requested_by: "agent",
+          client_id: null,
+        } as Record<string, unknown>,
+      }));
+    const told: Array<{ type: string; at: string; payload?: Record<string, unknown> }> = [
+      { type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now },
+      ...decided,
+      ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]),
+    ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
+    return told.map((e, i) => {
+      const body = JSON.stringify({ event_type: e.type, payload: e.payload ?? {} });
+      return { seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: sha256Hex(body), body: Buffer.from(body, "utf8").toString("base64") };
+    });
+  }
+
+  /** The connection's account stream: every agent's orders requested and filled, in time order. Types and times only. */
+  function accountStream(streamId: string) {
+    const orders = workspace.agents.flatMap((a) => [...a.past_orders, ...a.orders]).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const told = orders.flatMap((o) => [{ type: "OrderRequestRecorded", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]);
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
   function get(route: string, query: URLSearchParams): Response {
-    if ([...query.keys()].some((name) => !(route === "/approvals" && name === "state"))) return problem(404, "not_found", "none");
+    const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (journal !== null && (name === "after_seq" || name === "limit"));
+    if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
+    if (journal) {
+      const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
+      if (!lines) return problem(404, "not_found", "none");
+      const after = Number(query.get("after_seq") ?? "0");
+      const limit = Number(query.get("limit") ?? "100");
+      if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) return problem(422, "invalid", "none");
+      const events = lines.filter((e) => e.seq > after).slice(0, limit);
+      const head = { seq: lines.length, hash: "0".repeat(64), recorded_at: servedAt };
+      return read({ stream_id: decodeURIComponent(journal[1]), head, events, next_after_seq: events.at(-1)?.seq ?? after, at_head: (events.at(-1)?.seq ?? after) >= lines.length });
+    }
+    const oneEvent = route.match(/^\/journal\/events\/([^/]+)$/);
+    if (oneEvent) {
+      const event = (controlStream(`ctl:${workspaceId}`) ?? []).find((e) => e.event_id === decodeURIComponent(oneEvent[1]));
+      return event ? read({ event: { ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} } }) : problem(404, "not_found", "none");
+    }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
+    if (route === "/instruments")
+      return read({
+        instruments: Object.values(INSTRUMENTS)
+          .map((i) => ({ instrument_id: i.asset_id, symbol: i.symbol, asset_class: i.asset_class, snapshot: `sha256:${sha256Hex(`instrument:${i.asset_id}`)}`, registered_at: servedAt }))
+          .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)),
+      });
+    if (route === "/signal-models") return read({ models: [MOCK_MODEL] });
+    /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
+    if (route === "/alerts") return read({ alerts: [], truncated: false });
+    if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
-    if (route === "/connections") return read({ connections: [{ connection_id: workspace.connection.connection_id, environment: workspace.environment }] });
+    if (route === "/connections") return read({ connections: connectionRows() });
+    const oneConnection = route.match(/^\/connections\/([^/]+)$/);
+    if (oneConnection) {
+      const row = connectionRows().find((c) => c.connection_id === decodeURIComponent(oneConnection[1]));
+      return row ? read({ connection: row }) : problem(404, "not_found", "none");
+    }
     if (route === "/approvals") {
       const state = query.get("state");
       if (state !== "pending" && state !== "resolved") return problem(422, "invalid", "none");
       const listed = workspace.approvals.filter((a) => (a.status === "delivered") === (state === "pending"));
       return read({ approvals: listed.map(approvalRow) });
+    }
+    const activity = route.match(/^\/agents\/([^/]+)\/(orders|positions)$/);
+    if (activity) {
+      const agent = agentOf(decodeURIComponent(activity[1]));
+      if (!agent) return problem(404, "not_found", "none");
+      const head = { agent_id: agent.agent_id, account_ref: workspace.connection.connection_id };
+      if (activity[2] === "positions") {
+        const positions = agent.positions.map((p) => ({ instrument_id: p.instrument.asset_id, filled_qty: canon(p.qty), cost_basis: null, risk_mark: null, market_value: null, unrealized_pnl: null, protection: { orders: [], covered_qty: "0", stop: null, take_profit: null, unprotected_since: null } }));
+        return read({ ...head, positions, account_positions: agentDetail(agent).account_positions });
+      }
+      const served = [...agent.past_orders.map((o) => ({ ...o, updated: o.closed_at })), ...agent.orders.map((o) => ({ ...o, updated: o.submitted_at }))];
+      const orders = served.map((o) => ({
+        client_order_id: o.client_order_id,
+        intent_id: null,
+        purpose: o.purpose,
+        instrument_id: o.instrument.symbol,
+        side: o.side,
+        type: o.limit_price === null ? "market" : "limit",
+        tif: o.time_in_force,
+        qty: canon(o.qty),
+        limit_price: o.limit_price === null ? null : canon(o.limit_price),
+        stop_price: o.stop_price === null ? null : canon(o.stop_price),
+        state: o.state.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
+        filled_qty: canon(o.filled_qty),
+        submitted_at: canonical(o.submitted_at),
+        updated_at: canonical(o.updated),
+      }));
+      return read({ ...head, orders });
     }
     const agentRoute = route.match(/^\/agents\/([^/]+)$/);
     if (agentRoute) {
@@ -208,7 +401,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
       const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
-      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } } } }) : problem(404, "not_found", "none");
+      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2, decision_deferred_to_binding: [] } }) : problem(404, "not_found", "none");
     }
     const backtestRoute = route.match(/^\/backtests\/([^/]+)$/);
     if (backtestRoute) {
@@ -272,6 +465,37 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return null;
   }
 
+  /**
+   * `passkey` evidence and its assertion for `kind` and `digest` (DEC-2108 items 7 and 8, DEC-2128
+   * item 1), in the server's order as far as a mock can follow it; `null` when it verifies, and then
+   * the challenge is spent. The signature is not checked.
+   */
+  function judgePasskey(evidence: unknown, assertion: unknown, kind: string, digest: unknown): { status: number; code: string } | null {
+    if (evidence == null) return assertion == null ? { status: 401, code: "step_up_required" } : { status: 422, code: "invalid" };
+    if (typeof evidence !== "object" || Array.isArray(evidence)) return { status: 401, code: "step_up_missing" };
+    const { assertion_id, authenticated_at, method } = evidence as Record<string, unknown>;
+    if (method !== "passkey") return assertion == null ? { status: 401, code: "step_up_method" } : { status: 422, code: "invalid" };
+    if (typeof assertion !== "object" || assertion === null) return { status: 401, code: "step_up_missing" };
+    const { passkey_id, client_data_json, authenticator_data, signature } = assertion as Record<string, unknown>;
+    if (typeof authenticator_data !== "string" || typeof signature !== "string" || typeof client_data_json !== "string") return { status: 422, code: "invalid" };
+    if (!passkeys.some((p) => p.passkey_id === passkey_id && (p.cool_off_ends === null || p.cool_off_ends <= servedAt))) return { status: 401, code: "step_up_missing" };
+    const challenge = issued.find((c) => c.challenge_id === assertion_id);
+    if (!challenge) return { status: 401, code: "step_up_missing" };
+    if (challenge.kind !== kind || challenge.digest !== digest) return { status: 401, code: "step_up_mismatch" };
+    if (authenticated_at !== challenge.issued_at) return { status: 401, code: "step_up_stale" };
+    if (challenge.used) return { status: 401, code: "step_up_reused" };
+    let client: { type?: unknown; challenge?: unknown } = {};
+    try {
+      client = JSON.parse(Buffer.from(client_data_json, "base64url").toString("utf8")) as typeof client;
+    } catch {
+      return { status: 401, code: "step_up_missing" };
+    }
+    const bytes = [...challengeKeys.values()].find((e) => e.challenge === challenge)?.bytes;
+    if (client.type !== "webauthn.get" || client.challenge !== bytes) return { status: 401, code: "step_up_missing" };
+    challenge.used = true;
+    return null;
+  }
+
   /** `POST /step-up/challenges` (§3.6): a challenge bound to the action, never journaled; the same key answers the same challenge. */
   const challengeKeys = new Map<string, { body: string; challenge: IssuedChallenge; bytes: string }>();
   function challenge(headers: Headers, body: string): Response {
@@ -307,9 +531,100 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: c.challenge_id, webauthn_challenge: entry.bytes, action: { kind: c.kind, digest: c.digest }, issued_at: c.issued_at, expires_at: c.expires_at });
   }
 
+  /** `read-models/connections`' rows: the fixture's established connection, then each connect started here. */
+  function connectionRows() {
+    const row = (connection_id: string, state: string) => ({ connection_id, broker: "alpaca", environment: workspace.environment === "live" ? "live" : "paper", state, scopes: state === "established" ? ["account:write", "trading"] : null, since: servedAt, refusal: null, revoked_reason: null, agents: [] as string[] });
+    return [row(workspace.connection.connection_id, "established"), ...connects.map((c) => row(c.connection_id, c.reads++ === 0 ? "connecting" : "established"))];
+  }
+
+  /**
+   * `POST /connections/oauth/start` (DEC-2623 item 6's order after the session and body): live is
+   * refused, a disclosure other than the current one is `invalid`, then the step-up for the connect
+   * digest; a retry with the same key and body answers the same start (item 8).
+   */
+  function startConnect(headers: Headers, body: string): Response {
+    const key = headers.get("Idempotency-Key") ?? "";
+    if (!isIdempotencyKey(key)) return problem(422, "invalid", "none");
+    const earlier = connects.find((c) => c.idempotency_key === key);
+    if (earlier && earlier.body !== body) return problem(409, "idempotency_conflict", "none");
+    let members: Record<string, unknown> = {};
+    try {
+      members = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    if (members.broker !== "alpaca" || (members.environment !== "paper" && members.environment !== "live")) return problem(422, "invalid", "none");
+    if (workspace.environment === "live" || members.environment === "live") return problem(403, "live_unavailable", "none");
+    const disclosure = members.disclosure as { document?: unknown; version?: unknown } | undefined;
+    if (disclosure?.document !== CONNECT_DISCLOSURE.document || disclosure.version !== CONNECT_DISCLOSURE.version) return problem(422, "invalid", "none");
+    if (!earlier) {
+      const refused = judgeCliConfirm(members.step_up, "connection", connectStepUpDigest(workspaceId));
+      if (refused) return problem(401, refused, "none");
+    }
+    const entry = earlier ?? { idempotency_key: key, body, connection_id: `conn_${eventId(`${workspaceId}\nconnect\n${key}`)}`, reads: 0 };
+    if (!earlier) connects.push(entry);
+    const state = sha256Hex(`state\n${key}`);
+    const expires = canonical(new Date(Date.parse(workspace.now) + 600_000).toISOString());
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), authorization_url: `${MOCK_AUTHORIZATION_ORIGIN}/oauth/authorize?state=${state}`, expires_at: expires, connection_id: entry.connection_id });
+  }
+
+  /** `POST /passkeys/registration-challenges` (§3.6): a challenge held for one submit, bound to this member. */
+  function register(headers: Headers): Response {
+    if (!isIdempotencyKey(headers.get("Idempotency-Key") ?? "")) return problem(422, "invalid", "none");
+    if (workspace.environment === "live") return problem(403, "live_unavailable", "none");
+    const id = eventId(`${workspaceId}\nregistration\n${headers.get("Idempotency-Key")}`);
+    const bytes = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+    const held = { bytes, step_up_needed: passkeys.length > 0 };
+    registrations.set(id, held);
+    const expires = canonical(new Date(Date.parse(workspace.now) + CHALLENGE_SECONDS * 1000).toISOString());
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: id, webauthn_challenge: bytes, rp_id: MOCK_RP_ID, user_handle: MOCK_USER_HANDLE, exclude: passkeys.map((p) => p.passkey_id), step_up_needed: held.step_up_needed, issued_at: servedAt, expires_at: expires });
+  }
+
+  /**
+   * `POST /passkeys` (§3.6): the registration held and dropped, then the step-up a member who holds a
+   * passkey gives (`credential_enrol`), then the client data naming the registration as a
+   * `webauthn.create`. The attestation is not verified, which only the server's `enrol` does. A
+   * first passkey cools off for 24 hours.
+   */
+  function enrol(headers: Headers, body: string): Response {
+    if (!isIdempotencyKey(headers.get("Idempotency-Key") ?? "")) return problem(422, "invalid", "none");
+    let m: Record<string, unknown> = {};
+    try {
+      m = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    const id = typeof m.challenge_id === "string" ? m.challenge_id : "";
+    const held = registrations.get(id);
+    registrations.delete(id);
+    if (!held) return problem(422, "invalid", "none");
+    if (held.step_up_needed) {
+      const refused = judgePasskey(m.step_up, m.step_up_assertion, "credential_enrol", `sha256:${sha256Hex(JSON.stringify({ op: "enrol", registration: id }))}`);
+      if (refused) return problem(refused.status, refused.code, "none");
+    } else if (m.step_up !== null || m.step_up_assertion !== null) return problem(422, "invalid", "none");
+    let client: { type?: unknown; challenge?: unknown } = {};
+    try {
+      client = JSON.parse(Buffer.from(String(m.client_data_json), "base64url").toString("utf8")) as typeof client;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    const passkey = typeof m.passkey_id === "string" ? m.passkey_id : "";
+    if (client.type !== "webauthn.create" || client.challenge !== held.bytes || typeof m.attestation_object !== "string" || passkey.length < 22 || passkeys.some((p) => p.passkey_id === passkey)) return problem(422, "invalid", "none");
+    const cool = passkeys.length === 0 ? canonical(new Date(Date.parse(workspace.now) + 24 * 3600 * 1000).toISOString()) : null;
+    passkeys.push({ passkey_id: passkey, cool_off_ends: cool });
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), event_id: eventId(`${workspaceId}\nenrol\n${id}`), passkey_id: passkey, alg: "es256", cool_off_ends: cool });
+  }
+
   function post(route: string, headers: Headers, body: string): Response {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
+    if (route === "/passkeys/registration-challenges") return register(headers);
+    if (route === "/passkeys") return enrol(headers, body);
     if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
+    if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
+    if (/^\/agents\/[^/]+\/go-live$/.test(route)) {
+      goLives.push(decodeURIComponent(route.split("/")[2] ?? ""));
+      return problem(409, "live_unavailable", "none");
+    }
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -325,11 +640,25 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const refused = judgeCliConfirm(members.step_up, "approve", members.content_hash);
       if (refused) return problem(401, refused, "none");
     }
-    if (match.operation === "confirm_version") {
+    const repeated = commands.find((c) => c.idempotency_key === key && c.path === prefix + route);
+    if (match.operation === "confirm_version" && !repeated) {
       const version = decodeURIComponent(route.split("/")[2] ?? "");
       if (!versions.has(version)) return problem(404, "not_found", "none");
       if (members.screen_digest !== screens.get(version)) return problem(409, "classification_changed", "none");
-      return members.step_up == null ? problem(401, "step_up_required", "none") : problem(401, "step_up_missing", "none");
+      const refused = judgePasskey(members.step_up, members.step_up_assertion, "confirm_version", `sha256:${sha256Hex(JSON.stringify({ agent_id: null, base_version: null, mandate_version: version }))}`);
+      if (refused) return problem(refused.status, refused.code, "none");
+      confirmedVersions.add(version);
+    }
+    if (match.operation === "deploy" && !repeated) {
+      const agent = typeof members.agent_id === "string" ? members.agent_id : "";
+      const version = typeof members.mandate_version === "string" ? members.mandate_version : "";
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(agent)) return problem(422, "invalid", "none");
+      if (!versions.has(version)) return problem(404, "not_found", "none");
+      if (!confirmedVersions.has(version)) return problem(422, "invalid", "none");
+      if (deployedAgents.has(agent) || agentOf(agent)) return problem(422, "invalid", "none");
+      const refused = judgePasskey(members.step_up, members.step_up_assertion, "deploy", deployStepUpDigest(agent, version as `sha256:${string}`));
+      if (refused) return problem(refused.status, refused.code, "none");
+      deployedAgents.set(agent, version);
     }
     if (match.operation === "create_version" && (typeof members.environment !== "string" || members.environment === "live")) return problem(422, "invalid", "none");
     const path = prefix + route;
@@ -341,6 +670,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
       apply(match.operation, path, members);
     }
     if (match.operation === "approval_response") return respond(202, { response_id: command.event_id, phase: "recorded" });
+    if (match.operation === "confirm_version")
+      return respond(202, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), command_id: command.event_id, phase: "recorded", classification: "risk_increasing", applies: "now" });
     if (match.operation === "create_version") {
       const version = mandateVersion(members as unknown as Mandate);
       versions.set(version, members as unknown as Mandate);
@@ -368,5 +699,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })) };
+  return { fetch, deployed: () => [...deployedAgents.keys()], recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), goLives: () => [...goLives], started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

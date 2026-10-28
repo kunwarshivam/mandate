@@ -28,3 +28,30 @@ spec:
 ---
 {{ include "mandate.emit" (include "mandate.artifactsClaim" .) }}
 {{- end }}
+{{- /*
+The research store (DEC-2279 item 5): research artifacts only, which the model gateway alone writes
+and the runtime reads back ("mandate.researchArtifactsAccess"). It renders with the gateway. Its
+size is `researchArtifacts.size`, which the chart's tests hold at no less than twice the gateway's
+fixed cap (DEC-2279 item 4). ReadWriteOnce by default, and its pods join the shared store's
+colocation ("mandate.colocated").
+*/ -}}
+{{- define "mandate.researchArtifactsClaim" -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: research-artifacts
+  labels:
+    mandate.dev/workspace: {{ .Values.workspace | quote }}
+spec:
+  accessModes: [{{ .Values.researchArtifacts.accessMode | quote }}]
+  {{- with .Values.researchArtifacts.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.researchArtifacts.size | quote }}
+{{- end -}}
+{{- if include "mandate.researchArtifactsClaimed" . }}
+---
+{{ include "mandate.emit" (include "mandate.researchArtifactsClaim" .) }}
+{{- end }}

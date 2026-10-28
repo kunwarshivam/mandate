@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Fetch, OPERATIONS, createWorkspaceClient } from "./client";
-import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "./commands";
+import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareOwnerCommand, prepareOwnerExit } from "./commands";
 import { createMockServer } from "./mock-server";
 import { NOT_COMMANDS, WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
@@ -51,7 +51,8 @@ function documented(): Map<string, Set<string>> {
   return out;
 }
 
-const SCHEMA_OF: Readonly<Record<Operation, string>> = {
+/** Each command's request schema; the deploy body's lands with its `mandate-api` type (§3.11 item 11), so its members are checked against the spec's list instead. */
+const SCHEMA_OF: Readonly<Record<Exclude<Operation, "deploy">, string>> = {
   pause: "pause-request",
   resume: "resume-request",
   hold_openings: "hold-request",
@@ -78,6 +79,7 @@ interface Schema {
 }
 
 function schemaFor(operation: Operation): Schema {
+  if (operation === "deploy") throw new Error("the deploy body has no request schema yet; check it against DEPLOY_MEMBERS");
   return JSON.parse(readFileSync(join(SCHEMAS, `${SCHEMA_OF[operation]}.schema.json`), "utf8")) as Schema;
 }
 
@@ -97,6 +99,10 @@ async function loaded(client: ReturnType<typeof recording>["client"]): Promise<{
   if (!result.ok) throw new Error(`not loaded: ${result.error.code}`);
   return { view: result.view, scope: { agents: result.view.agents, connectionId: result.ws.connection.connection_id, environment: result.ws.environment } };
 }
+
+/** An owner exit's asset and screen, as the positions screen sends them (§5.4). */
+const EXIT_ASSET = "7b4a1c2e-1111-4a2b-9c3d-000000000001";
+const EXIT_RECORD = { screen: "D10" as const, environment: "paper" as const, title: "Exit", shown: ["Sell all of it."], modes: [] };
 
 const KINDS: CommandKind[] = ["pause", "resume", "stop", "kill", "release", "pause_all", "stop_all", "close_all"];
 
@@ -162,7 +168,10 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       const confirmed = prepareApprovalResponse(client, pendingOne, "approve", { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false }, challenge.value);
       if (confirmed.ok) for (const command of confirmed.commands) sent.push(await client.send(command));
     }
-    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
+    const exit = prepareOwnerExit(client, view.agents[0].agent_id, EXIT_ASSET, EXIT_RECORD);
+    if (!exit.ok) throw new Error(exit.reason);
+    sent.push(await client.send(exit.commands[0]));
+    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" }, stepUp: null })));
     const created = await client.send(prepareCreateVersion(client, buildWorkspace("normal").agents[0].mandate));
     const version = versionCreated(created.ok ? created.body : null);
     expect(version.ok).toBe(true);
@@ -205,10 +214,12 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       expect(evidence.$defs.StepUpEvidence.properties?.method.enum).toContain(step.method);
     }
     for (const classification of ["risk_increasing", "risk_reducing", "neutral"] as const) {
-      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification } });
+      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification }, stepUp: null });
       bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
-    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version"]));
+    const exit = prepareOwnerExit(client, view.agents[0].agent_id, EXIT_ASSET, EXIT_RECORD);
+    if (exit.ok) for (const c of exit.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
+    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version", "owner_exit"]));
     for (const { operation, body } of bodies) {
       const schema = schemaFor(operation);
       for (const member of schema.required ?? []) expect(Object.hasOwn(body, member), `${operation} needs ${member}`).toBe(true);

@@ -10,25 +10,30 @@ description = "The agent runtime as a long-running process: journal tailing with
 workspace = true
 
 [dependencies]
+mandate-accounting.workspace = true
 mandate-artifacts-fs.workspace = true
+mandate-bars.workspace = true
+mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true
+mandate-gate-context.workspace = true
 mandate-gateway.workspace = true
+mandate-identity.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
+mandate-ports.workspace = true
 mandate-process.workspace = true
 mandate-research.workspace = true
 mandate-research-driver.workspace = true
 mandate-research-run.workspace = true
+mandate-risk.workspace = true
 mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
-tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
-mandate-journal-pg.workspace = true
+mandate-accounting.workspace = true
+mandate-marketdata.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
-sqlx.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

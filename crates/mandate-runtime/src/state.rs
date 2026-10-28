@@ -3,16 +3,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU8;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_approval::{
     ApprovalRef, AskablePurpose, AssertionId, BoundAction, OpaqueUser, ReferenceMark, Request,
     RequestContent,
 };
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_num::Signed;
+use mandate_num::{Qty, Signed};
 
 use crate::error::RuntimeError;
 use crate::payload;
+use crate::theses::Theses;
 use crate::types::{
     Deployment, EventId, FoldedEvent, Handoff, Initiator, IntentBody, LocalHold, Mode, ModelOutput,
     Outstanding, OwnerConfirmation, Purpose, RiskClock, Seq, SignalInputs, WriterEpoch,
@@ -20,7 +21,7 @@ use crate::types::{
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
-pub const FOLD_VERSION: u32 = 1;
+pub const FOLD_VERSION: u32 = 3;
 
 /// How long a passing `ConnectionChecked` covers an opening, in risk-clock seconds: one day, the
 /// period of the executor's daily check (connections spec §8.1, §9.2 "Healthy"). A check this old
@@ -42,7 +43,14 @@ pub struct RuntimeState {
     unresolved: Option<UnresolvedAppend>,
     risk_clock: Option<RiskClock>,
     last_evaluated: Option<RiskClock>,
-    copied_mode: Mode,
+    /// This agent's account-stream restrictions, by the `restriction` that set each, as the
+    /// executor keys them: a `normal` lifts only the restriction it names (trading spec §7.3,
+    /// "causes lift independently").
+    own_restrictions: BTreeMap<String, Mode>,
+    /// The executor's account-wide restrictions, its `AgentModeApplied` naming every agent (`*`),
+    /// keyed the same way and kept apart from [`Self::own_restrictions`], as the executor keeps
+    /// them, so neither lifts the other (DEC-2806).
+    every_restrictions: BTreeMap<String, Mode>,
     journaled_mode: Mode,
     lifecycle: Mode,
     switch: Option<Switch>,
@@ -70,9 +78,6 @@ pub struct RuntimeState {
     /// carried it. Evidence is usable once per workspace (EI-11), so any other event that repeats
     /// an assertion is reusing it, and a re-tail of the first is not.
     assertions: BTreeMap<AssertionId, EventId>,
-    /// The owner's exits of one instrument, by the `OwnerExitRequested` that records each, so that a
-    /// restart can hand one the executor has not taken again (`AGENTS.md` rule 13, DEC-257 item 7).
-    owner_exits: BTreeMap<EventId, OwnerExit>,
     /// The latest `ConnectionChecked` of this deployment's own connection, or `None` while the
     /// account stream holds none (journal spec §9.8, DEC-969).
     connection_check: Option<ConnectionCheck>,
@@ -86,6 +91,25 @@ pub struct RuntimeState {
     /// The intents whose order or decision the account stream has ended: a binding-gate deny, an
     /// abandonment, or a terminal state of its order. Nothing else ends one (DEC-1150 item 4).
     ended: BTreeSet<EventId>,
+    /// Each instrument's current thesis and the lineages, from the agent stream's thesis records,
+    /// its `ThesisInvalidated`, and the account stream's removals (mandate spec §8.6, DEC-2391).
+    theses: Theses,
+    /// The latest `RetirementHeld` on the agent stream, the runtime's own record that a retirement
+    /// has waited another day (journal spec §9.34): what a restarted runtime folds first so it
+    /// never writes a period twice (DEC-2352 item 5).
+    retirement_held: Option<HeldPeriod>,
+}
+
+/// One `RetirementHeld` as the runtime folds it: the record that began the retirement, its place
+/// in the sequence, when the retirement began waiting, and the tick it was written at (journal
+/// spec §9.34). It steps nothing: no mode, hold, or decision reads it. The ends that close its
+/// sequence and the next period's due time are its writer's, E6-5's (DEC-2352 item 8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldPeriod {
+    pub cause: EventId,
+    pub period: u64,
+    pub held_since: RiskClock,
+    pub written_at: RiskClock,
 }
 
 /// One folded `ConnectionChecked`: whether every check it lists passed, and its risk clock.
@@ -93,14 +117,6 @@ pub struct RuntimeState {
 struct ConnectionCheck {
     passed: bool,
     at: RiskClock,
-}
-
-/// An owner's exit of one instrument as the fold holds it: what the planner is asked for again.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OwnerExit {
-    pub(crate) instrument: InstrumentId,
-    pub(crate) confirmation: Option<OwnerConfirmation>,
-    pub(crate) handoff: Handoff,
 }
 
 /// The kill switch the fold remembers. The `event` is the `KillSwitchActivated` that identifies the
@@ -161,7 +177,8 @@ impl RuntimeState {
             unresolved: None,
             risk_clock: None,
             last_evaluated: None,
-            copied_mode: Mode::Normal,
+            own_restrictions: BTreeMap::new(),
+            every_restrictions: BTreeMap::new(),
             journaled_mode: Mode::Normal,
             lifecycle: Mode::Normal,
             switch: None,
@@ -178,12 +195,21 @@ impl RuntimeState {
             marks: BTreeMap::new(),
             copied: BTreeSet::new(),
             assertions: BTreeMap::new(),
-            owner_exits: BTreeMap::new(),
             connection_check: None,
             requests: BTreeMap::new(),
             orders_of: BTreeMap::new(),
             ended: BTreeSet::new(),
+            theses: Theses::default(),
+            retirement_held: None,
         }
+    }
+
+    /// The latest period of a held retirement folded from the agent stream, or `None` (journal
+    /// spec §9.34). It does not say whether that sequence is still open: its ends, the agent's
+    /// stop, an owner's resume or stop, and a cancelling version, are its writer's to read
+    /// (DEC-2352 item 8).
+    pub fn retirement_held(&self) -> Option<&HeldPeriod> {
+        self.retirement_held.as_ref()
     }
 
     /// Which deployment this runtime is.
@@ -221,14 +247,19 @@ impl RuntimeState {
     /// "the broker's truth is not yet confirmed", which is a reason not to *decide*, while dropping
     /// an exit already journaled would remove protection rather than add it, and trading-domain spec
     /// §5.5 lets only `paused`, `stopped`, an `Unknown` order, or the broker hold an exit. The copied
-    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten alone and
-    /// `exits_only` re-hands no opening (DEC-131 item 22).
+    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten and an
+    /// owner's exit alone and `exits_only` re-hands no opening (DEC-131 item 22). An owner's exit
+    /// is re-handed in every mode, as the owner's flatten it replaced was (DEC-2387 item 3): the
+    /// owner asked for it, and the executor's mode gate is what may hold it (`AGENTS.md` rule 13).
     pub fn permits_rehand(&self, purpose: Purpose) -> bool {
         match self.rehand_mode() {
             Mode::Normal => true,
             Mode::ExitsOnly => !purpose.adds_risk(),
-            Mode::Paused => matches!(purpose, Purpose::Protective | Purpose::Flatten),
-            Mode::Stopped => purpose == Purpose::Flatten,
+            Mode::Paused => matches!(
+                purpose,
+                Purpose::Protective | Purpose::Flatten | Purpose::OwnerExit
+            ),
+            Mode::Stopped => matches!(purpose, Purpose::Flatten | Purpose::OwnerExit),
         }
     }
 
@@ -253,11 +284,12 @@ impl RuntimeState {
     }
 
     /// The effective mode a given deployment lifecycle would produce: the strictest of the copied
-    /// account-stream mode, that lifecycle, the startup hold, and the kill switch's final mode. A
+    /// account-stream modes, this agent's and the account-wide one, that lifecycle, the startup
+    /// hold, and the kill switch's final mode. A
     /// maximum over [`Mode`]'s ordering, so the runtime is never less strict than the account stream
     /// and never lifts what the account stream set.
     pub(crate) fn mode_with(&self, lifecycle: Mode) -> Mode {
-        let mut mode = self.copied_mode.max(lifecycle);
+        let mut mode = self.restricted().max(lifecycle);
         if self.awaiting_reconciliation {
             mode = mode.max(LocalHold::AwaitingReconciliation.mode());
         }
@@ -265,6 +297,17 @@ impl RuntimeState {
             mode = mode.max(switch.initiator.final_mode());
         }
         mode
+    }
+
+    /// The strictest restriction the account stream holds this agent in: its own and the
+    /// account-wide ones, as the executor's `effective_mode` takes them.
+    fn restricted(&self) -> Mode {
+        self.own_restrictions
+            .values()
+            .chain(self.every_restrictions.values())
+            .copied()
+            .max()
+            .unwrap_or(Mode::Normal)
     }
 
     /// The deployment's own lifecycle state, as a mode rather than as a set of
@@ -278,7 +321,7 @@ impl RuntimeState {
     /// The same maximum as [`Self::effective_mode`] without the startup hold, which governs new
     /// proposals alone (DEC-131 item 22).
     fn rehand_mode(&self) -> Mode {
-        let mut mode = self.copied_mode.max(self.lifecycle);
+        let mut mode = self.restricted().max(self.lifecycle);
         if let Some(switch) = &self.switch {
             mode = mode.max(switch.initiator.final_mode());
         }
@@ -386,7 +429,45 @@ impl RuntimeState {
             outputs: self.outputs.clone(),
             output_events: self.output_events.clone(),
             now,
+            ended_theses: self.ended_theses(now),
+            working_exits: self.working_exits(),
+            thesis_classes: self.theses.classes(),
         }
+    }
+
+    /// The instruments whose current thesis has ended at `now`, which the order plan sells while
+    /// the agent holds them (mandate spec §8.3 step 2, §8.6, MI-34).
+    pub fn ended_theses(&self, now: RiskClock) -> BTreeSet<InstrumentId> {
+        self.theses.ended(now)
+    }
+
+    /// Per instrument, the quantity of the sells this runtime proposed that nothing on the account
+    /// stream has ended yet: what a plan takes off the position before it proposes an exit, so an
+    /// exit already working is never proposed twice (mandate spec §8.3 step 2, "minus working
+    /// exits"). A part-filled exit still counts whole, which sells less now and the rest once it
+    /// ends, never more than the position (`AGENTS.md` rule 3). A kill switch's `Flatten` is not
+    /// counted: it sells the agent's whole sub-ledger itself, and the mode it sets holds every other
+    /// proposal while it works. A sum past what a quantity can hold, which no real order reaches,
+    /// keeps the larger of the two; the binding gate's `sell_exceeds_available` still refuses any
+    /// sell above what the position and the open sells leave (trading spec §5.3 rule 4).
+    pub fn working_exits(&self) -> BTreeMap<InstrumentId, Qty> {
+        let mut working: BTreeMap<InstrumentId, Qty> = BTreeMap::new();
+        for live in self.outstanding.keys() {
+            if self.ended.contains(live) {
+                continue;
+            }
+            if let Some(IntentBody::Order {
+                instrument,
+                side: Side::Sell,
+                qty,
+                ..
+            }) = self.bodies.get(live)
+            {
+                let total = working.entry(instrument.clone()).or_insert(Qty::ZERO);
+                *total = total.checked_add(*qty).unwrap_or((*total).max(*qty));
+            }
+        }
+        working
     }
 
     /// The intent event ids a flatten plan is asked about: every intent the fold still holds
@@ -474,13 +555,6 @@ impl RuntimeState {
             .collect()
     }
 
-    /// The owner exits the executor has not been seen to take, which a restart hands again.
-    pub(crate) fn untaken_owner_exits(&self) -> impl Iterator<Item = (&EventId, &OwnerExit)> {
-        self.owner_exits
-            .iter()
-            .filter(|(_, exit)| matches!(exit.handoff, Handoff::Pending))
-    }
-
     /// The intent event ids of the intents still live in one instrument: all an owner's exit of
     /// that instrument may cancel (mandate spec §6.1, trading-domain spec §5.5). The plan's
     /// cancels name client order ids, a mapping the exit adapter derives from the journal
@@ -565,7 +639,15 @@ pub fn fold(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtime
 
 /// What one event type means to the runtime's state. The arms that change nothing are named rather
 /// than absent, because DEC-85 makes the difference between "interpreted and inert" and "unknown"
-/// the difference between a fold and a silent loss.
+/// the difference between a fold and a silent loss. Among the inert ones are the account stream's
+/// copy of `ConnectionEstablished` (journal spec §9.8; the runtime reads its connection from the
+/// control stream), `AccountCloseRequested` (an account kill switch's close, which the runtime
+/// reads as `KillSwitchActivated`) and `OwnerConfirmationReceived` (an owner exit's confirmed bid,
+/// whose hand-off it reads as `IntentReceived`), and the executor's record of an agent-scope
+/// `KillSwitchActivated` on another agent of the same account. Every type the journal admits on
+/// the account and agent streams has an arm but four, which no writer emits there yet and which
+/// stay refused until a story decides what they mean to the runtime (tests/account_copies.rs
+/// names them).
 fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), RuntimeError> {
     if let Some(at) = payload::clock_of(&event.payload, "risk_clock") {
         state.risk_clock = Some(state.risk_clock.map_or(at, |last| last.max(at)));
@@ -578,6 +660,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 .and_then(payload::mode_from)
                 .ok_or_else(|| payload::non_canonical("lifecycle"))?;
         }
+        "KillSwitchActivated" if another_agents_switch(state, &event.payload) => {}
         "KillSwitchActivated" => {
             copy_of(state, event);
             let initiator = payload::str_of(&event.payload, "initiator")
@@ -595,18 +678,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         "OwnerExitRequested" => {
             copy_of(state, event);
             let confirmation = payload::honoured_confirmation(&event.payload)?;
-            if payload::str_of(&event.payload, "scope") == Some("instrument") {
-                let subject = payload::str_of(&event.payload, "subject")
-                    .ok_or_else(|| payload::non_canonical("subject"))?;
-                state.owner_exits.insert(
-                    event.event_id.clone(),
-                    OwnerExit {
-                        instrument: payload::instrument_of(subject)?,
-                        confirmation,
-                        handoff: Handoff::Pending,
-                    },
-                );
-            } else {
+            if payload::str_of(&event.payload, "scope") != Some("instrument") {
                 state.shown = confirmation;
             }
         }
@@ -684,10 +756,12 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 },
             );
         }
+        "AgentModeApplied" if every_agent(&event.payload) => {
+            restrict(&mut state.every_restrictions, event)?;
+        }
         "AgentModeApplied" => {
             if addressed_here(state, &event.payload) {
-                let to = mode_field(event)?;
-                state.copied_mode = to;
+                let to = restrict(&mut state.own_restrictions, event)?;
                 state.switch = retired(state.switch.take(), to, event, &state.acknowledged);
             }
         }
@@ -744,18 +818,19 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 if let Some(live) = state.outstanding.get_mut(&intent) {
                     live.handoff = Handoff::Taken;
                 }
-                if let Some(exit) = state.owner_exits.get_mut(&intent) {
-                    exit.handoff = Handoff::Taken;
-                }
             }
+        }
+        "ThesisProposed" | "ThesisRevised" => state.theses.recorded(&event.payload)?,
+        "ThesisInvalidated" => state.theses.invalidated(&event.payload)?,
+        "RetirementHeld" => state.retirement_held = Some(held_period(event)?),
+        "UniverseChanged" => {
+            let agent = state.deployment.agent.0.clone();
+            state.theses.universe_changed(&event.payload, &agent)?;
         }
         "StreamOpened"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
         | "DecisionMade"
-        | "ThesisProposed"
-        | "ThesisRevised"
-        | "ThesisInvalidated"
         | "RunStarted"
         | "ToolCallRecorded"
         | "ToolResultRecorded"
@@ -775,6 +850,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "CompensatingEvent"
         | "AccountSnapshotRecorded"
         | "AccountStateObserved"
+        | "ConnectionEstablished"
+        | "AccountCloseRequested"
+        | "OwnerConfirmationReceived"
         | "RejectObserved"
         | "AccountRestrictionChanged"
         | "ExternalActivityIngested"
@@ -789,7 +867,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "PositionReleased"
         | "InstrumentRestrictionChanged"
         | "GoalCompleted"
-        | "UniverseChanged"
         | "ClockAdvanced"
         | "ClockOffsetRecorded"
         | "ClockToleranceExceeded"
@@ -803,6 +880,31 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
     }
     Ok(())
+}
+
+/// One `RetirementHeld` read as the journal admits it (rule 265): a cause, a period from 1, and two
+/// whole-second timestamps. A record that does not read so is refused, never folded as a guess.
+fn held_period(event: &FoldedEvent) -> Result<HeldPeriod, RuntimeError> {
+    let cause = event
+        .causation_id
+        .clone()
+        .ok_or_else(|| payload::non_canonical("causation_id"))?;
+    let period = event
+        .payload
+        .get("period")
+        .and_then(Value::as_int)
+        .filter(|period| *period >= 1)
+        .ok_or_else(|| payload::non_canonical("period"))?;
+    let held_since = payload::stamped_clock_of(&event.payload, "held_since")
+        .ok_or_else(|| payload::non_canonical("held_since"))?;
+    let written_at = payload::stamped_clock_of(&event.payload, "risk_clock")
+        .ok_or_else(|| payload::non_canonical("risk_clock"))?;
+    Ok(HeldPeriod {
+        cause,
+        period,
+        held_since,
+        written_at,
+    })
 }
 
 /// An `OrderStateChanged` of an order the runtime follows: a terminal state ends its intent, and a
@@ -890,6 +992,43 @@ fn retired(
         .as_ref()
         .is_some_and(|cause| acknowledged.contains_key(cause));
     if lifts { None } else { Some(switch) }
+}
+
+/// Whether a `KillSwitchActivated` is an agent-scope switch on another agent: the executor's
+/// account-stream record of a switch it applied to one agent reaches every runtime following that
+/// account, and is that agent's alone. A switch on the account, or one naming no subject, is never
+/// spared, and the subject is compared ignoring ASCII case, as a ULID is spelt in either case, so
+/// only a subject that is certainly another agent's is spared and this agent's stop never is.
+fn another_agents_switch(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "scope") == Some("agent")
+        && payload::str_of(payload, "subject")
+            .is_some_and(|subject| !subject.eq_ignore_ascii_case(&state.deployment.agent.0))
+}
+
+/// Folds one `AgentModeApplied` into `restrictions` as the executor folds it: its mode under its
+/// `restriction` (none read as the empty name), which a `normal` removes, so each cause lifts only
+/// itself. Answers the record's mode.
+fn restrict(
+    restrictions: &mut BTreeMap<String, Mode>,
+    event: &FoldedEvent,
+) -> Result<Mode, RuntimeError> {
+    let to = mode_field(event)?;
+    let restriction = payload::str_of(&event.payload, "restriction")
+        .unwrap_or_default()
+        .to_owned();
+    if to == Mode::Normal {
+        restrictions.remove(&restriction);
+    } else {
+        restrictions.insert(restriction, to);
+    }
+    Ok(to)
+}
+
+/// Whether an `AgentModeApplied` is the executor's account-wide restriction, naming every agent of
+/// the account (`EVERY_AGENT` in `mandate-executor`). It moves only the account-wide restrictions:
+/// it never lifts or confirms this agent's own restriction or kill switch.
+fn every_agent(payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "agent") == Some("*")
 }
 
 /// Whether an agent-scoped fact on the shared account stream is this deployment's. Mandate spec
@@ -1030,6 +1169,15 @@ fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeEr
                 risk_impact: Vec::new(),
                 deadline: mandate_approval::RiskClock(deadline.secs()),
                 execution,
+                deferred_to_binding: payload
+                    .get("content")
+                    .and_then(|content| content.get("deferred_to_binding"))
+                    .and_then(Value::as_array)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
             },
             content_hash,
             delivered: false,

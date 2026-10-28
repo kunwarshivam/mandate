@@ -34,6 +34,10 @@ images:
   executor: ""
   token-exchange: ""
   scheduler: ""
+  # The notification dispatcher (X8, DEC-2500, DEC-2516): the hosted workspace's notices, mailed
+  # only through the recorded transport, which sends nothing. It needs `api.workspace`, whose
+  # control stream names the streams it follows, `api.appOrigin`, and the `dispatcher` values.
+  dispatcher: ""
   model-gateway: ""
   exporter: ""
   data: ""
@@ -62,6 +66,33 @@ alpacaOAuth:
 # tier but dev or ci refuses it, in the schema and in the chart.
 oauthFixture:
   enabled: false
+
+# The notification dispatcher's configuration file, once images.dispatcher is named (DEC-2500 item
+# 7, DEC-2516 item 2): the ConfigMap `dispatcher-config`, mounted read-only. `recipient` is the one
+# recipient its email channel mails, in DEC-710 item 4's form (`[a-z][a-z0-9_]{0,63}`), required
+# with the image, and `build` its binary's digest, `sha256:<64 hex>`, which an image pinned by
+# digest may leave empty: its digest is the build then. `subjects` are streams it
+# follows beside those the control stream names, a floor and never a filter. The workspace, the
+# environment (paper only) and the app origin are `api.workspace`, `environment` and
+# `api.appOrigin`. Web push stays off (DEC-2504).
+dispatcher:
+  recipient: ""
+  build: ""
+  subjects: []
+
+# The data process (mandate-datad), once images.data is named: each instrument whose daily and
+# minute bars it stores from the cell's recorded series, as `{symbol, assetId, anchor}`. The asset
+# id is the one the instrument's closes object names; the anchor is the close the series has on one
+# session, `<YYYY-MM-DD>=<close>`, and each session after it closes 0.1 higher. At least one is
+# required with the image, each symbol once: a recording, never market data, so only the local and
+# CI cell lists any.
+data:
+  instruments: []
+  # Where its bars come from (DEC-2082): `recorded`, the listed instruments' recorded series, the
+  # local and CI cell's alone; or `alpaca-iex`, each registered US-equity instrument's settled IEX
+  # bars from data.alpaca.markets under the platform's data key, read once from the vault
+  # (DEC-2283), staging's alone, which lists no instrument.
+  source: recorded
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
@@ -101,6 +132,14 @@ artifacts:
   # Empty takes the cluster's default class (local-path in the local cell).
   storageClass: ""
   # ReadWriteOnce keeps every mounting pod on one node; ReadWriteMany needs a class that offers it.
+  accessMode: ReadWriteOnce
+
+# The research store (DEC-2279 item 5): the research runtime's artifacts, which only the model
+# gateway writes, mounted at /var/lib/mandate/research-artifacts. It renders with the gateway. The
+# gateway's fixed cap is 512 MiB, and the chart's tests hold the size at no less than twice that.
+researchArtifacts:
+  size: 2Gi
+  storageClass: ""
   accessMode: ReadWriteOnce
 
 # Where the workspace journal's Postgres is. The journal-db chart's defaults match these.
@@ -172,6 +211,30 @@ runtime:
   connection: ""
   owner: ""
   research: ""
+
+# The second deployment manager (DEC-2070): the research agent's own workspace, as a ULID, whose
+# runtime and executor it starts, as the first starts the hosted workspace's. Empty, it does not
+# render; `cargo xtask cell demo` names it. Only a dev or ci cell may, or staging beside the model
+# gateway (DEC-2080); production never.
+deployManager:
+  researchWorkspace: ""
+
+# The model-gateway service (E21-62, DEC-2326): the one workspace it serves, as its ULID, and the
+# deployment whose meter stream it writes, both required once `images.model-gateway` is named. The
+# two monthly budgets are spending values (DEC-79): left empty, the service refuses to start, with
+# each one's code, rather than run on a number no one named. Only the local cell's values set them,
+# to the recorded bundle's own caps, over a recording that spends nothing, and the chart refuses them
+# anywhere else. The service reads each agent's daily cap from the artifact store, which mounts only
+# with `images.api`; without it, the service refuses to start (`artifact_store_unavailable`).
+modelGateway:
+  workspace: ""
+  deployment: ""
+  workspaceMonthlyUsd: ""
+  deploymentMonthlyUsd: ""
+  # The live registry file (DEC-2216 item 4, DEC-2081), strict JSON: a hosted cell's alone, and
+  # staging's alone among them. Named, the gateway starts live from it and the vault; empty, it
+  # serves the recorded bundle, which only the local cell's image carries.
+  registry: ""
 
 # The broker every executor runs over (DEC-2306 item 1): `fixture`, the in-process fixture paper
 # broker, or `alpaca-paper`, Alpaca's paper trading host under the vault lease on its connection,

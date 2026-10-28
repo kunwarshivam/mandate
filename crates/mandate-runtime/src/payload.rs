@@ -432,7 +432,9 @@ fn ignored_from(reason: &str) -> Option<ModelOutputIgnored> {
 }
 
 /// The order an `IntentProposed` payload records. Shared by the fold and the retry, so an intent
-/// handed again is byte-for-byte the one its draft recorded.
+/// handed again is byte-for-byte the one its draft recorded. A `limit` has its price and a
+/// `market` order none, and only an exit goes at the market (journal spec §9.1 rules 2 and 3,
+/// DEC-2387); any other shape is refused rather than read as some other order.
 pub(crate) fn order_of(payload: &Value) -> Result<crate::types::IntentBody, RuntimeError> {
     let purpose = str_of(payload, "purpose")
         .and_then(purpose_from)
@@ -443,12 +445,17 @@ pub(crate) fn order_of(payload: &Value) -> Result<crate::types::IntentBody, Runt
         .and_then(side_from)
         .ok_or_else(|| non_canonical("side"))?;
     let qty = str_of(payload, "qty").ok_or_else(|| non_canonical("qty"))?;
-    let limit = str_of(payload, "limit_price").ok_or_else(|| non_canonical("limit_price"))?;
+    let limit = match (str_of(payload, "type"), payload.get("limit_price")) {
+        (Some("limit"), Some(Value::Str(limit))) => Some(price_of(limit)?),
+        (Some("market"), Some(Value::Null)) if !purpose.adds_risk() => None,
+        (Some("limit" | "market"), _) => return Err(non_canonical("limit_price")),
+        _ => return Err(non_canonical("type")),
+    };
     Ok(crate::types::IntentBody::Order {
         instrument: instrument_of(instrument)?,
         side,
         qty: qty_of(qty)?,
-        limit: price_of(limit)?,
+        limit,
         purpose,
     })
 }
@@ -476,6 +483,18 @@ pub(crate) const ACCOUNT_RESTRICTED: &str = "account_restricted";
 /// The dry run's reason code for an opening in an instrument where another still works: trading
 /// spec §5.3 rule 6's, one working non-protective order per instrument (DEC-1150 item 5).
 pub(crate) const WORKING_ORDER_LIMIT: &str = "working_order_limit";
+/// An opening the dry run allowed with checks deferred, for which the builder produced no plan: no
+/// request version can both bind no plan and name a deferral, so the runtime refuses it itself
+/// rather than ask no one unseen (DEC-2810, DEC-2515 item 1).
+pub(crate) const PLAN_REQUIRED: &str = "plan_required";
+/// An opening classified `ask` whose decision cannot be bound for an approval request: no
+/// `decided_by` label, or a `combined_score` that is not a decimal (DEC-2814).
+pub(crate) const ASK_UNBOUND: &str = "ask_unbound";
+/// An opening classified `ask` whose builder plan names another asset class than the order
+/// (journal spec rule 136; DEC-2814).
+pub(crate) const PLAN_MISMATCH: &str = "plan_mismatch";
+/// An opening classified `ask` whose approval content object or hash cannot be written (DEC-2814).
+pub(crate) const CONTENT_UNHASHABLE: &str = "content_unhashable";
 pub(crate) const REASON_STARTUP_HOLD: &str = "awaiting_reconciliation";
 pub(crate) const REASON_OWNER_PAUSE: &str = "owner_pause";
 pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";
@@ -519,6 +538,27 @@ pub(crate) fn step_up_value(evidence: &StepUp) -> Result<Value, RuntimeError> {
         (
             "authenticated_at",
             seconds(
+                RiskClock::from_secs(evidence.authenticated_at.0),
+                "authenticated_at",
+            )?,
+        ),
+        ("method", text(method)),
+    ])
+}
+
+/// The counterpart of [`step_up_of`] for the agent stream's `OwnerExitRequested`, whose evidence
+/// types `authenticated_at` as a §4.7 timestamp (journal spec §9.1), unlike the control stream's
+/// whole seconds that [`step_up_value`] copies onto `ApprovalResponded` (§9.7). The executor reads
+/// that timestamp to bound a stepped-up exit's confirmation (DEC-2040 item 7, DEC-2387).
+pub(crate) fn step_up_stamped(evidence: &StepUp) -> Result<Value, RuntimeError> {
+    let method = match evidence.method {
+        StepUpMethod::CliConfirm => CLI_CONFIRM,
+    };
+    object(vec![
+        ("assertion_id", text(&evidence.assertion.0)),
+        (
+            "authenticated_at",
+            stamp(
                 RiskClock::from_secs(evidence.authenticated_at.0),
                 "authenticated_at",
             )?,

@@ -1,0 +1,52 @@
+# Every value here is the founder's, entered at apply time through TF_VAR_* in his own shell, never
+# committed: docs/runbooks/ci-runners.md names each one.
+
+variable "state_passphrase" {
+  description = "Encrypts this root's state and plans. Keep a copy in a password manager."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.state_passphrase) >= 32
+    error_message = "The state passphrase must be at least 32 characters."
+  }
+}
+
+variable "github_app_client_id" {
+  description = "The runner App's client id (Settings, Developer settings, GitHub Apps)."
+  type        = string
+}
+
+variable "github_app_installation_id" {
+  description = "The number at the end of the App installation's settings URL."
+  type        = string
+}
+
+variable "github_app_private_key" {
+  description = "The runner App's private key, the whole PEM."
+  type        = string
+  sensitive   = true
+}
+
+variable "debug_ssh_key" {
+  description = "DEC-2077's debug window: your SSH public key, only while you debug. Empty, the default, keeps the window shut."
+  type        = string
+  default     = ""
+}
+
+variable "debug_ssh_cidr" {
+  description = "DEC-2077's debug window: your own address as a /32, only while you debug. Empty, the default, admits nothing."
+  type        = string
+  default     = ""
+}
+
+variable "runner_count" {
+  description = "One for the founder's canary; three for the approved fleet."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = floor(var.runner_count) == var.runner_count && var.runner_count >= 1 && var.runner_count <= 3
+    error_message = "The runner count is one canary through the approved three-runner fleet."
+  }
+}

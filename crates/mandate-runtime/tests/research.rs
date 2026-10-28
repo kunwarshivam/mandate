@@ -6,7 +6,8 @@ mod common;
 
 use common::research::{
     AAPL, CUT_OFF, INTERVAL_S, Loop, MSFT, Model, RESEARCH_MODEL, RESPONSE_AAPL, RecordedPlane,
-    World, failing, full_run, pin, production_preconditions, record_for, recorded, worker_run,
+    World, failing, full_run, pin, production_preconditions, record_for, recorded, refused_run,
+    worker_run,
 };
 use common::{
     ACCOUNT_STREAM, AllowGate, FixedPlan, TestIds, clock, event, ports, text, universe, with_clock,
@@ -580,7 +581,7 @@ fn an_operator_alert_is_opaque_and_follows_the_call_record() {
         })
         .collect();
     assert_eq!(alerts.len(), 1);
-    assert_eq!(alerts[0].message_key, "research_call_refused");
+    assert_eq!(alerts[0].kind.key(), "research_call_refused");
     assert_eq!(alerts[0].subject_event, record);
 }
 
@@ -602,7 +603,7 @@ fn three_deadline_misses_in_a_row_alert_the_operator_once() {
             called
                 .effects
                 .iter()
-                .filter(|effect| matches!(effect, Effect::Notify(r) if r.message_key == "research_deadline_streak"))
+                .filter(|effect| matches!(effect, Effect::Notify(r) if r.kind.key() == "research_deadline_streak"))
                 .count(),
         );
     }
@@ -1645,38 +1646,42 @@ fn a_pin_the_gateway_does_not_hold_ends_the_run_and_disables_research_for_it() {
     assert_eq!(starts(&repinned).len(), 1);
 }
 
+/// A refusal, the gateway's or the caller's own `gateway_unreachable` (DEC-2397 item 3), for a run
+/// that is not in flight, or that has not asked for its call, is not interpreted, and the run stays.
 #[test]
 fn a_refusal_for_a_run_not_in_flight_is_refused() {
-    let f = Fixture::new();
-    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
-    let mut lp = Loop::new(1);
-    boot(&mut lp, &ports);
-    let world = World::open();
-    let stray = lp.step(
-        ResearchInput::Refused {
-            run_id: "01NORUN".to_owned(),
-            at: clock(CUT_OFF),
-            error: RequestError::UnknownModel,
-        },
-        &ports,
-        &world,
-    );
-    assert!(matches!(stray, Err(RuntimeError::NotInterpreted { .. })));
-    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
-    let early = lp.step(
-        ResearchInput::Refused {
-            run_id: started[0].0.clone(),
-            at: clock(CUT_OFF + 1),
-            error: RequestError::UnknownModel,
-        },
-        &ports,
-        &world,
-    );
-    assert!(
-        matches!(early, Err(RuntimeError::NotInterpreted { .. })),
-        "a refusal before a call was requested"
-    );
-    assert_eq!(lp.research.in_flight(), Some(started[0].0.as_str()));
+    for error in [RequestError::UnknownModel, RequestError::GatewayUnreachable] {
+        let f = Fixture::new();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let world = World::open();
+        let stray = lp.step(
+            ResearchInput::Refused {
+                run_id: "01NORUN".to_owned(),
+                at: clock(CUT_OFF),
+                error,
+            },
+            &ports,
+            &world,
+        );
+        assert!(matches!(stray, Err(RuntimeError::NotInterpreted { .. })));
+        let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+        let early = lp.step(
+            ResearchInput::Refused {
+                run_id: started[0].0.clone(),
+                at: clock(CUT_OFF + 1),
+                error,
+            },
+            &ports,
+            &world,
+        );
+        assert!(
+            matches!(early, Err(RuntimeError::NotInterpreted { .. })),
+            "a refusal before a call was requested"
+        );
+        assert_eq!(lp.research.in_flight(), Some(started[0].0.as_str()));
+    }
 }
 
 #[test]
@@ -2734,4 +2739,109 @@ fn a_trading_batch_in_doubt_is_never_abandoned_as_research() {
         handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports),
         Err(RuntimeError::AppendUnresolved { .. })
     ));
+}
+
+/// The alerts `step` raised, by key and subject.
+fn alerts_of(step: &mandate_runtime::ResearchStep) -> Vec<(&'static str, String)> {
+    step.effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Notify(reference) => {
+                Some((reference.kind.key(), reference.subject_event.0.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// DEC-2397 item 3: a call the model-gateway service never answered whole ends its run with no
+/// output and no record, alerts the operator once naming the run's last observation, and keeps the
+/// pin: the next due run starts, where a gateway refusal of the same call withdraws it.
+#[test]
+fn a_lost_call_ends_its_run_alerts_and_keeps_the_pin() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let plane = RecordedPlane::load();
+    refused_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        RequestError::GatewayUnreachable,
+        clock(CUT_OFF + 30),
+    );
+    assert!(lp.research.in_flight().is_none(), "the run ended");
+    assert!(
+        lp.events("ModelInvocationRecorded").is_empty(),
+        "no record of a lost call"
+    );
+    let observed = lp.events("ObservationRecorded");
+    let last = observed
+        .last()
+        .unwrap_or_else(|| panic!("the run observed items"));
+    let lost = lp
+        .steps
+        .last()
+        .unwrap_or_else(|| panic!("a step took the loss"));
+    assert_eq!(
+        alerts_of(lost),
+        [("research_gateway_unreachable", last.event_id.0.clone())]
+    );
+    assert!(
+        lost.requests.is_empty(),
+        "the lost call is never sent again: {lost:?}"
+    );
+    let later = clock(CUT_OFF + 2 * i64::from(INTERVAL_S));
+    assert_eq!(
+        starts(&lp.run(ResearchInput::Poll(later), &ports, &world)).len(),
+        1,
+        "research stays on schedule"
+    );
+
+    let mut refused = Loop::new(1);
+    boot(&mut refused, &ports);
+    refused_run(
+        &mut refused,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        RequestError::UnknownModel,
+        clock(CUT_OFF + 30),
+    );
+    assert!(
+        alerts_of(refused.steps.last().unwrap()).is_empty(),
+        "a gateway refusal alerts no one"
+    );
+    assert!(
+        starts(&refused.run(ResearchInput::Poll(later), &ports, &world)).is_empty(),
+        "a gateway refusal withdraws the pin"
+    );
+}
+
+/// DEC-2397 item 3: a lost call waits for the next due run, as a refused one does, and does not
+/// start a run again at once.
+#[test]
+fn a_lost_call_waits_for_the_next_due_run() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let plane = RecordedPlane::load();
+    refused_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        RequestError::GatewayUnreachable,
+        clock(CUT_OFF + 30),
+    );
+    let soon = clock(CUT_OFF + 31);
+    assert!(starts(&lp.run(ResearchInput::Poll(soon), &ports, &world)).is_empty());
 }

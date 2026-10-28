@@ -52,6 +52,8 @@ fn each_platform_identity_has_its_secret_name_written_out() {
         Identity::Runtime,
         Identity::SecretImport,
         Identity::ModelGateway,
+        Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
         Identity::Provisioner,
     ]
@@ -66,6 +68,8 @@ fn each_platform_identity_has_its_secret_name_written_out() {
             Ok("vault-approle-runtime".to_owned()),
             Ok("vault-approle-secret-import".to_owned()),
             Ok("vault-approle-model-gateway".to_owned()),
+            Ok("vault-approle-news-reader".to_owned()),
+            Ok("vault-approle-bars-reader".to_owned()),
             Ok("vault-approle-email-sender".to_owned()),
             Ok("vault-approle-provisioner".to_owned()),
         ]

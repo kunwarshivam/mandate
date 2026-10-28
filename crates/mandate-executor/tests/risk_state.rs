@@ -13,19 +13,28 @@
 //! never, and `open` refuses an instrument that is not a canonical asset id (DEC-2313), so every
 //! instrument here is one. Until B2b-2 lands, each test that reaches such a record or refusal fails
 //! at its `Unimplemented` stub.
+//!
+//! DEC-2829: a version-1 order-state `CompensatingEvent` right after the `OrderStateChanged` it
+//! corrects, in the same batch, steps nothing; any other compensation fails closed.
 
-use mandate_canon::{Key, Value, parse, to_canonical};
+mod common;
+
+use mandate_accounting::Side;
+use mandate_canon::{Key, Object, Value, parse, to_canonical};
 use mandate_domain::{AgentMode, AssetClass, Environment, MarketSession};
-use mandate_executor::ExecutorError;
 use mandate_executor::risk_state::{
-    AccountRiskFold, OrderPath, RiskAppend, RiskCalendar, RiskView, UnreadableCause,
+    AccountRiskFold, ExchangeRiskCalendar, OrderPath, RiskAppend, RiskCalendar, RiskView,
+    UnreadableCause, risk_snapshot,
 };
 use mandate_executor::tripwire::TripwireState;
+use mandate_executor::{
+    BrokerOutcome, Effect, EventDraft, ExecutorError, Input, ReconcileReason, reconcile,
+};
 use mandate_journal::{Draft, StoredEvent};
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty, Ratio, Usd};
 use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::ProvenanceMap;
-use mandate_spec::risk::{Opening, RiskState, SessionClock};
+use mandate_spec::risk::{LimitKey, Opening, RiskState, SessionClock};
 use mandate_spec::{Mandate, SpecError, ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 use serde_json::Value as Json;
@@ -708,8 +717,9 @@ fn accepted(base: &Json, append: &RiskAppend) -> bool {
 /// the fold never runs (DEC-2307 item 3), and every member the step states but `AgentModeApplied`'s
 /// `from`, which §9.6's closed payload does not carry. Each record follows from its row at the row's
 /// clock for this agent and is one the journal accepts; a trigger or a lift carries the step's
-/// snapshot, `AgentModeApplied` is the executor's own and names the action of the step's last trigger
-/// before it as its restriction (DEC-2308 item 3), and an instrument restriction names the
+/// snapshot, `AgentModeApplied` is the executor's own and names as its restriction the action of the
+/// step's last trigger before it (DEC-2308 item 3), or with none, the last lift's action or limit,
+/// or `goal_completed` (DEC-2331), and an instrument restriction names the
 /// instrument the marks named (DEC-2307 item 4, DEC-2308 item 2).
 fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, step: &Json) {
     let (seq, base) = (row.seq, base_draft());
@@ -723,11 +733,14 @@ fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, st
         .map(|e| e["type"].as_str().unwrap())
         .collect();
     assert_eq!(types, wanted, "seq {seq}: the records, in order");
-    let mut action = None;
+    let (mut action, mut cause) = (None, None);
     for (append, entry) in appends.iter().zip(journal) {
         let mode = append.event_type == "AgentModeApplied";
-        if entry["type"] == "RiskLimitTriggered" {
-            action = entry["action"].as_str();
+        match entry["type"].as_str() {
+            Some("RiskLimitTriggered") => action = entry["action"].as_str(),
+            Some("RiskLimitLifted") => cause = entry["action"].as_str().or(entry["limit"].as_str()),
+            Some("GoalCompleted") => cause = Some("goal_completed"),
+            _ => {}
         }
         if !mode && !CLOSED_RECORDS.contains(&append.event_type) {
             continue;
@@ -747,7 +760,12 @@ fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, st
             "InstrumentRestrictionChanged" => assert_eq!(text("instrument"), Some(instrument)),
             "AgentModeApplied" => {
                 assert_eq!(append.payload.get("originated"), Some(&Value::Bool(true)));
-                assert_eq!(text("restriction"), action, "seq {seq}: the rung's action");
+                let wanted = action.or(cause);
+                assert_eq!(
+                    text("restriction"),
+                    wanted,
+                    "seq {seq}: DEC-2308 item 3, DEC-2331"
+                );
             }
             _ => {}
         }
@@ -765,9 +783,10 @@ fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, st
     }
 }
 
-/// Folds a case's steps as account-stream rows from seq 2, a `mark` as a version-2 `MarkUpdated`
-/// and a `clock` or `risk_day_started` as a tick, checks each against its `expect`, and returns each
-/// step's records.
+/// Folds a case's steps as account-stream rows from seq 2, a `mark` as a version-2 `MarkUpdated`,
+/// a `clock` or `risk_day_started` as a tick, and a `fill` as the agent's own order (its request and
+/// submission, which step nothing) and then its `FillApplied` (DEC-2393 items 1 and 2), checks each
+/// stepping row against its `expect`, and returns each step's records.
 fn walk(fold: &mut AccountRiskFold<'_>, instrument: &str, steps: &[Json]) -> Vec<Vec<RiskAppend>> {
     walk_from(fold, instrument, 2, steps)
 }
@@ -780,7 +799,8 @@ fn walk_from(
     steps: &[Json],
 ) -> Vec<Vec<RiskAppend>> {
     let mut records = Vec::new();
-    for (seq, step) in (first..).zip(steps) {
+    let mut seq = first;
+    for step in steps {
         let text = |key: &str| step[key].as_str().unwrap();
         let row = match text("event") {
             "mark" => mark(
@@ -792,14 +812,192 @@ fn walk_from(
                 text("session"),
             ),
             "clock" | "risk_day_started" => tick(seq, text("at")),
-            other => panic!("not a mark or a tick: {other}"),
+            "fill" => {
+                let order = format!("o-{seq}");
+                for row in own_order(seq, AGENT, &order, instrument, text("side"), text("qty")) {
+                    assert_eq!(
+                        fold.fold(&row).unwrap(),
+                        Vec::new(),
+                        "an order steps nothing"
+                    );
+                }
+                seq += 2;
+                fill(
+                    seq,
+                    &order,
+                    instrument,
+                    (text("side"), text("qty"), text("price")),
+                    text("at"),
+                    "[]",
+                )
+            }
+            other => panic!("not a mark, a tick or a fill: {other}"),
         };
         let appends = fold.fold(&row).unwrap();
         check_records(&appends, &row, instrument, step);
         check_snapshot(fold.view(), seq, &step["expect"]);
+        seq = journal(fold, &appends, seq + 1);
         records.push(appends);
     }
     records
+}
+
+/// The records a step returned, appended from seq `first` as the executor appends them, in one
+/// batch right after their cause, and folded back, each the record the fold owes and stepping
+/// nothing (DEC-2301 item 2). Returns the seq after them.
+fn journal(fold: &mut AccountRiskFold<'_>, appends: &[RiskAppend], first: u64) -> u64 {
+    let before = fold.view().clone();
+    let mut seq = first;
+    for append in appends {
+        let row = appended(seq, append);
+        assert_eq!(
+            fold.fold(&row).unwrap(),
+            Vec::new(),
+            "seq {seq}: a record steps nothing"
+        );
+        seq += 1;
+    }
+    assert_eq!(fold.owed().count(), 0, "every owed record came back");
+    if let (RiskView::Readable { snapshot: was, .. }, RiskView::Readable { snapshot, .. }) =
+        (&before, fold.view())
+    {
+        assert_eq!(was, snapshot, "the records move nothing");
+    }
+    seq
+}
+
+/// `append` as the row the journal stores it as at `seq`.
+fn appended(seq: u64, append: &RiskAppend) -> StoredEvent {
+    let cause = append.causation_id.clone().map_or(Value::Null, Value::Str);
+    let mut body = mandate_canon::Object::new();
+    for (key, value) in [
+        ("causation_id", cause),
+        ("event_type", Value::Str(append.event_type.to_owned())),
+        ("payload", append.payload.clone()),
+        ("stream_id", Value::Str(ACCOUNT.to_owned())),
+    ] {
+        body.insert(Key::new(key).unwrap(), value);
+    }
+    stored(
+        seq,
+        append.event_type,
+        append.schema_version,
+        to_canonical(&Value::Object(body)),
+    )
+}
+
+/// A row on the account stream with its own `causation_id`.
+fn caused(
+    seq: u64,
+    event_type: &str,
+    version: u64,
+    cause: Option<&str>,
+    payload: &str,
+) -> StoredEvent {
+    let cause = cause.map_or("null".to_owned(), |cause| format!(r#""{cause}""#));
+    let body = format!(
+        r#"{{"event_type":"{event_type}","schema_version":{version},"seq":{seq},
+        "stream_id":"{ACCOUNT}","causation_id":{cause},"payload":{payload}}}"#
+    );
+    stored(
+        seq,
+        event_type,
+        version,
+        to_canonical(&parse(body.as_bytes()).unwrap()),
+    )
+}
+
+/// `agent`'s order `order` at seqs `seq` and `seq + 1`: its `OrderRequestRecorded`, then the
+/// `OrderSubmitted` at version 2 whose `causation_id` names it (journal spec rule 45).
+fn own_order(
+    seq: u64,
+    agent: &str,
+    order: &str,
+    instrument: &str,
+    side: &str,
+    qty: &str,
+) -> [StoredEvent; 2] {
+    let request = caused(
+        seq,
+        "OrderRequestRecorded",
+        1,
+        None,
+        &format!(
+            r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,
+            "stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,
+            "at_floor":null,"risk_clock":"{OPENED}"}}"#
+        ),
+    );
+    let submitted = caused(
+        seq + 1,
+        "OrderSubmitted",
+        2,
+        Some(&request.event_id),
+        &format!(
+            r#"{{"client_order_id":"{order}","attempt":1,"instrument_id":"{instrument}",
+            "side":"{side}","type":"limit","tif":"day","qty":"{qty}","limit_price":"100",
+            "risk_clock":"{OPENED}"}}"#
+        ),
+    );
+    [request, submitted]
+}
+
+/// A `FillApplied` of `order`: `(side, qty, price)` at `clock`, with the `fees` list `fees`, at
+/// version 2, as the executor writes every fill (DEC-2812).
+fn fill(
+    seq: u64,
+    order: &str,
+    instrument: &str,
+    trade: (&str, &str, &str),
+    clock: &str,
+    fees: &str,
+) -> StoredEvent {
+    fill_at(2, seq, order, instrument, trade, clock, fees)
+}
+
+/// [`fill`] at `version`.
+fn fill_at(
+    version: u64,
+    seq: u64,
+    order: &str,
+    instrument: &str,
+    trade: (&str, &str, &str),
+    clock: &str,
+    fees: &str,
+) -> StoredEvent {
+    let (side, qty, price) = trade;
+    row(
+        seq,
+        "FillApplied",
+        version,
+        &format!(
+            r#"{{"fill_id":"f-{seq}","client_order_id":"{order}","instrument_id":"{instrument}",
+            "side":"{side}","qty_gross":"{qty}","price":"{price}","trade_date":"{OPENED_DAY}",
+            "risk_clock":"{clock}","fees":{fees}}}"#
+        ),
+    )
+}
+
+/// A `FeesCharged` as the paper executor's `simulated_fee` books it for `order`: `accrued` the fee,
+/// `charged` 0, `simulated` true (DEC-948 item 3).
+fn fees_charged(seq: u64, order: &str, accrued: &str, clock: &str) -> StoredEvent {
+    row(
+        seq,
+        "FeesCharged",
+        1,
+        &format!(
+            r#"{{"family":"equities","day":"{OPENED_DAY}","accrued":"{accrued}","charged":"0",
+            "simulated":true,"client_order_id":"{order}","sec":null,"taf":null,"cat":"{accrued}",
+            "risk_clock":"{clock}"}}"#
+        ),
+    )
+}
+
+fn equity(view: &RiskView) -> String {
+    match view {
+        RiskView::Readable { snapshot, .. } => snapshot.agent_equity.to_string(),
+        other => panic!("the view is readable: {other:?}"),
+    }
 }
 
 fn readable_in(mode: AgentMode) -> RiskView {
@@ -874,12 +1072,11 @@ fn a_version_1_mark_is_no_verdict_and_moves_nothing() {
     assert!(snapshot.instrument_restrictions.is_empty(), "30 s is fresh");
 }
 
-/// `RiskState` holds one position, so a sane BTC/USD mark at 57990 moves MC-R20's E to
-/// 10000 + 0.1 × (57990 − 60000) = 9799, and a mark naming a second instrument is one the fold
-/// cannot step without pricing BTC's position at it (DEC-2308 item 4): the view becomes
-/// unreadable, holding openings and no exit.
+/// A sane BTC/USD mark at 57990 moves MC-R20's E to 10000 + 0.1 × (57990 − 60000) = 9799. A mark
+/// naming another instrument, whose lots the agent does not hold, steps nothing: the view reads on,
+/// its E unmoved (DEC-2849 item 2, DEC-2804 item 9).
 #[test]
-fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
+fn a_mark_for_another_instrument_steps_nothing() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
     let mut fold = open_case(&case, &mandate, &Crypto);
@@ -904,22 +1101,22 @@ fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
         true,
         "crypto",
     );
+    let before = fold.view().clone();
     assert_eq!(fold.fold(&other).unwrap(), vec![]);
-    assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 2)
-    );
-    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
-    assert!(fold.view().holds(OrderPath::Opening));
-    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
-        assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
-    }
+    let (RiskView::Readable { snapshot, head }, RiskView::Readable { snapshot: was, .. }) =
+        (fold.view(), &before)
+    else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (was, 3));
+    assert_eq!(snapshot.agent_equity.to_string(), "9799");
 }
 
 /// MC-R20 opens holding BTC/USD, bound at open, so a first mark naming ETH/USD at 59000 is never
-/// read as BTC's price (which would make E 9900): the view becomes unreadable (DEC-2310 item 1).
+/// read as BTC's price (which would make E 9900): it steps nothing (DEC-2310 item 1, DEC-2849
+/// item 2).
 #[test]
-fn a_held_openings_first_mark_for_another_instrument_makes_the_view_unreadable() {
+fn a_held_openings_first_mark_for_another_instrument_steps_nothing() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
     let mut fold = open_case(&case, &mandate, &Crypto);
@@ -931,16 +1128,15 @@ fn a_held_openings_first_mark_for_another_instrument_makes_the_view_unreadable()
         true,
         "crypto",
     );
+    let opened = fold.view().clone();
     assert_eq!(fold.fold(&other).unwrap(), vec![]);
-    assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 1)
-    );
-    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
-    assert!(fold.view().holds(OrderPath::Opening));
-    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
-        assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
-    }
+    let (RiskView::Readable { snapshot, head }, RiskView::Readable { snapshot: was, .. }) =
+        (fold.view(), &opened)
+    else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (was, 2));
+    assert_eq!(snapshot.agent_equity.to_string(), "10000");
 }
 
 /// A held opening, or a fold opened past seq 1, must name its instrument: the first could otherwise
@@ -1097,7 +1293,8 @@ fn mc_r13_session_and_insane_marks_fold_as_the_reference_case() {
         text("day_start_equity"),
         steps[1]["expect"]["agent_equity"].as_str()
     );
-    walk_from(&mut fold, XYZ, 5, &steps[2..]);
+    let next = journal(&mut fold, &midnight, 5);
+    walk_from(&mut fold, XYZ, next, &steps[2..]);
 }
 
 /// MC-R01's ladder reaches `paused`, and a row the fold cannot read after it keeps `paused`, which
@@ -1257,4 +1454,2370 @@ fn an_opening_on_an_instrument_that_is_not_a_canonical_asset_id_is_refused() {
         "a flat opening names no symbol either"
     );
     assert_eq!(flat(XYZ), None, "a flat opening on a canonical id");
+}
+
+const AT_1: &str = "2026-09-22T14:31:00.000000000Z";
+const AT_2: &str = "2026-09-22T14:32:00.000000000Z";
+const AT_3: &str = "2026-09-22T14:33:00.000000000Z";
+
+/// The flat opening of `research_equity_pinned` (A 10000), marked at 100 and holding the agent's
+/// own order `o-1` for XYZ: seqs 2 to 4.
+fn marked_with_an_order<'c>(mandate: &ValidatedMandate, calendar: &'c Wall) -> AccountRiskFold<'c> {
+    let mut fold = open(mandate, calendar);
+    fold.fold(&mark(2, XYZ, AT_1, "100", true, "regular"))
+        .unwrap();
+    for row in own_order(3, AGENT, "o-1", XYZ, "buy", "12") {
+        assert_eq!(fold.fold(&row).unwrap(), Vec::new());
+    }
+    fold
+}
+
+/// DEC-2393 items 1 to 3, by hand: E = A + cash + Q × mark, where cash is every own fill's
+/// proceeds less its cost less every fee charged to an own order.
+#[test]
+fn the_agents_own_fills_and_fees_move_its_equity_and_another_agents_never_do() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    assert_eq!(equity(fold.view()), "10000");
+    fold.fold(&fill(5, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "10000", "10000 - 1000 + 10 × 100");
+    fold.fold(&fees_charged(6, "o-1", "0.05", AT_2)).unwrap();
+    assert_eq!(equity(fold.view()), "9999.95", "the simulated fee lowers E");
+    let commission = r#"[{"kind":"commission","amount":"1.5","asset":"USD","status":"charged"}]"#;
+    fold.fold(&fill(7, "o-1", XYZ, ("buy", "2", "100"), AT_2, commission))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "9998.45",
+        "and so does the fill's own commission"
+    );
+    for row in own_order(8, "agent-2", "o-2", XYZ, "buy", "5") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(10, "o-2", XYZ, ("buy", "5", "90"), AT_2, commission))
+        .unwrap();
+    fold.fold(&fees_charged(11, "o-2", "7", AT_2)).unwrap();
+    fold.fold(&fill(12, "o-stray", XYZ, ("sell", "1", "1"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "9998.45",
+        "another agent's fills and fees are not this one's"
+    );
+    fold.fold(&mark(13, XYZ, AT_3, "99", true, "regular"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "9986.45", "10000 - 1201.55 + 12 × 99");
+    assert_eq!(readable_head(fold.view()), 13);
+}
+
+/// An order with no companion is the agent's when the submission itself names it, and a
+/// replacement of the agent's order is the agent's (DEC-2393 item 1).
+#[test]
+fn a_submission_naming_the_agent_and_a_replacement_of_its_order_are_its_own() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    fold.fold(&mark(2, XYZ, AT_1, "100", true, "regular"))
+        .unwrap();
+    let legacy = row(
+        3,
+        "OrderSubmitted",
+        1,
+        &format!(
+            r#"{{"client_order_id":"o-1","agent_id":"{AGENT}","instrument_id":"{XYZ}","side":"buy",
+            "type":"limit","tif":"day","qty":"10","limit_price":"100","risk_clock":"{OPENED}"}}"#
+        ),
+    );
+    fold.fold(&legacy).unwrap();
+    let replaced = row(
+        4,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1b","state":"accepted","replaces":"o-1","ignored":false}"#,
+    );
+    fold.fold(&replaced).unwrap();
+    fold.fold(&fill(5, "o-1", XYZ, ("buy", "4", "100"), AT_2, "[]"))
+        .unwrap();
+    fold.fold(&fill(6, "o-1b", XYZ, ("buy", "6", "100"), AT_2, "[]"))
+        .unwrap();
+    fold.fold(&mark(7, XYZ, AT_3, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "9900", "10000 - 1000 + 10 × 90");
+}
+
+#[test]
+fn a_fee_in_another_asset_is_a_refusal_to_decide() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let in_asset = r#"[{"kind":"crypto_asset","amount":"0.01","asset":"XYZ","status":"charged"}]"#;
+    let appended = fold.fold(&fill(5, "o-1", XYZ, ("buy", "1", "100"), AT_2, in_asset));
+    assert_eq!(appended.unwrap(), Vec::new());
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 4)
+    );
+}
+
+#[test]
+fn an_own_fill_on_a_second_instrument_is_a_refusal_to_decide() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    fold.fold(&fill(5, "o-1", ETH, ("buy", "1", "100"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 4)
+    );
+}
+
+/// DEC-2314: a flat opening binds only a canonical asset id, whichever row binds it first.
+#[test]
+fn a_first_binding_on_an_id_that_is_not_canonical_is_a_refusal_to_decide() {
+    let mandate = mandate();
+    for first in ["XYZ", "7B4A1C2E-2222-4A2B-9C3D-000000000002"] {
+        let mut by_mark = open(&mandate, &Wall);
+        by_mark
+            .fold(&mark(2, first, AT_1, "100", true, "regular"))
+            .unwrap();
+        assert_eq!(
+            unreadable(by_mark.view()),
+            (UnreadableCause::RefusedToDecide, 1)
+        );
+
+        let mut by_fill = open(&mandate, &Wall);
+        for row in own_order(2, AGENT, "o-1", first, "buy", "1") {
+            by_fill.fold(&row).unwrap();
+        }
+        by_fill
+            .fold(&fill(4, "o-1", first, ("buy", "1", "100"), AT_2, "[]"))
+            .unwrap();
+        assert_eq!(
+            unreadable(by_fill.view()),
+            (UnreadableCause::RefusedToDecide, 3)
+        );
+    }
+}
+
+/// A sale of more than the sub-ledger holds would be a short sale (`AGENTS.md` rule 12).
+#[test]
+fn an_own_sale_of_more_than_the_agent_holds_is_a_refusal_to_decide() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    fold.fold(&fill(5, "o-1", XYZ, ("sell", "1", "100"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 4)
+    );
+}
+
+#[test]
+fn a_fill_or_a_fee_that_does_not_decode_makes_the_view_unreadable() {
+    let mandate = mandate();
+    let bad_fee = r#"[{"kind":"commission","amount":"-1","asset":"USD","status":"charged"}]"#;
+    for row in [
+        fill(5, "o-1", XYZ, ("short", "1", "100"), AT_2, "[]"),
+        fill(5, "o-1", XYZ, ("buy", "0", "100"), AT_2, "[]"),
+        fill(5, "o-1", XYZ, ("buy", "1", "x"), AT_2, "[]"),
+        fill(
+            5,
+            "o-1",
+            XYZ,
+            ("buy", "1", "100"),
+            "2026-09-22T14:32:00.500000000Z",
+            "[]",
+        ),
+        fill(5, "o-1", XYZ, ("buy", "1", "100"), AT_2, bad_fee),
+        fill(5, "o-1", XYZ, ("buy", "1", "100"), AT_2, "null"),
+        fees_charged(5, "o-1", "-0.01", AT_2),
+        fees_charged(5, "o-1", "x", AT_2),
+    ] {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        fold.fold(&row).unwrap();
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::Undecodable, 4),
+            "{}",
+            String::from_utf8_lossy(&row.body)
+        );
+    }
+}
+
+#[test]
+fn an_order_record_at_a_version_the_fold_does_not_know_makes_the_view_unreadable() {
+    let mandate = mandate();
+    for (event_type, version) in [
+        ("OrderRequestRecorded", 2),
+        ("OrderSubmitted", 3),
+        ("OrderStateChanged", 3),
+        ("FillApplied", 3),
+        ("LateFillApplied", 2),
+        ("FeesCharged", 2),
+    ] {
+        let mut fold = open(&mandate, &Wall);
+        fold.fold(&row(2, event_type, version, "{}")).unwrap();
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::UnknownSchemaVersion, 1),
+            "{event_type} v{version}"
+        );
+    }
+}
+
+/// The reference cases that hold a fill, through journaled rows up to their first input that R2
+/// reads: each fill is the agent's own order, so the figures are the harness's (DEC-2393 item 4).
+/// A case's leading `risk_day_started` at its opening instant is the day the fold opens in, which
+/// no tick crosses into, as the MC-R20 walk above skips it.
+#[test]
+fn the_risk_state_cases_with_fills_fold_through_journaled_rows() {
+    let readable = ["mark", "clock", "risk_day_started", "fill"];
+    for id in ["MC-R14", "MC-R21", "MC-R23"] {
+        let case = case(id);
+        let mandate = case_mandate(&case);
+        let calendar = nyse();
+        let mut fold = open_case(&case, &mandate, &calendar);
+        let steps: Vec<Json> = case["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .skip_while(|step| {
+                step["event"] == "risk_day_started" && step["at"] == case["initial"]["at"]
+            })
+            .take_while(|step| readable.contains(&step["event"].as_str().unwrap()))
+            .cloned()
+            .collect();
+        assert!(
+            steps.iter().any(|step| step["event"] == "fill"),
+            "{id} walks a fill"
+        );
+        walk(&mut fold, instrument(&case), &steps);
+    }
+}
+
+/// Each `RiskLimitTriggered` of a walk as `limit=breach_time_s`, in the order it was appended.
+fn breach_times(records: &[Vec<RiskAppend>]) -> Vec<String> {
+    let triggers = records.iter().flatten();
+    let triggers = triggers.filter(|append| append.event_type == "RiskLimitTriggered");
+    triggers
+        .map(|append| {
+            let limit = append.payload.get("limit").and_then(Value::as_str).unwrap();
+            let breach = append.payload.get("breach_time_s").map(to_canonical);
+            format!("{limit}={}", String::from_utf8(breach.unwrap()).unwrap())
+        })
+        .collect()
+}
+
+/// MC-R04 (`breach_confirm_s` 60, `at` 0.06 on rung 1): DD is 0.0714 at 14:02:00, so rung 1's breach
+/// time runs from there. At 14:02:05 DD reaches 1.25 × 0.06 on a sane quote, `hard_breach_pending`
+/// with the 5 s accumulated, and at 14:02:15 the hard level holds 10 s later, `hard_trigger` with
+/// 15 s (§5.6, §9.27). The scale rung has no confirmation: 0 s.
+#[test]
+fn mc_r04s_hard_triggers_carry_the_breach_time_they_accumulated() {
+    let case = case("MC-R04");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let records = walk(&mut fold, XYZ, case["steps"].as_array().unwrap());
+    let wanted = [
+        "drawdown_ladder[0]=0",
+        "drawdown_ladder[1]=5",
+        "drawdown_ladder[1]=15",
+    ];
+    assert_eq!(breach_times(&records), wanted);
+}
+
+/// MC-R06 (`breach_confirm_s` 60, crypto): the daily loss breaches at 03:59:30, 30 s before the
+/// rollover, and keeps confirming against the previous day's E₀ (§5.4). Its next input is the mark
+/// at 04:30:00, so it latches `resolved_at_rollover` with 30 + 1800 = 1830 s.
+#[test]
+fn mc_r06s_rollover_trigger_carries_the_breach_time_across_midnight() {
+    let case = case("MC-R06");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let steps = case["steps"].as_array().unwrap();
+    check_snapshot(fold.view(), 1, &steps[0]["expect"]);
+    let records = walk(&mut fold, BTC, &steps[1..]);
+    assert_eq!(breach_times(&records), ["max_daily_loss=1830"]);
+}
+
+/// MC-R07 and MC-R08 set `breach_confirm_s` to 0, so each limit triggers at the first breaching
+/// input with no time in breach before it: the daily loss at 03:50, and MC-R08's new-day breach at
+/// 04:20, whose interval from the 04:00 rollover starts with E = E₀. MC-R07's last step, a lift
+/// whose `AgentModeApplied` follows no trigger, is DEC-2331 item 1(a)'s.
+#[test]
+fn zero_confirmation_triggers_carry_no_breach_time() {
+    let mut walked = Vec::new();
+    for (id, last) in [("MC-R07", 3), ("MC-R08", 4)] {
+        let case = case(id);
+        let mandate = case_mandate(&case);
+        let mut fold = open_case(&case, &mandate, &Crypto);
+        let steps = case["steps"].as_array().unwrap();
+        walked.push(breach_times(&walk(&mut fold, BTC, &steps[1..=last])));
+    }
+    assert_eq!(walked[0], ["max_daily_loss=0"]);
+    let wanted = [
+        "max_daily_loss=0",
+        "drawdown_ladder[0]=0",
+        "max_daily_loss=0",
+    ];
+    assert_eq!(walked[1], wanted);
+}
+
+/// MC-R22: a `profit_stop` confirms by time in breach on marks alone and journals `GoalCompleted`
+/// in its second form, `reason` and `then` with no `on_complete` (§9.27 rule 238), then
+/// `AgentModeApplied` to `exits_only`. That mode change follows no trigger, so its restriction is
+/// `goal_completed` (DEC-2331 item 1(b)).
+#[test]
+fn mc_r22_profit_stop_completes_the_goal_on_marks() {
+    let case = case("MC-R22");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let steps = case["steps"].as_array().unwrap();
+    walk(&mut fold, XYZ, &steps[..3]);
+    let text = |key: &str| steps[3][key].as_str().unwrap();
+    let last = mark(5, XYZ, text("at"), text("bid"), true, "regular");
+    let appends = fold.fold(&last).unwrap();
+    let types: Vec<&str> = appends.iter().map(|append| append.event_type).collect();
+    assert_eq!(types, ["GoalCompleted", "AgentModeApplied"]);
+    let payload = format!(
+        r#"{{"agent_id":"{AGENT}","reason":"profit_stop_reached",
+        "then":"discretionary_exit_all_then_retire","on_complete":null,"risk_clock":"{}"}}"#,
+        text("at")
+    );
+    assert_eq!(appends[0].payload, parse(payload.as_bytes()).unwrap());
+    let base = base_draft();
+    for append in &appends {
+        assert_eq!(append.causation_id.as_deref(), Some(last.event_id.as_str()));
+        assert!(accepted(&base, append), "{append:?}");
+    }
+    let mode = |member: &str| appends[1].payload.get(member).cloned();
+    assert_eq!(mode("to"), Some(Value::Str("exits_only".to_owned())));
+    assert_eq!(mode("originated"), Some(Value::Bool(true)));
+    assert_eq!(
+        mode("restriction"),
+        Some(Value::Str("goal_completed".to_owned()))
+    );
+    check_snapshot(fold.view(), 5, &steps[3]["expect"]);
+}
+
+/// DEC-2331 item 1(a): a mode change with no trigger before it in its step names the step's last
+/// lift: its ladder action, or its limit's journal name when the lift carries none. MC-R07's last
+/// mark lifts `max_daily_loss`, which carries no action, back to `normal`; MC-R19's last mark clears
+/// the flash print's hard breach, and its last lift, `drawdown_ladder[2]` with `hard_breach_cleared`,
+/// carries none either.
+#[test]
+fn a_mode_change_after_a_lift_names_the_lifted_limit() {
+    let mut named = Vec::new();
+    for (id, crypto) in [("MC-R07", true), ("MC-R19", false)] {
+        let case = case(id);
+        let (mandate, calendar) = (case_mandate(&case), nyse());
+        let clock: &dyn RiskCalendar = if crypto { &Crypto } else { &calendar };
+        let mut fold = open_case(&case, &mandate, clock);
+        let steps = case["steps"].as_array().unwrap();
+        let steps = if crypto { &steps[1..] } else { &steps[..] };
+        let records = walk(&mut fold, instrument(&case), steps);
+        let last = records.last().unwrap().last().unwrap();
+        assert_eq!(last.event_type, "AgentModeApplied", "{id}");
+        let restriction = last.payload.get("restriction").and_then(Value::as_str);
+        named.push(restriction.map(str::to_owned));
+    }
+    let wanted = ["max_daily_loss", "drawdown_ladder[2]"].map(|name| Some(name.to_owned()));
+    assert_eq!(named, wanted);
+}
+
+/// The paper executor's own fee record, as `simulated_fee` writes it: `charged` "0" and `accrued`
+/// the fee. The accrual lowers E (trading spec §8.2); a broker-posted or another family's fee for
+/// an own order is a refusal to decide (DEC-2393 item 3).
+#[test]
+fn the_simulated_fee_lowers_equity_by_its_accrual_and_any_other_fee_record_is_refused() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    fold.fold(&fill(5, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]"))
+        .unwrap();
+    let simulated = row(
+        6,
+        "FeesCharged",
+        1,
+        &format!(
+            r#"{{"family":"equities","day":"{OPENED_DAY}","accrued":"0.0123","charged":"0",
+            "simulated":true,"client_order_id":"o-1","sec":null,"taf":null,"cat":"0.0123",
+            "risk_clock":"{AT_2}"}}"#
+        ),
+    );
+    fold.fold(&simulated).unwrap();
+    assert_eq!(equity(fold.view()), "9999.9877");
+    for (simulated, family) in [("false", "equities"), ("true", "crypto")] {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        let posted = row(
+            5,
+            "FeesCharged",
+            1,
+            &format!(
+                r#"{{"family":"{family}","day":"{OPENED_DAY}","accrued":"1","charged":"1",
+                "simulated":{simulated},"client_order_id":"o-1","sec":null,"taf":null,"cat":"1",
+                "risk_clock":"{AT_2}"}}"#
+            ),
+        );
+        fold.fold(&posted).unwrap();
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::RefusedToDecide, 4)
+        );
+    }
+}
+
+/// A fill naming no order (`FillApplied` version 2's `null`, DEC-2812) is external activity
+/// (journal spec §9.16), never the agent's; a fill journaled twice is stepped once.
+#[test]
+fn a_fill_with_no_order_steps_nothing_and_a_repeated_fill_steps_once() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let external = row(
+        5,
+        "FillApplied",
+        2,
+        &format!(
+            r#"{{"fill_id":"f-x","client_order_id":null,"instrument_id":"{XYZ}","side":"buy",
+            "qty_gross":"5","price":"1","trade_date":"{OPENED_DAY}","risk_clock":"{AT_2}","fees":[]}}"#
+        ),
+    );
+    fold.fold(&external).unwrap();
+    assert_eq!(equity(fold.view()), "10000");
+    let first = fill(6, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]");
+    fold.fold(&first).unwrap();
+    let mut again = fill(7, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]");
+    again.body = String::from_utf8(again.body.clone())
+        .unwrap()
+        .replace("f-7", "f-6")
+        .into_bytes();
+    fold.fold(&again).unwrap();
+    fold.fold(&mark(8, XYZ, AT_3, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "9900",
+        "10 shares, not 20: 10000 - 1000 + 10 × 90"
+    );
+}
+
+/// A successor named by a change that is not terminal, or is `ignored`, is not the agent's, as the
+/// executor's fold names a successor only on a terminal, applied state (DEC-2393 item 1).
+#[test]
+fn only_a_terminal_applied_change_makes_its_successor_the_agents() {
+    let mandate = mandate();
+    for (state, ignored) in [("accepted", false), ("replaced", true)] {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        let changed = row(
+            5,
+            "OrderStateChanged",
+            2,
+            &format!(
+                r#"{{"client_order_id":"o-1","state":"{state}","replaced_by":"o-9","ignored":{ignored}}}"#
+            ),
+        );
+        fold.fold(&changed).unwrap();
+        fold.fold(&fill(6, "o-9", XYZ, ("buy", "10", "100"), AT_2, "[]"))
+            .unwrap();
+        fold.fold(&mark(7, XYZ, AT_3, "90", true, "regular"))
+            .unwrap();
+        assert_eq!(equity(fold.view()), "10000", "{state}, ignored {ignored}");
+    }
+}
+
+/// MC-R01 to its `paused`, through rows, with every record it returned journaled back: the fold
+/// it leaves, and its view.
+fn mc_r01_journaled<'c>(
+    mandate: &ValidatedMandate,
+    calendar: &'c Nyse,
+) -> (AccountRiskFold<'c>, Vec<StoredEvent>) {
+    let case = case("MC-R01");
+    let mut fold = open_case(&case, mandate, calendar);
+    let mut rows = Vec::new();
+    let mut seq = 2;
+    for step in case["steps"].as_array().unwrap() {
+        let text = |key: &str| step[key].as_str().unwrap();
+        let row = mark(seq, XYZ, text("at"), text("bid"), true, "regular");
+        let appends = fold.fold(&row).unwrap();
+        rows.push(row);
+        seq += 1;
+        for append in &appends {
+            let record = appended(seq, append);
+            fold.fold(&record).unwrap();
+            rows.push(record);
+            seq += 1;
+        }
+    }
+    (fold, rows)
+}
+
+/// A replay of the journal from seq 1 re-derives every record the live fold appended, from its
+/// cause, finds each on the stream as it owed it, and ends at the same view owing nothing, so the
+/// executor appends nothing twice (DEC-2301 item 2, DEC-2304; R3).
+#[test]
+fn a_replay_of_the_journal_reproduces_the_live_view() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (live, rows) = mc_r01_journaled(&mandate, &calendar);
+    assert!(
+        rows.iter()
+            .any(|row| row.event_type == "RiskLimitTriggered"),
+        "the walk journals records"
+    );
+    let mut replayed = open_case(&case, &mandate, &calendar);
+    let mut returned = 0;
+    for row in &rows {
+        returned += replayed.fold(row).unwrap().len();
+    }
+    let journaled = rows
+        .iter()
+        .filter(|row| row.event_type.starts_with("Risk") || row.event_type == "AgentModeApplied")
+        .count();
+    assert_eq!(
+        returned, journaled,
+        "each journaled record re-derived once, from its cause"
+    );
+    assert_eq!(replayed.view(), live.view());
+    assert_eq!(replayed.owed().count(), 0);
+}
+
+/// Every way a journaled record can differ from the one the fold owes makes the view unreadable
+/// (`not_reproduced`): its payload, its cause, its type, its version, its order, and a record the
+/// fold never returned.
+#[test]
+fn a_record_the_fold_would_not_have_produced_makes_the_view_unreadable() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let tampered = |change: &dyn Fn(&mut StoredEvent)| {
+        let mut rows = rows.clone();
+        change(&mut rows[first]);
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..=first] {
+            fold.fold(row).unwrap();
+        }
+        unreadable(fold.view())
+    };
+    let edit = |from: &'static str, to: &'static str| {
+        move |row: &mut StoredEvent| {
+            let body = String::from_utf8(row.body.clone()).unwrap();
+            assert!(body.contains(from), "{from} in {body}");
+            row.body = body.replacen(from, to, 1).into_bytes();
+        }
+    };
+    let head = u64::try_from(first).unwrap() + 1;
+    let wanted = (UnreadableCause::NotReproduced, head);
+    assert_eq!(
+        tampered(&edit(r#""agent_equity":""#, r#""agent_equity":"1"#)),
+        wanted
+    );
+    assert_eq!(
+        tampered(&edit(r#""causation_id":""#, r#""causation_id":"0"#)),
+        wanted
+    );
+    assert_eq!(tampered(&|row| row.schema_version = 2), wanted);
+    assert_eq!(
+        tampered(&|row| row.event_type = "RiskLimitLifted".to_owned()),
+        wanted
+    );
+    let swapped = {
+        let mut rows = rows.clone();
+        let (first, len) = burst(&rows);
+        assert!(len >= 2, "two records in a row");
+        let (a, b) = (rows[first].clone(), rows[first + 1].clone());
+        rows[first] = StoredEvent { seq: a.seq, ..b };
+        rows[first + 1] = StoredEvent {
+            seq: a.seq + 1,
+            ..a
+        };
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..=first] {
+            fold.fold(row).unwrap();
+        }
+        (unreadable(fold.view()), first)
+    };
+    let head = u64::try_from(swapped.1).unwrap() + 1;
+    assert_eq!(
+        swapped.0,
+        (UnreadableCause::NotReproduced, head),
+        "records out of the order owed"
+    );
+
+    let mut forged = open_case(&case, &mandate, &calendar);
+    let mut record = rows[first].clone();
+    record.seq = 2;
+    forged.fold(&record).unwrap();
+    assert_eq!(
+        unreadable(forged.view()),
+        (UnreadableCause::NotReproduced, 1),
+        "a record the fold never returned"
+    );
+}
+
+/// DEC-2849 I7, one fold per followed agent (item 3): a risk record or mode record another
+/// agent's fold owed, naming that agent, steps nothing in this one, even beside a record of this
+/// fold's from the same cause. Read anywhere, the fold's view and what it owes
+/// are those of a fold that never saw it (a record naming this fold's agent that it never returned
+/// stays `not_reproduced`: `a_record_the_fold_would_not_have_produced_makes_the_view_unreadable`).
+#[test]
+fn another_agents_risk_record_steps_nothing() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let mut records: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            row.event_type.starts_with("Risk") || row.event_type == "AgentModeApplied"
+        })
+        .map(|(index, _)| index)
+        .collect();
+    records.sort_by_key(|index| rows[*index].event_type.clone());
+    records.dedup_by_key(|index| rows[*index].event_type.clone());
+    assert!(
+        records
+            .iter()
+            .any(|index| rows[*index].event_type == "AgentModeApplied"),
+        "a mode record, which names its `agent`"
+    );
+    assert!(!records.is_empty(), "the walk journals records");
+    let mut checked = 0;
+    for at in 1..rows.len() {
+        for &record in &records {
+            let body = String::from_utf8(rows[record].body.clone()).unwrap();
+            let key = [r#""agent_id":""#, r#""agent":""#]
+                .into_iter()
+                .find(|key| body.contains(key))
+                .unwrap();
+            let start = body.find(key).unwrap() + key.len();
+            let end = start + body[start..].find('"').unwrap();
+            let others = format!("{}{}{}", &body[..start], "agent-other", &body[end..]);
+            let mut seen = open_case(&case, &mandate, &calendar);
+            let mut unseen = open_case(&case, &mandate, &calendar);
+            for row in &rows[..at] {
+                seen.fold(row).unwrap();
+                unseen.fold(row).unwrap();
+            }
+            let foreign = StoredEvent {
+                seq: rows[at - 1].seq + 1,
+                body: others.into_bytes(),
+                ..rows[record].clone()
+            };
+            assert_eq!(seen.fold(&foreign).unwrap(), Vec::new());
+            let mut next = unseen.clone();
+            let shifted: Vec<StoredEvent> = rows[at..]
+                .iter()
+                .map(|row| StoredEvent {
+                    seq: row.seq + 1,
+                    ..row.clone()
+                })
+                .collect();
+            for row in &shifted {
+                seen.fold(row).unwrap();
+            }
+            for row in &rows[at..] {
+                next.fold(row).unwrap();
+            }
+            let snapshot = |view: &RiskView| match view {
+                RiskView::Readable { snapshot, .. } => Some(snapshot.clone()),
+                RiskView::Unreadable { .. } => None,
+            };
+            assert!(snapshot(seen.view()).is_some(), "still readable");
+            assert_eq!(
+                (
+                    snapshot(seen.view()),
+                    seen.owed().cloned().collect::<Vec<_>>()
+                ),
+                (
+                    snapshot(next.view()),
+                    next.owed().cloned().collect::<Vec<_>>()
+                ),
+                "{} naming another agent, read after row {at}",
+                rows[record].event_type
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+}
+
+/// A crash between a cause and its records leaves them owed at the head: the restarted fold reads
+/// the stream to its end and names exactly the records to append next (R3).
+#[test]
+fn records_a_crash_kept_from_the_journal_are_owed_at_the_head() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (live, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let cause = &rows[first - 1];
+    let mut restarted = open_case(&case, &mandate, &calendar);
+    for row in &rows[..first] {
+        restarted.fold(row).unwrap();
+    }
+    let owed: Vec<RiskAppend> = restarted.owed().cloned().collect();
+    assert!(!owed.is_empty());
+    assert!(
+        owed.iter()
+            .all(|append| append.causation_id.as_deref() == Some(cause.event_id.as_str()))
+    );
+    let mut seq = cause.seq + 1;
+    for append in &owed {
+        let row = appended(seq, append);
+        assert_eq!(
+            row.body,
+            rows[usize::try_from(seq - 2).unwrap()].body,
+            "seq {seq}"
+        );
+        restarted.fold(&row).unwrap();
+        seq += 1;
+    }
+    for row in &rows[usize::try_from(seq - 2).unwrap()..] {
+        restarted.fold(row).unwrap();
+    }
+    assert_eq!(restarted.view(), live.view());
+}
+
+/// An `AgentModeApplied` the fold does not owe is another writer's, an owner's pause or a kill
+/// switch, and moves nothing in the fold.
+#[test]
+fn a_mode_record_the_fold_does_not_owe_is_another_writers() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let before = fold.view().clone();
+    let paused = caused(
+        2,
+        "AgentModeApplied",
+        1,
+        None,
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"owner","originated":false}}"#),
+    );
+    fold.fold(&paused).unwrap();
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable");
+    };
+    let RiskView::Readable { snapshot: was, .. } = &before else {
+        panic!("readable");
+    };
+    assert_eq!((snapshot, *head), (was, 2));
+}
+
+/// One generated input: a sane or insane regular mark at a bid, a tick, or an own buy or sell.
+#[derive(Debug, Clone)]
+enum Generated {
+    Mark(u16, bool),
+    Tick,
+    Buy(u8),
+    Sell(u8),
+}
+
+fn generated() -> impl proptest::strategy::Strategy<Value = Generated> {
+    use proptest::prelude::*;
+    prop_oneof![
+        (80_u16..=120, any::<bool>()).prop_map(|(bid, sane)| Generated::Mark(bid, sane)),
+        Just(Generated::Tick),
+        (1_u8..=5).prop_map(Generated::Buy),
+        (1_u8..=5).prop_map(Generated::Sell),
+    ]
+}
+
+/// The rows of `inputs` folded live on MC-R01's mandate, one minute apart from 14:01, each input
+/// journaled as the executor journals it, one batch (a fill with its `FeesCharged` and its order's
+/// state, a tick with a `TradingDayStarted`), and the records the fold returned for the batch
+/// journaled right after it; a sale beyond what the generated buys hold is left out, so every
+/// stream is one the executor could write.
+fn live_rows(
+    inputs: &[Generated],
+    mandate: &ValidatedMandate,
+    calendar: &Nyse,
+    compensated: bool,
+) -> (Vec<StoredEvent>, RiskView) {
+    let case = case("MC-R01");
+    let mut fold = open_case(&case, mandate, calendar);
+    let (mut rows, mut seq, mut held) = (Vec::new(), 2_u64, 100_u32);
+    for (minute, input) in (1_u32..).zip(inputs) {
+        let clock = format!(
+            "2026-09-21T{:02}:{:02}:00.000000000Z",
+            14 + minute / 60,
+            minute % 60
+        );
+        let mut cause = Vec::new();
+        match input {
+            Generated::Mark(bid, sane) => {
+                cause.push(mark(seq, XYZ, &clock, &bid.to_string(), *sane, "regular"));
+            }
+            Generated::Tick => cause.push(tick(seq, &clock)),
+            Generated::Buy(qty) | Generated::Sell(qty) => {
+                let side = if matches!(input, Generated::Buy(_)) {
+                    "buy"
+                } else {
+                    "sell"
+                };
+                if side == "sell" && u32::from(*qty) > held {
+                    continue;
+                }
+                held = if side == "buy" {
+                    held + u32::from(*qty)
+                } else {
+                    held - u32::from(*qty)
+                };
+                let order = format!("o-{seq}");
+                cause.extend(own_order(seq, AGENT, &order, XYZ, side, &qty.to_string()));
+                let state = |seq| {
+                    row(
+                        seq,
+                        "OrderStateChanged",
+                        2,
+                        &format!(
+                            r#"{{"client_order_id":"{order}","state":"filled","ignored":false}}"#
+                        ),
+                    )
+                };
+                let after = if compensated {
+                    let filled = state(seq + 2);
+                    let adopted =
+                        compensation(seq + 3, &filled, |p| p["risk_clock"] = clock.clone().into());
+                    cause.push(filled);
+                    cause.push(adopted);
+                    seq + 4
+                } else {
+                    seq + 2
+                };
+                cause.push(fill(
+                    after,
+                    &order,
+                    XYZ,
+                    (side, &qty.to_string(), "100"),
+                    &clock,
+                    "[]",
+                ));
+                cause.push(fees_charged(after + 1, &order, "0.01", &clock));
+                if !compensated {
+                    cause.push(state(after + 2));
+                }
+            }
+        }
+        if matches!(input, Generated::Tick) {
+            cause.push(trading_day(seq + 1, &clock));
+        }
+        let mut returned = Vec::new();
+        for row in cause {
+            returned.extend(fold.fold(&row).unwrap());
+            seq = row.seq + 1;
+            rows.push(row);
+        }
+        for append in &returned {
+            let record = appended(seq, append);
+            fold.fold(&record).unwrap();
+            rows.push(record);
+            seq += 1;
+        }
+    }
+    (rows, fold.view().clone())
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// Any journal the executor writes replays from seq 1 to the live view, owing nothing; and cut
+    /// at any row, the restarted fold owes exactly the journaled records the cut dropped whose
+    /// cause it kept, in their order (DEC-2399). A crash cuts only between batches, since an append
+    /// is atomic; cutting inside a batch too is the stricter check.
+    #[test]
+    fn a_replay_ends_where_the_live_fold_did_and_a_crash_owes_what_it_dropped(
+        inputs in proptest::collection::vec(generated(), 1..40),
+        cut in 0_usize..1000,
+    ) {
+        let case = case("MC-R01");
+        let (mandate, calendar) = (case_mandate(&case), nyse());
+        let (rows, live) = live_rows(&inputs, &mandate, &calendar, false);
+        proptest::prop_assert!(
+            matches!(live, RiskView::Readable { .. }),
+            "a stream the executor writes stays readable: {:?}",
+            live
+        );
+        let mut replayed = open_case(&case, &mandate, &calendar);
+        for row in &rows {
+            replayed.fold(row).unwrap();
+        }
+        proptest::prop_assert_eq!(replayed.view(), &live);
+        proptest::prop_assert_eq!(replayed.owed().count(), 0);
+
+        let kept = rows.len().saturating_sub(1) * cut / 1000;
+        let mut restarted = open_case(&case, &mandate, &calendar);
+        for row in &rows[..kept] {
+            restarted.fold(row).unwrap();
+        }
+        let kept_ids: BTreeSet<&str> = rows[..kept].iter().map(|row| row.event_id.as_str()).collect();
+        let dropped: Vec<&StoredEvent> = rows[kept..]
+            .iter()
+            .filter(|row| FOLD_TYPES.contains(&row.event_type.as_str()))
+            .filter(|row| {
+                let body = parse(&row.body).unwrap();
+                body.get("causation_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|cause| kept_ids.contains(cause))
+            })
+            .collect();
+        let owed: Vec<RiskAppend> = restarted.owed().cloned().collect();
+        proptest::prop_assert_eq!(owed.len(), dropped.len());
+        for (append, row) in owed.iter().zip(&dropped) {
+            proptest::prop_assert_eq!(&appended(row.seq, append).body, &row.body);
+        }
+    }
+}
+
+/// The record types the fold returns, written here apart from the crate's list.
+const FOLD_TYPES: [&str; 8] = [
+    "RiskDayStarted",
+    "RiskLimitTriggered",
+    "RiskLimitLifted",
+    "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
+    "AgentModeApplied",
+];
+
+/// The scheduler's `TradingDayStarted` copy, which the executor journals in the batch right after
+/// the tick that crosses midnight (journal spec §9.13).
+fn trading_day(seq: u64, clock: &str) -> StoredEvent {
+    row(
+        seq,
+        "TradingDayStarted",
+        1,
+        &format!(r#"{{"day":"2026-09-23","clock":"{clock}"}}"#),
+    )
+}
+
+/// The executor journals a whole batch before the fold reads it, so the rest of the cause's batch
+/// comes between the cause and its records: a fill's `FeesCharged` and its order's state, and a
+/// midnight tick's `TradingDayStarted`. They pass, and the records are found after them (DEC-2399
+/// item 2).
+#[test]
+fn the_rest_of_a_causes_batch_comes_before_its_records() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let filled = row(
+        7,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1","state":"filled","ignored":false}"#,
+    );
+    let batch = [
+        fill(5, "o-1", XYZ, ("buy", "12", "100"), AT_2, "[]"),
+        fees_charged(6, "o-1", "0.01", AT_2),
+        filled,
+        tick(8, "2026-09-23T04:00:00.000000000Z"),
+        trading_day(9, "2026-09-23T04:00:00.000000000Z"),
+    ];
+    let checked = row(10, "ConnectionChecked", 1, r#"{"result":"ok"}"#);
+    let mut returned = Vec::new();
+    for row in &batch {
+        returned.extend(fold.fold(row).unwrap());
+    }
+    assert_eq!(
+        returned.first().map(|append| append.event_type),
+        Some("RiskDayStarted"),
+        "the midnight tick's records, owed after the batch"
+    );
+    assert_eq!(fold.owed().count(), returned.len());
+    fold.fold(&checked).unwrap();
+    assert_eq!(
+        fold.owed().count(),
+        returned.len(),
+        "a connection check passes too"
+    );
+    let next = journal(&mut fold, &returned, 11);
+    assert_eq!(readable_head(fold.view()), next - 1);
+}
+
+/// An `AgentModeApplied` is the fold's only when it names the cause of the record owed next, and
+/// then it must be that record. One naming no cause (a kill switch, an unmapped broker status) or
+/// another cause (the copy of an agent stream's `AgentModeChanged`, journal spec §9.6) is another
+/// writer's, whether or not records are owed (DEC-2399 items 1 and 4).
+#[test]
+fn a_mode_record_not_naming_the_owed_cause_is_another_writers_even_while_records_are_owed() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let others = |seq: u64, cause: Option<&str>| {
+        caused(
+            seq,
+            "AgentModeApplied",
+            1,
+            cause,
+            &format!(
+                r#"{{"agent":"{AGENT}","to":"paused","restriction":"kill_switch","originated":true}}"#
+            ),
+        )
+    };
+    let replay = |extra: StoredEvent| {
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..first] {
+            fold.fold(row).unwrap();
+        }
+        fold.fold(&extra).unwrap();
+        for row in &rows[first..] {
+            let moved = StoredEvent {
+                seq: row.seq + 1,
+                ..row.clone()
+            };
+            fold.fold(&moved).unwrap();
+        }
+        fold
+    };
+    let copied = caused(
+        rows[first].seq,
+        "AgentModeApplied",
+        1,
+        Some("01J8Z4C0000000000000000000"),
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"owner","originated":false}}"#),
+    );
+    let passed = replay(copied);
+    assert!(
+        matches!(passed.view(), RiskView::Readable { .. }),
+        "a copy naming another cause: {:?}",
+        passed.view()
+    );
+    let passed = replay(others(rows[first].seq, None));
+    assert!(
+        matches!(passed.view(), RiskView::Readable { .. }),
+        "{:?}",
+        passed.view()
+    );
+    let cause = rows[first - 1].event_id.clone();
+    let refused = replay(others(rows[first].seq, Some(&cause)));
+    assert_eq!(
+        unreadable(refused.view()).0,
+        UnreadableCause::NotReproduced,
+        "a caused mode record that is not the one owed"
+    );
+}
+
+/// An unreadable view owes nothing, after a failed append or after any other cause, so the
+/// executor never appends what is no longer the journal's (DEC-2399 item 3).
+#[test]
+fn an_unreadable_view_owes_nothing() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let owing = || {
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..first] {
+            fold.fold(row).unwrap();
+        }
+        assert!(fold.owed().count() > 0);
+        fold
+    };
+    let mut failed = owing();
+    failed.append_failed();
+    assert_eq!(failed.owed().count(), 0);
+    let mut gap = owing();
+    let skipped = StoredEvent {
+        seq: rows[first].seq + 1,
+        ..rows[first].clone()
+    };
+    gap.fold(&skipped).unwrap();
+    assert_eq!(unreadable(gap.view()).0, UnreadableCause::SeqGap);
+    assert_eq!(gap.owed().count(), 0);
+}
+
+/// The executor's restart, end to end: the journal is cut after a cause's batch, part or none of
+/// its records appended; the restarted fold reads to the head, the owed records are appended
+/// there, and a second replay of the whole repaired journal, from seq 1, reaches the live view
+/// owing nothing. The oracle is the live run's own journal, whose records came from what the
+/// fold returned, not from `owed()`.
+#[test]
+fn a_journal_repaired_at_the_head_replays_to_the_live_view() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (live, rows) = mc_r01_journaled(&mandate, &calendar);
+    let (first, records) = burst(&rows);
+    assert!(records >= 2, "the cut can fall inside the batch of records");
+    for appended_before_crash in 0..records {
+        let cut = first + appended_before_crash;
+        let mut restarted = open_case(&case, &mandate, &calendar);
+        for row in &rows[..cut] {
+            restarted.fold(row).unwrap();
+        }
+        let owed: Vec<RiskAppend> = restarted.owed().cloned().collect();
+        assert_eq!(owed.len(), records - appended_before_crash);
+        let mut repaired: Vec<StoredEvent> = rows[..cut].to_vec();
+        for (seq, append) in (rows[cut].seq..).zip(&owed) {
+            let row = appended(seq, append);
+            assert_eq!(row.body, rows[usize::try_from(seq - 2).unwrap()].body);
+            restarted.fold(&row).unwrap();
+            repaired.push(row);
+        }
+        repaired.extend(rows[first + records..].iter().cloned());
+        let mut again = open_case(&case, &mandate, &calendar);
+        for row in &repaired {
+            again.fold(row).unwrap();
+        }
+        assert_eq!(
+            again.view(),
+            live.view(),
+            "cut after {appended_before_crash} records"
+        );
+        assert_eq!(again.owed().count(), 0);
+    }
+}
+
+/// The risk records journaled in `rows`, by type and payload, in order.
+fn records(rows: &[StoredEvent]) -> Vec<(String, Value)> {
+    rows.iter()
+        .filter(|row| FOLD_TYPES.contains(&row.event_type.as_str()))
+        .map(|row| {
+            let body = parse(&row.body).unwrap();
+            (row.event_type.clone(), body.get("payload").unwrap().clone())
+        })
+        .collect()
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// DEC-2829: the reconciler's version-1 compensation beside each order state it adopts, which
+    /// it journals before the fill (trading domain spec §11), moves nothing. The oracle is the same
+    /// inputs journaled with no compensation at all: the view stays readable, its snapshot is the
+    /// oracle's, and the fold journals the oracle's records.
+    #[test]
+    fn a_paired_compensation_moves_no_figure_and_no_record(
+        inputs in proptest::collection::vec(generated(), 1..40),
+    ) {
+        let case = case("MC-R01");
+        let (mandate, calendar) = (case_mandate(&case), nyse());
+        let (plain_rows, plain) = live_rows(&inputs, &mandate, &calendar, false);
+        let (rows, compensated) = live_rows(&inputs, &mandate, &calendar, true);
+        let (RiskView::Readable { snapshot: expected, .. }, RiskView::Readable { snapshot, .. }) =
+            (&plain, &compensated)
+        else {
+            return Err(proptest::test_runner::TestCaseError::fail(format!(
+                "both views stay readable: {plain:?} {compensated:?}"
+            )));
+        };
+        proptest::prop_assert_eq!(snapshot, expected);
+        proptest::prop_assert_eq!(records(&rows), records(&plain_rows));
+    }
+}
+
+/// The longest run of consecutive risk records in `rows`: where it starts, and how long it is.
+fn burst(rows: &[StoredEvent]) -> (usize, usize) {
+    let mut best = (0, 0);
+    let mut start = 0;
+    for (index, row) in rows.iter().enumerate() {
+        if !FOLD_TYPES.contains(&row.event_type.as_str()) {
+            start = index + 1;
+        } else if index + 1 - start > best.1 {
+            best = (start, index + 1 - start);
+        }
+    }
+    best
+}
+
+/// Another writer's mode record moves nothing in the fold: one that would loosen it, to `normal`
+/// while the ladder holds the agent `paused`, neither lifts a latched rung nor changes the fold's
+/// mode, which only the risk state's own steps move (DEC-2399 item 4).
+#[test]
+fn another_writers_mode_record_never_loosens_the_fold() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (mut fold, rows) = mc_r01_journaled(&mandate, &calendar);
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("readable");
+    };
+    assert_eq!(before.agent_mode, AgentMode::Paused);
+    assert!(!before.latched.is_empty());
+    let seq = rows.last().unwrap().seq + 1;
+    for (offset, cause) in [(0_u64, None), (1, Some("01J8Z4C0000000000000000000"))] {
+        let loosen = caused(
+            seq + offset,
+            "AgentModeApplied",
+            1,
+            cause,
+            &format!(
+                r#"{{"agent":"{AGENT}","to":"normal","restriction":"owner","originated":false}}"#
+            ),
+        );
+        fold.fold(&loosen).unwrap();
+    }
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot.as_ref(), *head), (before.as_ref(), seq + 1));
+    assert!(fold.view().holds(OrderPath::Opening));
+}
+
+/// A mode record naming the cause of any record owed is the fold's own, so it must be the record
+/// owed next: one naming a later owed record's cause, arriving first, is `not_reproduced`.
+#[test]
+fn a_mode_record_naming_a_later_owed_cause_is_not_reproduced() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let batch = [
+        tick(5, "2026-09-23T04:00:00.000000000Z"),
+        fill(
+            6,
+            "o-1",
+            XYZ,
+            ("buy", "12", "100"),
+            "2026-09-23T04:00:00.000000000Z",
+            "[]",
+        ),
+        mark(
+            7,
+            XYZ,
+            "2026-09-23T04:00:01.000000000Z",
+            "50",
+            true,
+            "regular",
+        ),
+    ];
+    let mut returned = Vec::new();
+    for row in &batch {
+        returned.extend(fold.fold(row).unwrap());
+    }
+    let later = returned
+        .iter()
+        .rfind(|append| append.causation_id.as_deref() == Some(batch[2].event_id.as_str()))
+        .expect("the crash's records");
+    assert_ne!(returned[0].causation_id, later.causation_id);
+    let early = caused(
+        8,
+        "AgentModeApplied",
+        1,
+        later.causation_id.as_deref(),
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"x","originated":true}}"#),
+    );
+    fold.fold(&early).unwrap();
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::NotReproduced, 7));
+}
+
+/// A tick or a mark from before the agent's deployment is not its input and steps nothing, a mark
+/// of an earlier agent's instrument included; an own fill or fee there cannot be, and is a refusal
+/// to decide (DEC-2804 item 3).
+#[test]
+fn rows_from_before_the_deployment_are_not_the_agents() {
+    let mandate = mandate();
+    let before = "2026-09-22T14:29:00.000000000Z";
+    let mut fold = open(&mandate, &Wall);
+    let opened = fold.view().clone();
+    fold.fold(&tick(2, before)).unwrap();
+    fold.fold(&mark(3, ETH, before, "50", true, "regular"))
+        .unwrap();
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable");
+    };
+    let RiskView::Readable { snapshot: was, .. } = &opened else {
+        panic!("readable");
+    };
+    assert_eq!(
+        (snapshot, *head),
+        (was, 3),
+        "E, staleness and the day unmoved"
+    );
+    for row in own_order(4, AGENT, "o-1", XYZ, "buy", "1") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(6, "o-1", XYZ, ("buy", "1", "100"), before, "[]"))
+        .unwrap();
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 5)
+    );
+
+    let mut fee = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "1") {
+        fee.fold(&row).unwrap();
+    }
+    fee.fold(&fees_charged(4, "o-1", "0.01", before)).unwrap();
+    assert_eq!(
+        unreadable(fee.view()),
+        (UnreadableCause::RefusedToDecide, 3)
+    );
+}
+
+/// The opening's own second is the agent's: on a bound fold a mark before it, of the bound
+/// instrument or another, steps nothing (DEC-2804 item 3), and a mark of another instrument in it
+/// steps nothing too (DEC-2849 item 2). A mark in that second prices the
+/// flat fold, and a fill and a fee there are the agent's (DEC-2834).
+#[test]
+fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
+    let mandate = mandate();
+    let before = "2026-09-22T14:29:59.000000000Z";
+    let bound = || {
+        AccountRiskFold::open(
+            ACCOUNT,
+            1,
+            AGENT,
+            &mandate,
+            &opening(),
+            Some(XYZ),
+            &Wall,
+            TripwireState::default(),
+        )
+        .unwrap()
+    };
+    let mut fold = bound();
+    let opened = fold.view().clone();
+    fold.fold(&mark(2, ETH, before, "50", true, "regular"))
+        .unwrap();
+    fold.fold(&mark(3, XYZ, before, "99", true, "regular"))
+        .unwrap();
+    let (RiskView::Readable { snapshot, head }, RiskView::Readable { snapshot: was, .. }) =
+        (fold.view(), &opened)
+    else {
+        panic!("readable");
+    };
+    assert_eq!(
+        (snapshot, *head),
+        (was, 3),
+        "neither earlier mark is the agent's"
+    );
+    fold.fold(&mark(4, ETH, OPENED, "50", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        readable_head(fold.view()),
+        4,
+        "a mark at the opening second naming another instrument steps nothing"
+    );
+
+    let mut at_opening = bound();
+    at_opening
+        .fold(&mark(2, XYZ, OPENED, "100", true, "regular"))
+        .unwrap();
+    for row in own_order(3, AGENT, "o-1", XYZ, "buy", "1") {
+        at_opening.fold(&row).unwrap();
+    }
+    at_opening
+        .fold(&fill(5, "o-1", XYZ, ("buy", "1", "100"), OPENED, "[]"))
+        .unwrap();
+    assert!(
+        matches!(at_opening.view(), RiskView::Readable { head: 5, .. }),
+        "a fill at the opening second is the agent's: {:?}",
+        at_opening.view()
+    );
+    let before = equity(at_opening.view());
+    at_opening
+        .fold(&fees_charged(6, "o-1", "0.01", OPENED))
+        .unwrap();
+    let lowered = Usd::parse(&before)
+        .unwrap()
+        .checked_sub(Usd::parse("0.01").unwrap())
+        .unwrap();
+    assert_eq!(
+        equity(at_opening.view()),
+        lowered.to_string(),
+        "a fee at the opening second is the agent's, and lowers E by its 0.01"
+    );
+}
+
+/// Every latched limit and every figure maps to the gate's own, each distinct so a swap between
+/// two of them shows (DEC-2804 item 7).
+#[test]
+fn the_gates_snapshot_maps_every_limit_and_figure() {
+    let RiskView::Readable { mut snapshot, .. } = readable_in(AgentMode::ExitsOnly) else {
+        panic!("readable");
+    };
+    let usd = |text: &str| Usd::parse(text).unwrap();
+    snapshot.agent_equity = usd("901");
+    snapshot.high_water_mark = usd("1002");
+    snapshot.day_start_equity = usd("953");
+    snapshot.capital_base = usd("1004");
+    snapshot.inherited_loss = usd("5");
+    snapshot.size_factor = Ratio::parse("0.25").unwrap();
+    snapshot.active_rungs = BTreeMap::from([(1, 30), (2, 7)]);
+    snapshot.latched = BTreeSet::from([
+        LimitKey::MaxDailyLoss,
+        LimitKey::DrawdownRung(2),
+        LimitKey::LifetimeFloor,
+        LimitKey::ProfitStop,
+    ]);
+    let view = RiskView::Readable { snapshot, head: 9 };
+    let (risk, mode) = risk_snapshot(&view).unwrap();
+    assert_eq!(mode, mandate_risk::AgentMode::ExitsOnly);
+    assert_eq!(
+        risk,
+        mandate_risk::RiskSnapshot {
+            agent_equity: usd("901"),
+            high_water_mark: usd("1002"),
+            day_start_equity: usd("953"),
+            capital_base: usd("1004"),
+            inherited_loss: usd("5"),
+            latched: BTreeSet::from([
+                mandate_risk::spec_types::LimitKey::MaxDailyLoss,
+                mandate_risk::spec_types::LimitKey::DrawdownRung(2),
+                mandate_risk::spec_types::LimitKey::LifetimeFloor,
+                mandate_risk::spec_types::LimitKey::ProfitStop,
+            ]),
+            active_rungs: BTreeMap::from([(1, 30), (2, 7)]),
+            size_factor: Ratio::parse("0.25").unwrap(),
+            agent_mode: mandate_risk::AgentMode::ExitsOnly,
+        }
+    );
+}
+
+/// The deployed calendar's edges: the regular session's open and close seconds, a half day, a
+/// holiday, a daylight-saving change, a span over several days, and a clock that goes back, which
+/// is refused for an equity as for crypto.
+#[test]
+fn the_deployed_calendar_counts_half_days_holidays_and_edges() {
+    let equity = ExchangeRiskCalendar::new(AssetClass::UsEquity).unwrap();
+    let between = |from: &str, to: &str| equity.seconds_between(at(from), at(to)).unwrap();
+    for (instant, session) in [
+        ("2026-09-22T13:29:59.000000000Z", MarketSession::PreMarket),
+        ("2026-09-22T13:30:00.000000000Z", MarketSession::Regular),
+        ("2026-09-22T19:59:59.000000000Z", MarketSession::Regular),
+        ("2026-09-22T20:00:00.000000000Z", MarketSession::AfterHours),
+        ("2026-11-26T15:00:00.000000000Z", MarketSession::Overnight),
+        ("2026-11-27T18:30:00.000000000Z", MarketSession::AfterHours),
+    ] {
+        assert_eq!(equity.session(at(instant)).unwrap(), session, "{instant}");
+    }
+    assert_eq!(
+        between(
+            "2026-09-22T13:29:00.000000000Z",
+            "2026-09-22T13:31:00.000000000Z"
+        ),
+        60,
+        "only the regular session's first minute"
+    );
+    assert_eq!(
+        between(
+            "2026-11-26T00:00:00.000000000Z",
+            "2026-11-27T00:00:00.000000000Z"
+        ),
+        0,
+        "Thanksgiving"
+    );
+    assert_eq!(
+        between(
+            "2026-11-27T00:00:00.000000000Z",
+            "2026-11-28T00:00:00.000000000Z"
+        ),
+        12_600,
+        "the half day closes at 13:00 New York"
+    );
+    assert_eq!(
+        between(
+            "2026-10-30T14:30:00.000000000Z",
+            "2026-11-02T14:31:00.000000000Z"
+        ),
+        19_800 + 60,
+        "Friday from 10:30 New York, the weekend, Monday's first minute after the change to EST"
+    );
+    assert_eq!(
+        between(
+            "2026-11-02T14:30:00.000000000Z",
+            "2026-11-02T14:31:00.000000000Z"
+        ),
+        60,
+        "09:30 New York is 14:30 UTC after the change"
+    );
+    for calendar in [
+        equity,
+        ExchangeRiskCalendar::new(AssetClass::Crypto).unwrap(),
+    ] {
+        assert_eq!(
+            calendar.seconds_between(at(OPENED), at("2026-09-22T14:29:00.000000000Z")),
+            Err(SpecError::ClockWentBackwards)
+        );
+    }
+}
+
+/// The binding gate's snapshot is the risk state's, member for member, beside its mode; an
+/// unreadable view gives none (DEC-2804 item 7).
+#[test]
+fn the_gates_risk_snapshot_is_the_risk_states() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (fold, _) = mc_r01_journaled(&mandate, &calendar);
+    let RiskView::Readable { snapshot, .. } = fold.view() else {
+        panic!("readable");
+    };
+    let (risk, mode) = risk_snapshot(fold.view()).expect("a readable view has one");
+    assert_eq!(mode, mandate_risk::AgentMode::Paused);
+    assert_eq!(risk.agent_mode, mode);
+    assert_eq!(risk.agent_equity, snapshot.agent_equity);
+    assert_eq!(risk.high_water_mark, snapshot.high_water_mark);
+    assert_eq!(risk.day_start_equity, snapshot.day_start_equity);
+    assert_eq!(risk.capital_base, snapshot.capital_base);
+    assert_eq!(risk.inherited_loss, snapshot.inherited_loss);
+    assert_eq!(risk.active_rungs, snapshot.active_rungs);
+    assert_eq!(risk.size_factor, snapshot.size_factor);
+    let latched: Vec<String> = risk.latched.iter().map(|key| format!("{key:?}")).collect();
+    let wanted: Vec<String> = snapshot
+        .latched
+        .iter()
+        .map(|key| format!("{key:?}"))
+        .collect();
+    assert!(!wanted.is_empty(), "MC-R01 latches its rungs");
+    assert_eq!(latched, wanted);
+    for mode in [AgentMode::Normal, AgentMode::ExitsOnly, AgentMode::Stopped] {
+        let (_, mapped) = risk_snapshot(&readable_in(mode)).unwrap();
+        assert_eq!(format!("{mapped:?}"), format!("{mode:?}"));
+    }
+    let mut broken = open_case(&case, &mandate, &calendar);
+    broken.append_failed();
+    assert_eq!(risk_snapshot(broken.view()), None);
+}
+
+/// The deployed calendar (DEC-2804 item 6): an equity's sessions and regular-session seconds from
+/// the exchange calendar, `overnight` while the market is closed; crypto's every second.
+#[test]
+fn the_deployed_calendar_answers_sessions_and_counts_seconds() {
+    let equity = ExchangeRiskCalendar::new(AssetClass::UsEquity).unwrap();
+    for (instant, session) in [
+        ("2026-09-22T12:00:00.000000000Z", MarketSession::PreMarket),
+        ("2026-09-22T14:30:00.000000000Z", MarketSession::Regular),
+        ("2026-09-22T21:00:00.000000000Z", MarketSession::AfterHours),
+        ("2026-09-26T15:00:00.000000000Z", MarketSession::Overnight),
+    ] {
+        assert_eq!(equity.session(at(instant)).unwrap(), session, "{instant}");
+    }
+    let day = (
+        at("2026-09-22T00:00:00.000000000Z"),
+        at("2026-09-23T00:00:00.000000000Z"),
+    );
+    assert_eq!(
+        equity.seconds_between(day.0, day.1).unwrap(),
+        23_400,
+        "09:30 to 16:00 New York"
+    );
+    let crypto = ExchangeRiskCalendar::new(AssetClass::Crypto).unwrap();
+    assert_eq!(crypto.seconds_between(day.0, day.1).unwrap(), 86_400);
+    assert_eq!(
+        crypto
+            .session(at("2026-09-26T15:00:00.000000000Z"))
+            .unwrap(),
+        MarketSession::Crypto
+    );
+}
+
+/// A tick in the opening's own second is the agent's and is stepped (DEC-2804 item 3): with no
+/// breach time to confirm, a lifetime floor the inherited loss already breaches triggers at it.
+#[test]
+fn a_tick_in_the_opening_second_is_stepped() {
+    let mandate = validated(
+        "research_equity_pinned",
+        &[serde_json::json!({"op": "replace", "path": "/risk/breach_confirm_s", "value": 0})],
+    );
+    let opening = Opening {
+        inherited_loss_usd: Usd::parse("1500").unwrap(),
+        ..opening()
+    };
+    let mut fold = AccountRiskFold::open(
+        ACCOUNT,
+        1,
+        AGENT,
+        &mandate,
+        &opening,
+        Some(XYZ),
+        &Wall,
+        TripwireState::default(),
+    )
+    .unwrap();
+    let records = fold.fold(&tick(2, OPENED)).unwrap();
+    let types: Vec<&str> = records.iter().map(|record| record.event_type).collect();
+    assert!(
+        types.contains(&"RiskLimitTriggered"),
+        "the floor triggers at the opening second: {types:?}"
+    );
+}
+
+/// A version-1 `FillApplied`, as rows journaled before DEC-2812 hold, steps the agent's sub-ledger
+/// exactly as a version-2 one does: the same fills at either version reach the same equity.
+#[test]
+fn a_fill_at_version_1_or_2_steps_the_same() {
+    let mandate = mandate();
+    let equities: Vec<String> = [1, 2]
+        .into_iter()
+        .map(|version| {
+            let mut fold = marked_with_an_order(&mandate, &Wall);
+            fold.fold(&fill_at(
+                version,
+                5,
+                "o-1",
+                XYZ,
+                ("buy", "10", "100"),
+                AT_2,
+                "[]",
+            ))
+            .unwrap();
+            fold.fold(&mark(6, XYZ, AT_3, "90", true, "regular"))
+                .unwrap();
+            equity(fold.view())
+        })
+        .collect();
+    assert_eq!(
+        equities,
+        ["9900", "9900"],
+        "10000 - 1000 + 10 × 90 at either version"
+    );
+}
+
+/// The reconciler's `CompensatingEvent` for the `OrderStateChanged` `corrects` (trading domain spec
+/// §11): its order, adopted from `accepted` to the state `corrects` records, naming `corrects` as
+/// its cause and its one corrected event, at version 1, with `patch` applied to its payload.
+fn compensation(seq: u64, corrects: &StoredEvent, patch: impl FnOnce(&mut Json)) -> StoredEvent {
+    let state: Json = serde_json::from_slice(&corrects.body).unwrap();
+    let mut payload = serde_json::json!({
+        "subject": state["payload"]["client_order_id"],
+        "difference": "order_state",
+        "from": "accepted",
+        "to": state["payload"]["state"],
+        "corrected_event_ids": [corrects.event_id],
+        "risk_clock": OPENED,
+    });
+    patch(&mut payload);
+    caused(
+        seq,
+        "CompensatingEvent",
+        1,
+        Some(&corrects.event_id),
+        &payload.to_string(),
+    )
+}
+
+/// A named change to a compensation's payload.
+type Patch = (&'static str, Box<dyn Fn(&mut Json)>);
+
+/// `o-1`'s `OrderStateChanged` to `filled` at seq 5, after [`marked_with_an_order`].
+fn o1_filled() -> StoredEvent {
+    row(
+        5,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1","state":"filled","ignored":false}"#,
+    )
+}
+
+/// DEC-2829 item 1: the reconciler's compensation right after the order state it adopts steps
+/// nothing, and the order is still the agent's: its fill after it moves E as before.
+#[test]
+fn a_compensation_beside_the_state_it_corrects_steps_nothing() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let filled = o1_filled();
+    assert_eq!(fold.fold(&filled).unwrap(), Vec::new());
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("readable");
+    };
+    assert_eq!(
+        fold.fold(&compensation(6, &filled, |_| {})).unwrap(),
+        Vec::new()
+    );
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (&before, 6));
+    fold.fold(&fill(7, "o-1", XYZ, ("buy", "10", "90"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "10100", "10000 - 900 + 10 × 100");
+    for row in own_order(8, "agent-2", "o-2", XYZ, "buy", "5") {
+        fold.fold(&row).unwrap();
+    }
+    let theirs = row(
+        10,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-2","state":"filled","ignored":false}"#,
+    );
+    fold.fold(&theirs).unwrap();
+    fold.fold(&compensation(11, &theirs, |_| {})).unwrap();
+    fold.fold(&fill(12, "o-2", XYZ, ("buy", "5", "90"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "10100",
+        "a compensation never makes another agent's order the agent's"
+    );
+}
+
+/// DEC-2829 item 2: any other compensation is an input the fold does not read, and the view fails
+/// closed: another version, difference, `from`, cause, corrected event or order or state, an append
+/// other than its order state's, or a row before it that is not an order state at all; and a
+/// paired one with no whole-second `risk_clock` is undecodable.
+#[test]
+fn a_compensation_any_other_way_fails_closed() {
+    let mandate = mandate();
+    let filled = o1_filled();
+    let other = "01J8Z4R0000000000000000099";
+    let patched: [Patch; 9] = [
+        (
+            "difference",
+            Box::new(|p| p["difference"] = "position".into()),
+        ),
+        ("from", Box::new(|p| p["from"] = Json::Null)),
+        (
+            "corrected",
+            Box::new(move |p| p["corrected_event_ids"] = serde_json::json!([other])),
+        ),
+        (
+            "none corrected",
+            Box::new(|p| p["corrected_event_ids"] = serde_json::json!([])),
+        ),
+        (
+            "two corrected",
+            Box::new(|p| {
+                let id = p["corrected_event_ids"][0].clone();
+                p["corrected_event_ids"] = serde_json::json!([id, id]);
+            }),
+        ),
+        (
+            "corrected not text",
+            Box::new(|p| p["corrected_event_ids"] = serde_json::json!([5])),
+        ),
+        ("subject", Box::new(|p| p["subject"] = "o-2".into())),
+        ("to", Box::new(|p| p["to"] = "canceled".into())),
+        ("no subject", Box::new(|p| p["subject"] = Json::Null)),
+    ];
+    let fails = |rows: &[StoredEvent], why: &str| {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        for row in rows {
+            fold.fold(row).unwrap();
+        }
+        let head = rows.last().unwrap().seq - 1;
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::UnknownSchemaVersion, head),
+            "{why}"
+        );
+    };
+    for (why, patch) in &patched {
+        fails(
+            &[filled.clone(), compensation(6, &filled, |p| patch(p))],
+            why,
+        );
+    }
+    let adopted = compensation(6, &filled, |_| {});
+    let version_2 = StoredEvent {
+        schema_version: 2,
+        ..adopted.clone()
+    };
+    fails(&[filled.clone(), version_2], "version 2");
+    let another_batch = StoredEvent {
+        recorded_at: "2026-09-22T14:30:00.000000001Z".to_owned(),
+        ..adopted.clone()
+    };
+    fails(&[filled.clone(), another_batch], "another batch");
+    let elsewhere = caused(
+        6,
+        "CompensatingEvent",
+        1,
+        Some(other),
+        &serde_json::json!({
+            "subject": "o-1", "difference": "order_state", "from": "accepted", "to": "filled",
+            "corrected_event_ids": [filled.event_id], "risk_clock": OPENED,
+        })
+        .to_string(),
+    );
+    fails(&[filled.clone(), elsewhere], "another cause");
+    let between = fees_charged(6, "o-1", "0.01", AT_2);
+    fails(
+        &[filled.clone(), between, compensation(7, &filled, |_| {})],
+        "a row between",
+    );
+    let lone = compensation(5, &filled, |_| {});
+    fails(&[lone], "no order state before it");
+    let abandoned = row(
+        5,
+        "OrderAbandoned",
+        1,
+        r#"{"client_order_id":"o-1","state":"filled"}"#,
+    );
+    fails(
+        &[abandoned.clone(), compensation(6, &abandoned, |_| {})],
+        "a row before it that is not an order state",
+    );
+    for clock in [Json::Null, "2026-09-22T14:30:00.5Z".into()] {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        fold.fold(&filled).unwrap();
+        fold.fold(&compensation(6, &filled, |p| {
+            p["risk_clock"] = clock.clone()
+        }))
+        .unwrap();
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::Undecodable, 5),
+            "risk clock {clock}"
+        );
+    }
+    let stateless = row(
+        5,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1","ignored":false}"#,
+    );
+    fails(
+        &[
+            stateless.clone(),
+            compensation(6, &stateless, |p| p["to"] = "filled".into()),
+        ],
+        "an order state naming no state",
+    );
+}
+
+/// `draft` as the journal stores it at `seq`, recorded at `recorded_at` as one append's rows are.
+fn sealed(seq: u64, draft: &EventDraft, recorded_at: &str) -> StoredEvent {
+    let mut body = Object::new();
+    let mut member = |name: &str, value: Value| {
+        body.insert(Key::new(name).unwrap(), value);
+    };
+    member("event_id", Value::Str(draft.event_id.0.clone()));
+    member("event_type", Value::Str(draft.event_type.clone()));
+    member("schema_version", common::int(draft.schema_version));
+    member("seq", common::int(seq));
+    member("stream_id", Value::Str(ACCOUNT.to_owned()));
+    member(
+        "causation_id",
+        draft
+            .causation_id
+            .as_ref()
+            .map_or(Value::Null, |cause| Value::Str(cause.0.clone())),
+    );
+    member("payload", draft.payload.clone());
+    StoredEvent {
+        event_id: draft.event_id.0.clone(),
+        recorded_at: recorded_at.to_owned(),
+        ..stored(
+            seq,
+            &draft.event_type,
+            draft.schema_version,
+            to_canonical(&Value::Object(body)),
+        )
+    }
+}
+
+/// DEC-2829, the contract with the reconciler: the batch the executor's own reconciliation journals
+/// when it adopts the broker's `filled` for an accepted order, sealed as one append, folds with the
+/// view readable, its compensation paired with the order state it corrects, and nothing stepped.
+#[test]
+fn the_reconcilers_own_adoption_batch_folds_readable() {
+    let aapl = common::FixedInstruments::LIQUID_EQUITY;
+    let (ids, instruments, config) = (common::TestIds, common::FixedInstruments, common::config());
+    let mandates = common::FixedMandate::covering(&[aapl]);
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut opened = common::Shell::new(1);
+    opened.fold_one(&common::stream_opened()).unwrap();
+    let mut shell = opened.restart_ready(&ports);
+    let submitted = shell.run(
+        common::handoff(
+            "01JABCDEFGHJKMNPQRSTVWXYZ0",
+            common::AGENT,
+            common::opening(aapl, "10", "150"),
+        ),
+        &ports,
+    );
+    let order = submitted.submissions()[0]
+        .client_order_id
+        .as_str()
+        .to_owned();
+    let accepted = common::broker_order("b-1", Some(&order), aapl, Side::Buy, "10", "0", "new");
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(accepted))),
+        &ports,
+    );
+    let mut taken = common::snapshot(shell.head().0, ReconcileReason::Startup);
+    taken.open_orders = vec![common::broker_order(
+        "b-1",
+        Some(&order),
+        aapl,
+        Side::Buy,
+        "10",
+        "10",
+        "filled",
+    )];
+    taken.fills = vec![common::broker_fill("f-1", Some(&order), "10", "150")];
+    taken.positions = vec![common::broker_position(aapl, "10")];
+    let run = reconcile(&shell.state, &taken, &ports).unwrap();
+    let drafts: Vec<&EventDraft> = run
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Journal(draft) => Some(draft),
+            _ => None,
+        })
+        .collect();
+    let types: Vec<&str> = drafts
+        .iter()
+        .map(|draft| draft.event_type.as_str())
+        .collect();
+    assert!(
+        types.contains(&"CompensatingEvent"),
+        "an adoption: {types:?}"
+    );
+
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("readable");
+    };
+    for (seq, draft) in (5..).zip(&drafts) {
+        assert_eq!(fold.fold(&sealed(seq, draft, AT_2)).unwrap(), Vec::new());
+    }
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("the reconciler's batch reads: {types:?} {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (&before, 4 + drafts.len() as u64));
+}
+
+/// DEC-2834 items 1 to 3: an own fill on a flat fold before any counted sane mark is held, with E
+/// unknown. The view holds openings and nothing else, nothing is returned, and a fee, a mark that is
+/// not sane and an equity's mark outside the regular session are held too. The first counted sane
+/// mark prices them: E = A − cost − fee + Q × bid, and a restart reaches the same view.
+#[test]
+fn an_unpriced_fill_is_held_until_the_first_counted_sane_mark_prices_it() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let mut rows: Vec<StoredEvent> = own_order(2, AGENT, "o-1", XYZ, "buy", "10").into();
+    rows.extend([
+        fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]"),
+        fees_charged(5, "o-1", "0.01", AT_1),
+        mark(6, XYZ, AT_2, "80", false, "regular"),
+        mark(7, XYZ, AT_2, "80", true, "pre_market"),
+    ]);
+    for row in &rows {
+        assert_eq!(fold.fold(row).unwrap(), Vec::new(), "{}", row.event_type);
+        if row.seq >= 4 {
+            assert_eq!(
+                unreadable(fold.view()),
+                (UnreadableCause::Unpriced, row.seq),
+                "held: {}",
+                row.event_type
+            );
+        }
+    }
+    let priced = mark(8, XYZ, AT_2, "90", true, "regular");
+    fold.fold(&priced).unwrap();
+    assert_eq!(readable_head(fold.view()), 8);
+    assert_eq!(
+        equity(fold.view()),
+        "9899.99",
+        "10000 − 1000 − 0.01 + 10 × 90"
+    );
+    rows.push(priced);
+    let mut restarted = open(&mandate, &Wall);
+    for row in &rows {
+        restarted.fold(row).unwrap();
+    }
+    assert_eq!(restarted.view(), fold.view());
+}
+
+/// DEC-2849 item 2: while unpriced, a mark naming another instrument steps nothing and does not
+/// price the fold, and the bound instrument's first counted sane mark still does.
+#[test]
+fn a_mark_of_another_instrument_while_unpriced_steps_nothing() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]"))
+        .unwrap();
+    fold.fold(&mark(5, ETH, AT_2, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::Unpriced, 5));
+    fold.fold(&mark(6, XYZ, AT_2, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "9900", "10000 − 1000 + 10 × 90");
+}
+
+/// One input to a flat fold: an own buy or sell at 100, a tick, or an XYZ mark at a bid, sane or
+/// not, in the regular session or the pre-market.
+#[derive(Debug, Clone)]
+enum Flat {
+    Buy(u8),
+    Sell(u8),
+    Tick,
+    Mark(u16, bool, bool),
+}
+
+fn flat_input() -> impl proptest::strategy::Strategy<Value = Flat> {
+    proptest::prop_oneof![
+        proptest::strategy::Strategy::prop_map(1_u8..=50, Flat::Buy),
+        proptest::strategy::Strategy::prop_map(1_u8..=50, Flat::Sell),
+        proptest::strategy::Just(Flat::Tick),
+        proptest::strategy::Strategy::prop_map(
+            (
+                20_u16..=180,
+                proptest::arbitrary::any::<bool>(),
+                proptest::arbitrary::any::<bool>()
+            ),
+            |(bid, sane, regular)| Flat::Mark(bid, sane, regular)
+        ),
+    ]
+}
+
+/// The rows of `inputs` on a flat fold, one minute apart from 14:31, each order's fill right after
+/// its request and submission, and a closing sane regular mark at 95. With `oracle`, a sane
+/// regular mark at the pricing bid is journaled right before the first own fill that comes before
+/// any counted sane mark, at that fill's instant: the fold the held inputs must end as.
+fn flat_rows(inputs: &[Flat], oracle: bool) -> Vec<(String, Flat)> {
+    let mut timed: Vec<(String, Flat)> = (31_u32..)
+        .zip(inputs)
+        .map(|(minute, input)| {
+            (
+                format!(
+                    "2026-09-22T{:02}:{:02}:00.000000000Z",
+                    14 + minute / 60,
+                    minute % 60
+                ),
+                input.clone(),
+            )
+        })
+        .collect();
+    let last = 31 + u32::try_from(inputs.len()).unwrap();
+    timed.push((
+        format!(
+            "2026-09-22T{:02}:{:02}:00.000000000Z",
+            14 + last / 60,
+            last % 60
+        ),
+        Flat::Mark(95, true, true),
+    ));
+    let counted = |input: &Flat| matches!(input, Flat::Mark(_, true, true));
+    let first_fill = timed
+        .iter()
+        .position(|(_, input)| matches!(input, Flat::Buy(_)))
+        .filter(|fill| !timed[..*fill].iter().any(|(_, input)| counted(input)));
+    if let (true, Some(fill)) = (oracle, first_fill) {
+        let bid = timed[fill..]
+            .iter()
+            .find_map(|(_, input)| match input {
+                Flat::Mark(bid, true, true) => Some(*bid),
+                _ => None,
+            })
+            .unwrap();
+        let at = timed[fill].0.clone();
+        timed.insert(fill, (at, Flat::Mark(bid, true, true)));
+    }
+    timed
+}
+
+/// `cents` as the canonical decimal dollars `Usd::parse` takes, with no trailing zero.
+fn canonical_cents(cents: i64) -> String {
+    match (cents / 100, cents % 100) {
+        (dollars, 0) => dollars.to_string(),
+        (dollars, part) if part % 10 == 0 => format!("{dollars}.{}", part / 10),
+        (dollars, part) => format!("{dollars}.{part:02}"),
+    }
+}
+
+/// A commission of 0.50 on every generated fill.
+const COMMISSION: &str =
+    r#"[{"kind":"commission","amount":"0.5","asset":"USD","status":"charged"}]"#;
+
+/// What `fold_flat` saw: the records journaled, the view at the end, whether anything was returned,
+/// owed or held beyond `exits_only` while unpriced, and E at the end by its own cents arithmetic:
+/// the allocation, less each buy's cost and each commission, plus each sale's proceeds, plus the
+/// quantity held at the closing mark's 95.
+type Folded = (Vec<(String, Value)>, RiskView, bool, i64);
+
+/// Folds `timed` on a flat fold, journaling each step's records right after it.
+fn fold_flat(timed: &[(String, Flat)]) -> Folded {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let (mut seq, mut held, mut orders) = (2_u64, 0_u32, 0_u32);
+    let mut records = Vec::new();
+    let mut while_unpriced = false;
+    let mut cents = 1_000_000_i64;
+    for (clock, input) in timed {
+        let mut rows = Vec::new();
+        match input {
+            Flat::Buy(qty) | Flat::Sell(qty) => {
+                let buy = matches!(input, Flat::Buy(_));
+                if !buy && u32::from(*qty) > held {
+                    continue;
+                }
+                let notional = i64::from(*qty) * 10_000;
+                if buy {
+                    held += u32::from(*qty);
+                    cents -= notional + 50;
+                } else {
+                    held -= u32::from(*qty);
+                    cents += notional - 50;
+                }
+                orders += 1;
+                let order = format!("o-{orders}");
+                let (side, qty) = (if buy { "buy" } else { "sell" }, qty.to_string());
+                rows.extend(own_order(seq, AGENT, &order, XYZ, side, &qty));
+                rows.push(fill(
+                    seq + 2,
+                    &order,
+                    XYZ,
+                    (side, &qty, "100"),
+                    clock,
+                    COMMISSION,
+                ));
+            }
+            Flat::Tick => rows.push(tick(seq, clock)),
+            Flat::Mark(bid, sane, regular) => {
+                let session = if *regular { "regular" } else { "pre_market" };
+                rows.push(mark(seq, XYZ, clock, &bid.to_string(), *sane, session));
+            }
+        }
+        for row in rows {
+            let appends = fold.fold(&row).unwrap();
+            seq = row.seq + 1;
+            if let RiskView::Unreadable {
+                cause: UnreadableCause::Unpriced,
+                mode,
+                ..
+            } = fold.view()
+            {
+                while_unpriced |=
+                    !appends.is_empty() || fold.owed().count() > 0 || *mode != AgentMode::ExitsOnly;
+            }
+            for append in &appends {
+                let record = appended(seq, append);
+                let body = parse(&record.body).unwrap();
+                records.push((
+                    record.event_type.clone(),
+                    body.get("payload").unwrap().clone(),
+                ));
+                fold.fold(&record).unwrap();
+                seq += 1;
+            }
+        }
+    }
+    cents += i64::from(held) * 9_500;
+    (records, fold.view().clone(), while_unpriced, cents)
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// DEC-2834: while a flat fold is unpriced no record is returned, so no limit trips or lifts and
+    /// nothing pauses; once its first counted sane mark prices it, its view and records are the
+    /// oracle's, a fold that read that mark's bid at the first unpriced fill's instant.
+    #[test]
+    fn an_unpriced_fold_trips_nothing_and_prices_as_the_oracle(
+        inputs in proptest::collection::vec(flat_input(), 1..25),
+    ) {
+        let (records, view, while_unpriced, cents) = fold_flat(&flat_rows(&inputs, false));
+        let (expected, oracle, _, _) = fold_flat(&flat_rows(&inputs, true));
+        proptest::prop_assert!(!while_unpriced, "a record, an owed record or a hold while unpriced");
+        let (RiskView::Readable { snapshot, .. }, RiskView::Readable { snapshot: want, .. }) =
+            (&view, &oracle)
+        else {
+            return Err(proptest::test_runner::TestCaseError::fail(format!(
+                "both read after the closing mark: {view:?} {oracle:?}"
+            )));
+        };
+        proptest::prop_assert_eq!(snapshot, want);
+        proptest::prop_assert_eq!(records, expected);
+        let e = Usd::parse(&canonical_cents(cents)).unwrap();
+        proptest::prop_assert_eq!(snapshot.agent_equity, e, "E by the accumulator");
+    }
+}
+
+/// DEC-2834, decided where each row is: while unpriced, a mark from before the opening instant does
+/// not price the fold, a fill of an order whose request and submission come after it is not the
+/// agent's, and a fill read twice is stepped once. The first counted sane mark prices the rest.
+#[test]
+fn an_unpriced_fold_reads_each_held_row_as_a_priced_one_would() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let mut rows: Vec<StoredEvent> = own_order(2, AGENT, "o-1", XYZ, "buy", "10").into();
+    let filled = fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]");
+    rows.push(filled.clone());
+    rows.push(StoredEvent { seq: 5, ..filled });
+    rows.push(mark(
+        6,
+        XYZ,
+        "2026-09-22T14:29:00.000000000Z",
+        "50",
+        true,
+        "regular",
+    ));
+    rows.push(fill(7, "o-2", XYZ, ("buy", "5", "100"), AT_1, "[]"));
+    rows.extend(own_order(8, AGENT, "o-2", XYZ, "buy", "5"));
+    for row in &rows {
+        fold.fold(row).unwrap();
+    }
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::Unpriced, 9));
+    fold.fold(&mark(10, XYZ, AT_2, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "9900",
+        "10000 − 1000 + 10 × 90: o-1's fill once, o-2's not the agent's where it was read"
+    );
+}
+
+/// DEC-2834 item 3: a held tick that crosses New York midnight starts the risk day when the fold is
+/// priced, with E₀ the priced E.
+#[test]
+fn a_held_midnight_starts_the_day_on_the_priced_equity() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]"))
+        .unwrap();
+    assert_eq!(
+        fold.fold(&tick(5, "2026-09-23T04:00:00.000000000Z"))
+            .unwrap(),
+        Vec::new()
+    );
+    let appends = fold
+        .fold(&mark(
+            6,
+            XYZ,
+            "2026-09-23T14:31:00.000000000Z",
+            "90",
+            true,
+            "regular",
+        ))
+        .unwrap();
+    let day = appends
+        .iter()
+        .find(|append| append.event_type == "RiskDayStarted")
+        .expect("the held midnight's day start");
+    assert_eq!(
+        day.payload.get("day_start_equity").and_then(Value::as_str),
+        Some("9900")
+    );
+}
+
+/// DEC-2834 item 1: a mark in the opening's own second is at the opening instant, so it prices a
+/// fill held from that second.
+#[test]
+fn a_mark_in_the_opening_second_prices_a_fill_held_there() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(4, "o-1", XYZ, ("buy", "10", "100"), OPENED, "[]"))
+        .unwrap();
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::Unpriced, 4));
+    fold.fold(&mark(5, XYZ, OPENED, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "9900");
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// DEC-2849 item 2: another instrument's marks change nothing in a fold. The same inputs,
+    /// journaled with and without an ETH mark after each input, end in the same snapshot and the
+    /// same journaled records.
+    #[test]
+    fn another_instruments_marks_change_nothing(
+        inputs in proptest::collection::vec(flat_input(), 1..25),
+        bids in proptest::collection::vec(1_u16..=500, 25),
+    ) {
+        let timed = flat_rows(&inputs, false);
+        let (records, view, _, _) = fold_flat(&timed);
+        let (interleaved, with_others) = fold_flat_with(&timed, &bids);
+        proptest::prop_assert_eq!(records, interleaved);
+        let (RiskView::Readable { snapshot, .. }, RiskView::Readable { snapshot: want, .. }) =
+            (&with_others, &view)
+        else {
+            return Err(proptest::test_runner::TestCaseError::fail(format!(
+                "both read: {with_others:?} {view:?}"
+            )));
+        };
+        proptest::prop_assert_eq!(snapshot, want);
+    }
+}
+
+/// [`fold_flat`] on a fold bound to XYZ at opening, as the executor daemon opens every fold
+/// (DEC-2804 item 2), with an ETH mark at a bid from `bids` journaled after each input's batch and
+/// its records, at the input's clock: the records journaled and the view at the end.
+fn fold_flat_with(timed: &[(String, Flat)], bids: &[u16]) -> (Vec<(String, Value)>, RiskView) {
+    let mandate = mandate();
+    let mut fold = AccountRiskFold::open(
+        ACCOUNT,
+        1,
+        AGENT,
+        &mandate,
+        &opening(),
+        Some(XYZ),
+        &Wall,
+        TripwireState::default(),
+    )
+    .unwrap();
+    let (mut seq, mut held, mut orders) = (2_u64, 0_u32, 0_u32);
+    let mut records = Vec::new();
+    for ((clock, input), bid) in timed.iter().zip(bids.iter().cycle()) {
+        let mut rows = Vec::new();
+        match input {
+            Flat::Buy(qty) | Flat::Sell(qty) => {
+                let buy = matches!(input, Flat::Buy(_));
+                if !buy && u32::from(*qty) > held {
+                    continue;
+                }
+                if buy {
+                    held += u32::from(*qty);
+                } else {
+                    held -= u32::from(*qty);
+                }
+                orders += 1;
+                let order = format!("o-{orders}");
+                let (side, qty) = (if buy { "buy" } else { "sell" }, qty.to_string());
+                rows.extend(own_order(seq, AGENT, &order, XYZ, side, &qty));
+                rows.push(fill(
+                    seq + 2,
+                    &order,
+                    XYZ,
+                    (side, &qty, "100"),
+                    clock,
+                    COMMISSION,
+                ));
+            }
+            Flat::Tick => rows.push(tick(seq, clock)),
+            Flat::Mark(bid, sane, regular) => {
+                let session = if *regular { "regular" } else { "pre_market" };
+                rows.push(mark(seq, XYZ, clock, &bid.to_string(), *sane, session));
+            }
+        }
+        for row in rows {
+            let appends = fold.fold(&row).unwrap();
+            seq = row.seq + 1;
+            for append in &appends {
+                let record = appended(seq, append);
+                let body = parse(&record.body).unwrap();
+                records.push((
+                    record.event_type.clone(),
+                    body.get("payload").unwrap().clone(),
+                ));
+                fold.fold(&record).unwrap();
+                seq += 1;
+            }
+        }
+        let other = mark(seq, ETH, clock, &bid.to_string(), true, "regular");
+        assert_eq!(
+            fold.fold(&other).unwrap(),
+            Vec::new(),
+            "another instrument's mark"
+        );
+        seq += 1;
+    }
+    (records, fold.view().clone())
 }

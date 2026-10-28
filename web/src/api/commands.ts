@@ -11,10 +11,11 @@
  */
 import type { WorkspaceClient } from "./client";
 import type { Classification } from "./confirm";
+import type { PasskeyStepUp } from "./passkey";
 import { type StepUpChallenge, cliConfirmEvidence } from "./step-up";
 import type { JsonObject, PreparedCommand } from "./types";
 import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
-import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord } from "@/lib/mock-runtime";
+import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord, DeployToPaperRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
 
 export type Prepared = { ok: true; commands: PreparedCommand[] } | { ok: false; reason: string };
@@ -33,22 +34,28 @@ export const UI_BUILD = "owlhead-web/E11-9";
 const ref = (text: string): ContentRef => `sha256:${sha256Hex(text)}`;
 
 /** The spec §5 `record`: the rendered screen as a content ref, and the build that rendered it. */
-export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord): { artifact: ContentRef; ui_build: ContentRef } {
+export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord | DeployToPaperRecord): { artifact: ContentRef; ui_build: ContentRef } {
   return { artifact: ref(JSON.stringify(record)), ui_build: ref(UI_BUILD) };
 }
 
 const one = (command: PreparedCommand): Prepared => ({ ok: true, commands: [command] });
 
-export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
+/**
+ * An owner command as its route takes it. A resume or a plain Stop carries the owner's passkey
+ * evidence and its assertion when `stepUp` is given (DEC-2140 item 1), and `null` evidence otherwise,
+ * which the runtime refuses (DEC-2102 item 4).
+ */
+export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord, stepUp: PasskeyStepUp | null = null): Prepared {
   const agentCommand = (operation: "pause" | "resume" | "stop", body: JsonObject): Prepared =>
     agentId ? one(client.prepare(operation, { agent: agentId }, body)) : { ok: false, reason: "no_agent" };
+  const evidence: JsonObject = stepUp ? { step_up: { ...stepUp.step_up }, step_up_assertion: { ...stepUp.step_up_assertion } } : { step_up: null };
   switch (kind) {
     case "pause":
       return agentCommand("pause", { record: null });
     case "resume":
-      return agentCommand("resume", { record: null, step_up: null });
+      return agentCommand("resume", { record: null, ...evidence });
     case "stop":
-      return agentCommand("stop", { release: false, warning_shown: null, record: null, step_up: null });
+      return agentCommand("stop", { release: false, warning_shown: null, record: null, ...evidence });
     case "release":
       if (!record) return { ok: false, reason: "no_warning_shown" };
       return agentCommand("stop", { release: true, warning_shown: ref(JSON.stringify(record.shown)), record: null, step_up: null });
@@ -70,6 +77,24 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
       throw new Error(`unhandled command ${String(unhandled)}`);
     }
   }
+}
+
+/** An asset id as the exits route takes it (`common.schema.json#/$defs/AssetId`): a lowercase UUID. */
+const ASSET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export const isAssetId = (instrument: string): boolean => ASSET_ID.test(instrument);
+
+/**
+ * The owner's exit from one instrument (§5.4, `POST /agents/{id}/exits`; rule 13): the asset and the
+ * screen the owner confirmed. The bid confirmation is all `null`: the positions read serves no quote
+ * with its size and time, so there is no bid the owner could have seen, and an equity sell outside the
+ * regular session waits for it, which the screen says. It carries no step-up: the server records an
+ * owner exit without one (§3.11 item 12), and it is never refused for step-up.
+ */
+export function prepareOwnerExit(client: WorkspaceClient, agentId: string, instrument: string, record: CommandRecord): Prepared {
+  if (!agentId) return { ok: false, reason: "no_agent" };
+  if (!isAssetId(instrument)) return { ok: false, reason: "no_asset_id" };
+  return one(client.prepare("owner_exit", { agent: agentId }, { instrument, bid: null, bid_size: null, quoted_at: null, floor: null, record: recordRef(record), step_up: null }));
 }
 
 /**
@@ -113,6 +138,8 @@ export interface ConfirmInput {
   base: ContentRef | null;
   record: ConfirmRecord;
   served: ServedConfirmation;
+  /** The passkey's evidence and assertion (DEC-2128), or `null` when no passkey was asked, which the server answers `step_up_required` for a risk-increasing version. */
+  stepUp: PasskeyStepUp | null;
 }
 
 /**
@@ -120,7 +147,8 @@ export interface ConfirmInput {
  * it: every required member and no other. `screen_digest` and `classification_shown` are the served
  * confirmation's, passed through and never computed here: the digest proves the screen rendered the
  * server's data, which only the server's own value can. `warnings_acknowledged` is empty: the summary
- * shows no warning to acknowledge. `step_up` is `null` until E9-4.
+ * shows no warning to acknowledge. Under passkey step-up the body carries `step_up` and its
+ * `step_up_assertion` (DEC-2128 item 1); without, `step_up` is `null` and no assertion is sent.
  */
 export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): PreparedCommand {
   const { record, served } = input;
@@ -135,7 +163,35 @@ export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): Pr
       classification_shown: served.classification,
       screen_digest: served.screen_digest,
       record: recordRef(record),
-      step_up: null,
+      ...(input.stepUp ? { step_up: { ...input.stepUp.step_up }, step_up_assertion: { ...input.stepUp.step_up_assertion } } : { step_up: null }),
+    },
+  );
+}
+
+/** What a deployment binds (spec §3.11 item 11): the agent's id, its confirmed version, the B3 record, and the passkey's step-up. */
+export interface DeployInput {
+  agentId: string;
+  version: ContentRef;
+  record: DeployToPaperRecord;
+  stepUp: PasskeyStepUp;
+}
+
+/**
+ * `POST /agents` (§4.2, §3.11 item 11): exactly `agent_id`, `mandate_version`, `backtest_id`,
+ * `record`, `step_up` and `step_up_assertion`. The backtest is the one B3 showed, or `null`; the
+ * server records it and never reads it. Paper only: the server refuses a `live` document.
+ */
+export function prepareDeploy(client: WorkspaceClient, input: DeployInput): PreparedCommand {
+  return client.prepare(
+    "deploy",
+    {},
+    {
+      agent_id: input.agentId,
+      mandate_version: input.version,
+      backtest_id: input.record.backtestId,
+      record: recordRef(input.record),
+      step_up: { ...input.stepUp.step_up },
+      step_up_assertion: { ...input.stepUp.step_up_assertion },
     },
   );
 }

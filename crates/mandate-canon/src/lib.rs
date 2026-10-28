@@ -25,6 +25,36 @@ mod write;
 
 pub use ulid::{UlidTextError, decode_ulid, encode_ulid, is_ulid};
 
+/// The domain tag [`stream_event_id`] hashes first, so no other digest's preimage can spell one.
+const STREAM_EVENT_ID_TAG: &[u8] = b"mandate.stream_event_id.v1\0";
+
+/// The event id a deterministic writer derives for the draft at `ordinal` of the batch it appends
+/// at `head` under writer epoch `epoch` on `stream`: a ULID whose 128 bits are the first 128 of
+/// the SHA-256 of the domain tag, the stream's length (8 bytes) and bytes, then the epoch, the
+/// head (8 bytes each) and the ordinal (4 bytes), big-endian. The same position always gives the
+/// same id, so a retry offers the journal the same draft (journal spec §5.1), and two streams
+/// never share one, as journal spec §3 requires of an `event_id`; the length before the bytes
+/// keeps one stream's name and position from spelling another's. The ULID's time component
+/// carries no meaning (journal spec §3).
+pub fn stream_event_id(stream: &str, epoch: u64, head: u64, ordinal: u32) -> String {
+    let length = u64::try_from(stream.len())
+        .unwrap_or(u64::MAX)
+        .to_be_bytes();
+    let digest = Digest::of_parts(&[
+        STREAM_EVENT_ID_TAG,
+        &length,
+        stream.as_bytes(),
+        &epoch.to_be_bytes(),
+        &head.to_be_bytes(),
+        &ordinal.to_be_bytes(),
+    ]);
+    let mut high = [0_u8; 16];
+    for (to, from) in high.iter_mut().zip(digest.as_bytes()) {
+        *to = *from;
+    }
+    encode_ulid(u128::from_be_bytes(high))
+}
+
 /// Largest integer the canonical form admits (journal spec §4.4).
 pub const MAX_INT: u64 = (1 << 53) - 1;
 /// Deepest nesting of arrays and objects the parser accepts.

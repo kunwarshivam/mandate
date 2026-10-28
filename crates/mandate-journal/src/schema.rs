@@ -17,6 +17,10 @@ pub(crate) enum Ty {
     /// Mandate spec §3's asset ID: `8-4-4-4-12` lowercase hexadecimal with hyphens (spec §9.3).
     AssetId,
     Ulid,
+    /// §9.1's `intent` (journal spec v0.108, DEC-2845): a ULID, or the executor's own exit's
+    /// intent of trading spec §2.3, exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with
+    /// no leading zero.
+    Intent,
     /// A journal decimal, normalized on the way in (spec §4.6).
     Decimal,
     Int,
@@ -65,6 +69,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
         Ty::Ident => checked(is_ident(text()?)),
         Ty::AssetId => checked(is_asset_id(text()?)),
         Ty::Ulid => checked(is_ulid(text()?)),
+        Ty::Intent => checked(is_intent(text()?)),
         Ty::Decimal => DecStr::parse(text()?)
             .map(|d| Value::Str(d.as_str().to_owned()))
             .map_err(|_| non_canonical()),
@@ -162,13 +167,14 @@ fn is_asset_id(s: &str) -> bool {
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}`, each segment an
-/// identifier (journal spec §2, §9.13's range grammar since v0.46).
+/// `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`,
+/// `dmeter:{deployment_id}`, or `news:{workspace_id}`, each segment an identifier (journal spec §2,
+/// §9.13's range grammar since v0.46, the news stream's since v0.103).
 fn is_stream_name(s: &str) -> bool {
     let parts: Vec<&str> = s.split(':').collect();
     let segments = match parts.first() {
         Some(&("acct" | "agent")) => 3,
-        Some(&("ctl" | "clock" | "ntf" | "meter" | "dmeter")) => 2,
+        Some(&("ctl" | "clock" | "ntf" | "meter" | "dmeter" | "news")) => 2,
         _ => return false,
     };
     parts.len() == segments && parts.iter().skip(1).all(|segment| is_ident(segment))
@@ -188,21 +194,39 @@ pub(crate) fn is_ulid(s: &str) -> bool {
         && s.bytes().next().is_some_and(|b| b <= b'7')
 }
 
+/// §9.1's `intent`: a ULID, `w-` and a ULID (the triggered-stop watchdog's exit), or `k-`, a ULID,
+/// `-` and an ordinal from 0 to 999 written with no leading zero (a kill switch's flatten).
+pub(crate) fn is_intent(s: &str) -> bool {
+    if is_ulid(s) {
+        return true;
+    }
+    if let Some(event) = s.strip_prefix("w-") {
+        return is_ulid(event);
+    }
+    let Some((switch, n)) = s.strip_prefix("k-").and_then(|rest| rest.split_once('-')) else {
+        return false;
+    };
+    let ordinal = !n.is_empty()
+        && n.len() <= 3
+        && n.bytes().all(|b| b.is_ascii_digit())
+        && (n == "0" || !n.starts_with('0'));
+    is_ulid(switch) && ordinal
+}
+
 pub(crate) fn parse_digest_ref(s: &str) -> Option<Digest> {
     s.strip_prefix("sha256:").and_then(Digest::from_hex)
 }
 
 /// The payload schema for `(event_type, schema_version)`, if one is registered. `IntentReceived`,
-/// `GateDecided` and `OrderSubmitted` are account-stream records that `control::governs` takes, so
-/// `control::schema` serves their versions, the v1 schemas below among them, and none is here.
+/// `GateDecided`, `OrderSubmitted`, `FillApplied` and `LateFillApplied` are account-stream records
+/// that `control::governs` takes, so `control::schema` serves their versions, the v1 schemas below
+/// among them, and none is here.
 pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
     match (event_type, schema_version) {
         ("StreamOpened", 1) => Some(&STREAM_OPENED_V1),
-        ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
         ("MarkUpdated", 2) => Some(&MARK_UPDATED_V2),
         ("ReconciliationRun", 1) => Some(&RECONCILIATION_RUN_V1),
-        ("LateFillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("FeesCharged", 1) => Some(&FEES_CHARGED_V1),
         _ => None,
     }
@@ -218,7 +242,7 @@ static STREAM_OPENED_V1: Ty = Ty::Record(&[
 ]);
 
 pub(crate) static INTENT_RECEIVED_V1: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("agent_id", Ty::Ident),
     ("instrument_id", Ty::Str),
     ("side", Ty::Str),
@@ -248,7 +272,7 @@ pub(crate) const GATE_CHECK_IDS: &[&str] = &[
 ];
 
 pub(crate) static GATE_DECIDED_V1: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("verdict", Ty::Str),
     ("reason_code", Ty::Nullable(&Ty::Str)),
     ("data_profile", Ty::Str),
@@ -293,7 +317,7 @@ pub(crate) static ORDER_SUBMITTED_V1: Ty = Ty::Record(&[
     ("limit_price", Ty::Nullable(&Ty::Decimal)),
 ]);
 
-static FILL_APPLIED_V1: Ty = Ty::Record(&[
+pub(crate) static FILL_APPLIED_V1: Ty = Ty::Record(&[
     ("fill_id", Ty::Str),
     ("client_order_id", Ty::Str),
     ("instrument_id", Ty::Str),

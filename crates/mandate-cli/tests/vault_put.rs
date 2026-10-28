@@ -192,6 +192,13 @@ fn each_secret_is_put_at_its_own_path() {
         ))
     );
     assert_eq!(
+        put_path(PutSecret::NewsDataKey),
+        Ok((
+            SecretPath::Platform(PlatformSecret::NewsDataKey),
+            "news data key"
+        ))
+    );
+    assert_eq!(
         put_path(PutSecret::AlpacaOauthClientSecret),
         Ok((SecretPath::ClientSecret, "Alpaca OAuth client secret"))
     );

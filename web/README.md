@@ -153,8 +153,12 @@ request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variabl
 | Variable | What it is |
 |---|---|
 | `OWLHEAD_DATA_SOURCE` | `fixtures` (the default when unset) or `api`. Anything else shows the deployment unreachable |
-| `OWLHEAD_API_ORIGIN` | The API's origin, `https://api.owlhead.ai` for the demo; `http` only on a loopback host |
-| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired |
+| `OWLHEAD_API_ORIGIN` | The API's origin: staging's is `https://api-staging.owlhead.ai` (DEC-2636); `http` only on a loopback host |
+| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired: staging's is `01KDEM0000000000000000000W` (`deploy/gitops/clusters/staging/workspace.yaml`) |
+
+The deployed Worker reads all three from its own variables, which the founder sets in the Cloudflare
+dashboard (DEC-823 items 4 and 5). Nothing in the repository sets them, and `keep_vars` in
+`wrangler.jsonc` keeps them across deploys. Unset, the Worker serves the fixtures.
 
 With `OWLHEAD_WORKSPACE_ID` unset, the browser opens its session and reads the workspace from its
 own memberships, `GET /v1/me/workspaces` (DEC-2113): exactly one membership is the workspace, and
@@ -167,9 +171,23 @@ unreachable, never the fixtures. `src/api/operations.ts` lists every operation t
 `src/api/contract.test.ts` fails a call the spec does not document (E21-45). Setting up an agent is
 three recorded steps (DEC-2401, DEC-2407): the version is created from the mandate document
 (`POST /mandate-versions`), the confirm binds the confirmation screen the server serves for it (read
-again just before), and deploying is not sent, since `POST /agents` needs an agent stream no route
-creates yet. Until E9-4 gives the browser its step-up ceremony, a first version's confirm carries no
-step-up and the API answers `step_up_required` with nothing recorded, which the set-up shows; changing a mandate is not sent yet,
+again just before), and the deploy (`POST /agents`) names an agent id the browser mints once per
+set-up (`agt_` and a ULID). No model reads the owner's words over the API, since the compiler is not
+served: the figures-only reader does, and the page says so. The account's room, who trades a symbol and
+the independent-approval policy are not served either, so the server judges V-002, V-006 and V-047.
+The confirm, when the served screen says it needs step-up, and the deploy each take passkey step-up
+(DEC-2128, `src/api/passkey.ts`): the browser asks `POST /step-up/challenges` for a challenge of kind
+`confirm_version` or `deploy` bound to the action's digest, reads the member's passkeys from
+`GET /passkeys`, has the authenticator sign the challenge (`navigator.credentials.get`, user verification
+required, the page's own host as the RP ID), and sends `step_up` with `step_up_assertion` beside it. A
+canceled check, a browser without WebAuthn, no passkey, or one still in its first 24 hours sends nothing
+and says so. The set-up first reads the instruments and signal models the deployment registered
+(`GET /instruments`, `GET /signal-models`, DEC-2136; `src/api/catalogue.ts`): it offers only those
+models, asking each declared parameter from the bounds its content states and checking a stated
+`a < b` constraint, refuses a symbol the deployment has not registered (naming the ones it lists),
+and names each instrument's registered asset id and the model's registered version and content hash
+in the version, so nothing is made up in the browser; a catalogue that cannot be read offers nothing
+and says so; changing a mandate is not sent yet,
 and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
 Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): Approve first asks
@@ -179,7 +197,36 @@ Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): App
 Its Approve then sends the grant with that challenge's evidence, and the screen says what the server answered
 (`step_up_missing` while the host has not confirmed). A code's five minutes are counted from when it
 was shown, never against this device's clock; paper only, and Skip still carries no step-up. The
-mock API stands in for the host's confirmation. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
+mock API stands in for the host's confirmation. Connections lists every connection
+`GET /connections` serves with its state, and the owner connects Alpaca paper trading there (DEC-2623): the
+screen shows the token-breadth disclosure in DEC-2622's version 1 wording, asks for a code of kind
+`connection` bound to that version (DEC-2621 item 4) with the `mandate step-up confirm-connect` line
+(DEC-2125), then sends `POST /connections/oauth/start` and the browser to the authorization page it
+answers, an `https` page only. Alpaca returns the browser to the API's callback, which redirects to
+`/connections/{id}`, read until it settles. Stop-all and Close-all take only an established connection
+as their scope, and the workspace scope when none is. An agent's screen lists its orders, newest first, and the net quantity its own fills hold per
+instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read every five seconds; a
+state the journal has not given is "not reported", a list that cannot be read is never shown as
+empty, and an agent with no account found says so. It also lists the latest 20 records on the
+agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequence, type and time,
+never a body (DEC-2377). Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
+groups the agents by the account their reads name: each agent's own net quantity per instrument, its
+cost basis, risk mark and protection shown as not reported until the API serves them (DEC-2111 item
+5), and the account's holdings at its last reconciliation from the same reads. Audit's Timeline reads the latest 50 records of the control
+stream, each agent's stream and each account stream those reads name (`GET
+/journal/streams/{id}/events`, §4.8.1) every ten seconds, and lists them newest first by type,
+stream, sequence and time, never a body re-told; a stream that cannot be read is named as not
+reported. Gate decisions, alerts and messages are not served yet. Settings › Profile lists the member's
+passkeys on the deployment (`GET /passkeys`) and adds one (§3.6, DEC-2108, `src/api/enrol.ts`): a
+registration challenge, then, when the member already holds a passkey, a `credential_enrol` step-up
+with it bound to `{"op": "enrol", "registration": <challenge_id>}`, then
+`navigator.credentials.create` (the deployment's RP ID and user handle, ES256 or Ed25519, user
+verification required, attestation `none`, the member's passkeys excluded), then `POST /passkeys`
+once; a first passkey must be added within five minutes of signing in and confirms after 24 hours.
+These are the passkeys the confirm, the deploy and an approval ask for, not the sign-in passkeys.
+WebAuthn needs a host name, so try it at `localhost`, never `127.0.0.1`.
+
+Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions
 shown as not reported, never as none. Release is not offered there. `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a

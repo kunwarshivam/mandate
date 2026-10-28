@@ -49,6 +49,8 @@ pub fn secret_name(identity: &Identity) -> Result<String, SourceError> {
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
+        | Identity::NewsReader
+        | Identity::BarsReader
         | Identity::EmailSender
         | Identity::Provisioner => role_name(identity),
     };

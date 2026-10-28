@@ -26,6 +26,8 @@ import {
   type Violation,
   type Watermark,
 } from "./types";
+import { CONNECT_START_ROUTE, type ConnectStartBody, type ConnectStarted, connectStarted } from "./connect";
+import { ENROL_ROUTE, type Enrolled, REGISTRATION_ROUTE, type RegistrationChallenge, enrolled, registrationChallenge } from "./enrol";
 import { type StepUpAction, type StepUpChallenge, sessionPrincipal, stepUpChallenge } from "./step-up";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -91,10 +93,44 @@ export interface WorkspaceClient {
   askChallenge(action: StepUpAction): Promise<ReadOutcome<StepUpChallenge>>;
   /** `GET /v1/me/session` (§4.10, DEC-2113): the session's own principal, outside the workspace prefix. */
   readSession(): Promise<ReadOutcome<{ principal_id: string }>>;
+  /** Fixes the key and body of one connect's start (§4.5, DEC-2623); sending it again is a retry that answers the same start (item 8). */
+  prepareConnect(body: ConnectStartBody): PreparedConnect;
+  /**
+   * Sends a prepared start. It commits `ConnectionRequested`, so an answer that does not say nothing
+   * was recorded is `effect: "unknown"`, never "nothing happened" (API-13).
+   */
+  sendConnect(prepared: PreparedConnect): Promise<ConnectOutcome>;
+  /**
+   * `POST /agents/{id}/go-live` (§4.2): the owner's request to move an agent to real money. Until
+   * counsel signs off it is always refused `live_unavailable`, and while the workspace's real-money
+   * gate is off the refusal is journaled first (DEC-2134). An answer that is not a refusal is
+   * reported as unknown, never as live.
+   */
+  askRealMoney(agentId: string): Promise<GoLiveOutcome>;
+  /** `POST /passkeys/registration-challenges` (§3.6): a registration challenge under a key of its own; it records nothing. */
+  askRegistration(): Promise<ReadOutcome<RegistrationChallenge>>;
+  /**
+   * `POST /passkeys` (§3.6): the made credential. It commits `CredentialEnrolled`, so a lost answer is
+   * `effect: "unknown"`, and the screen reads the member's passkeys again rather than send it twice.
+   */
+  enrolPasskey(body: JsonObject): Promise<ReadOutcome<Enrolled>>;
 }
+
+/** What a go-live request came to: always a refusal, or an answer the client could not read. */
+export type GoLiveOutcome = { ok: false; error: ApiError };
+
+/** One connect's start: its key and body, fixed when prepared. */
+export interface PreparedConnect {
+  readonly idempotency_key: string;
+  readonly body: string;
+}
+
+export type ConnectOutcome = { ok: true; value: ConnectStarted } | { ok: false; error: ApiError };
 
 /** The step-up challenge route under the workspace (§3.6). It is not a command: it records nothing. */
 export const STEP_UP_CHALLENGE_ROUTE = "/step-up/challenges";
+/** The owner's request to move an agent to real money (§4.2, DEC-2134). */
+const GO_LIVE_ROUTE = "/agents/{agent}/go-live";
 /** One's own session (§4.10). */
 export const SESSION_ROUTE = "/v1/me/session";
 
@@ -111,6 +147,7 @@ export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
   end_delegation: "/agents/{agent}/delegations/{delegation}/end",
   confirm_version: "/mandate-versions/{version}/confirm",
   create_version: "/mandate-versions",
+  deploy: "/agents",
 };
 
 /** Spec §3.3's CSRF defence (L2's pin, DEC-681): a header a cross-site form cannot set, on every command. */
@@ -247,17 +284,17 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
   }
 
   /** A read's answer, or one of a call that records nothing: every failure is `effect: "none"`. */
-  async function answered<T>(call: () => Promise<Response>, decoder: Decoder<T>): Promise<ReadOutcome<T>> {
+  async function answered<T>(call: () => Promise<Response>, decoder: Decoder<T>, lost: Effect = "none"): Promise<ReadOutcome<T>> {
     let response: Response;
     try {
       response = await call();
     } catch {
-      return { ok: false, error: networkError("none") };
+      return { ok: false, error: networkError(lost) };
     }
     const body = await parseBody(response);
     if (!response.ok) {
       const doc = decodeProblem(body);
-      const error = doc ? problemError(response.status, doc, "none") : invalidResponse(response.status, "none", UNREADABLE, null);
+      const error = doc ? problemError(response.status, doc, lost) : invalidResponse(response.status, lost, UNREADABLE, null);
       noteAuth(error);
       return { ok: false, error };
     }
@@ -267,9 +304,9 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     } catch {
       head = { ok: false, issue: UNREADABLE };
     }
-    if (!head.ok) return { ok: false, error: invalidResponse(response.status, "none", head.issue, null) };
+    if (!head.ok) return { ok: false, error: invalidResponse(response.status, lost, head.issue, null) };
     const value = decoder(body, "");
-    if (!value.ok) return { ok: false, error: invalidResponse(response.status, "none", value.issue, null) };
+    if (!value.ok) return { ok: false, error: invalidResponse(response.status, lost, value.issue, null) };
     return { ok: true, value: value.value, as_of: head.value.as_of, api_version: head.value.api_version };
   }
 
@@ -323,7 +360,67 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     return answered(() => fetch(baseUrl + path(STEP_UP_CHALLENGE_ROUTE), { method: "POST", credentials, headers, body }), stepUpChallenge(action));
   }
 
+  /** A POST of `body` under a fresh key with the CSRF mark, answered as `decoder` reads it. */
+  function posted<T>(route: `/${string}`, body: JsonObject, decoder: Decoder<T>, lost: Effect): Promise<ReadOutcome<T>> {
+    const key = newKey();
+    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
+    const headers = { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": key, [CSRF_HEADER]: "1" };
+    return answered(() => fetch(baseUrl + path(route), { method: "POST", credentials, headers, body: JSON.stringify(body) }), decoder, lost);
+  }
+  const askRegistration = () => posted(REGISTRATION_ROUTE, {}, registrationChallenge, "none");
+  const enrolPasskey = (body: JsonObject) => posted(ENROL_ROUTE, body, enrolled, "unknown");
+
   const readSession = () => answered(() => fetch(baseUrl + SESSION_ROUTE, { method: "GET", credentials, headers: { Accept: "application/json" } }), sessionPrincipal);
 
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession });
+  function prepareConnect(body: ConnectStartBody): PreparedConnect {
+    const key = newKey();
+    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
+    return Object.freeze({ idempotency_key: key, body: JSON.stringify(body) });
+  }
+
+  async function sendConnect(prepared: PreparedConnect): Promise<ConnectOutcome> {
+    let response: Response;
+    try {
+      response = await fetch(baseUrl + path(CONNECT_START_ROUTE), {
+        method: "POST",
+        credentials,
+        headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": prepared.idempotency_key, [CSRF_HEADER]: "1" },
+        body: prepared.body,
+      });
+    } catch {
+      return { ok: false, error: networkError("unknown") };
+    }
+    const body = await parseBody(response);
+    if (!response.ok) {
+      const doc = decodeProblem(body);
+      const error = doc ? problemError(response.status, doc, "unknown") : invalidResponse(response.status, "unknown", UNREADABLE, null);
+      noteAuth(error);
+      return { ok: false, error };
+    }
+    const started = connectStarted(body, "");
+    return started.ok ? { ok: true, value: started.value } : { ok: false, error: invalidResponse(response.status, "unknown", started.issue, null) };
+  }
+
+  async function askRealMoney(agentId: string): Promise<GoLiveOutcome> {
+    const key = newKey();
+    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
+    let response: Response;
+    try {
+      response = await fetch(baseUrl + path(fillRoute(GO_LIVE_ROUTE, { agent: agentId })), {
+        method: "POST",
+        credentials,
+        headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": key, [CSRF_HEADER]: "1" },
+        body: "{}",
+      });
+    } catch {
+      return { ok: false, error: networkError("unknown") };
+    }
+    const body = await parseBody(response);
+    const doc = response.ok ? null : decodeProblem(body);
+    const error = doc ? problemError(response.status, doc, "unknown") : invalidResponse(response.status, "unknown", UNREADABLE, null);
+    noteAuth(error);
+    return { ok: false, error };
+  }
+
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect, askRealMoney, askRegistration, enrolPasskey });
 }

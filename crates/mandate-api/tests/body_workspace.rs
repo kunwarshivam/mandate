@@ -135,7 +135,8 @@ const DECODERS: [(&str, Judge); 16] = [
 /// changes, this list naming its stem, then its schema, then its type and decoder row, which
 /// empties the list again. A listed stem has no request type and no row, and may not stay listed
 /// once its type lands.
-const SCHEMA_AHEAD_OF_TYPE: [&str; 4] = [
+const SCHEMA_AHEAD_OF_TYPE: [&str; 5] = [
+    "acknowledgment-request-request",
     "passkey-enrol-request",
     "passkey-registration-challenge-request",
     "reduction-session-challenge-request",

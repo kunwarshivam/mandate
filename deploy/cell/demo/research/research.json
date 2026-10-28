@@ -8,6 +8,7 @@
  },
  "caps": {
   "deployment_usd": "20",
+  "run_usd": "1.5",
   "workspace_monthly_usd": "50"
  },
  "endpoint": {
@@ -22,6 +23,7 @@
   "upstream": "recorded"
  },
  "entry": {
+  "agentic": "v0_2",
   "deadline_ms": 120000,
   "max_output_tokens": 4096,
   "model_id": "llm.research_agent",
@@ -32,11 +34,62 @@
   "snapshot": "recorded-demo-2026-10-19"
  },
  "halted_instruments": [],
+ "monitor_reply": {
+  "cached_tokens": 0,
+  "input_tokens": 900,
+  "latency_ms": 0,
+  "output": "{\"invalidations\":[{\"thesis_id\":\"$THESIS_ID\",\"evidence\":[\"nw-spy-outflows\"]}]}",
+  "output_tokens": 40
+ },
  "reply": {
   "cached_tokens": 0,
   "input_tokens": 1800,
   "latency_ms": 0,
   "output": "{\"theses\":[{\"instrument\":\"SPY\",\"direction\":\"long\",\"conviction\":\"0.6\",\"confidence\":\"0.6\",\"horizon_s\":432000,\"thesis\":\"A week of index fund inflows and steady business activity point to continued demand over the next week.\",\"invalidation\":\"Inflows reverse, or business activity falls.\",\"evidence\":[\"nw-spy-inflows\",\"w2-spy-survey\"]}],\"invalidations\":[]}",
   "output_tokens": 220
- }
+ },
+ "turns": [
+  {
+   "cached_tokens": 0,
+   "calls": [
+    {
+     "arguments": {
+      "count": 5,
+      "symbol": "SPY"
+     },
+     "name": "market.bars"
+    },
+    {
+     "arguments": {
+      "limit": 5,
+      "symbols": [
+       "SPY"
+      ],
+      "terms": [
+       "inflows"
+      ],
+      "window_h": 48
+     },
+     "name": "news.search"
+    }
+   ],
+   "input_tokens": 1200,
+   "latency_ms": 0,
+   "output_tokens": 60
+  },
+  {
+   "cached_tokens": 0,
+   "calls": [
+    {
+     "arguments": {
+      "text": "index fund inflows and a level business survey both point to steady demand"
+     },
+     "name": "note"
+    }
+   ],
+   "input_tokens": 1600,
+   "latency_ms": 0,
+   "output_tokens": 40
+  }
+ ]
 }

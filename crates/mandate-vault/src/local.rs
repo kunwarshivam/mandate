@@ -72,8 +72,11 @@ pub struct LocalSource {
 impl LocalSource {
     /// A session as `identity` over `vault`, which must be in the role the identity runs as:
     /// the API's for [`Identity::Api`] and [`Identity::ConnectionManager`], the executor's for
-    /// an executor and the secret import, and none for a runtime. Any other pairing, and the
-    /// token exchange, which is opened with [`LocalSource::with_grant`], is
+    /// an executor, the secret import, and the readers of the platform's own secrets (the model
+    /// gateway, the news reader and the email sender, DEC-2020 item 4, DEC-2277), and none for a
+    /// runtime. On the demo host the filesystem does not separate those readers from the
+    /// executor's entries; the table [`crate::policy::allows`] checks before every read does. Any
+    /// other pairing, and the token exchange, which is opened with [`LocalSource::with_grant`], is
     /// [`SourceError::Config`].
     pub fn new(
         identity: Identity,
@@ -87,6 +90,8 @@ impl LocalSource {
                 Identity::Executor(_)
                 | Identity::SecretImport
                 | Identity::ModelGateway
+                | Identity::NewsReader
+                | Identity::BarsReader
                 | Identity::EmailSender,
                 Some(Opened::Executor(v)),
             ) => Held::Executor(v),

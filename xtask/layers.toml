@@ -144,6 +144,7 @@ agent_process = [
     "mandate-mcp",
     "mandate-paper",
     "mandate-robinhood",
+    "mandate-runtime-models",
     "mandate-shell",
 ]
 
@@ -561,7 +562,7 @@ forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "man
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "thiserror"]
+allowed_external = ["secrecy", "thiserror", "tokio"]
 forbidden_internal = ["mandate-spec", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-mcp", "mandate-paper", "mandate-cli"]
 
 [crates.mandate-marketdata]
@@ -630,6 +631,15 @@ forbidden_internal = ["mandate-alpaca", "mandate-paper", "mandate-shell"]
 
 [crates.mandate-executor]
 layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+# The binding gate's reviewed inputs (DEC-2380 item 5): the rule set, the fee schedule and the
+# mandate's limits, moved out of mandate-shell so the executor process reads them through the same
+# functions without reaching the shell. Above mandate-executor, whose configuration it parses.
+[crates.mandate-gate-inputs]
+layer = 7
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
@@ -722,6 +732,15 @@ pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-daemon", "mandate-journal-pg"]
 
+# The stored market bars a decision may rest on (DEC-2385): the trust check on a daily-bar dataset,
+# moved from the shell so the shell, the runner, the runtime process and the executor read one rule.
+# Below all of them, over mandate-marketdata's dataset; it reads files and decides nothing else.
+[crates.mandate-bars]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["thiserror"]
+
 [crates.mandate-shell]
 layer = 8
 safety_critical = true
@@ -774,11 +793,25 @@ pure = false
 allowed_external = ["tokio"]
 
 # The agent runtime as a long-running process (E21-30, DEC-1012): one deployment's runtime core
-# over mandate-store, with mandate-process's lifecycle and probes; tokio for the SIGTERM listener.
+# over mandate-store, with mandate-process's lifecycle and probes; its binary, with tokio for the
+# SIGTERM listener, is mandate-runtime-models's (DEC-2383 item 7).
 # Its forbidden_internal list is what makes "the runtime has no route to a broker" hold by
 # construction: it can never reach the shell, the executor, a connector, the runner, or the CLI.
 [crates.mandate-daemon]
 layer = 8
+safety_critical = true
+pure = false
+allowed_external = []
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
+
+# The runtime's model composer and its process binary (DEC-2383 item 7, DEC-503 item 2; the
+# founder's call, 2026-10-26): mandate-modelhost behind mandate-daemon's Models port, as
+# mandate-paper composes the host, above both so the daemon never runs a model and the host never
+# reaches the journal. The `mandate-daemon` binary lives here because it links the composer, which
+# depends on the daemon's library. It keeps the daemon's forbidden list, so the runtime still has
+# no route to a broker.
+[crates.mandate-runtime-models]
+layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["tokio"]
@@ -786,8 +819,10 @@ forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "ma
 
 # The account executor as a long-running process (E21-30, DEC-2003): one account's executor core
 # over mandate-store, with mandate-process's lifecycle and probes. It reads the runtime only through
-# the journal, so it may never reach the runtime's process, the shell, the paper runner, the MCP
-# client, the CLI, or the broker simulator; its broker is a port, and no host is named here. It is
+# the journal, so it may never reach the runtime's process, the shell, the paper runner, the CLI,
+# or the broker simulator; its broker is a port, and no host is named here. It may carry the
+# Robinhood connector and its MCP client's types (DEC-2386 item 1, DEC-2382), which name no host:
+# the pinned host lives only behind the runner's `live` feature, and the executor has none. It is
 # the process that leases its connection's credential from mandate-vault (DEC-2306 item 2), which
 # is why it sits above it; the connector crates never take the vault.
 [crates.mandate-executord]
@@ -795,7 +830,7 @@ layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["secrecy", "tokio"]
-forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
+forbidden_internal = ["mandate-daemon", "mandate-runtime-models", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
 
 # The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
 # the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
@@ -918,6 +953,23 @@ safety_critical = true
 pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime"]
+
+# The workspace data process in the local cell (E21-29 lane SC): the deployed instrument's daily
+# bars from the cell's recorded series, stored as mandate-marketdata's dataset under the artifact
+# store, with mandate-process's lifecycle and probes. tokio drives the SIGTERM listener alone. It
+# appends to no journal stream and may never reach the runner, the shell, the CLI, any broker
+# connector, the executor or the runtime: it places nothing. Its hosted IEX source (DEC-2283,
+# superseding DEC-2385 item 3 for that source) reads the control stream through mandate-journal-pg
+# and the platform data key through mandate-vault (secrecy holds it), so it sits at layer 10, above
+# both, as mandate-provisionerd does; tokio also drives the batched fetch. PgJournal can append, so
+# what keeps the process to reading is its read-only database role (DEC-2283 item 3), which its
+# DSN must name.
+[crates.mandate-datad]
+layer = 10
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "thiserror", "tokio"]
+forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime", "mandate-store"]
 
 # The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
 # output to the shell's production cycle and decides nothing itself. It is the runner: the only

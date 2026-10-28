@@ -11,9 +11,10 @@ use crate::ports::{IdGen, Ports};
 use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
     Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
-    ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode,
-    ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose, RiskClock,
-    Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
+    ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope,
+    LiquidityRead, MandateView, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation,
+    Proposal, Purpose, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest,
+    WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -87,22 +88,10 @@ fn retried(
             "IntentProposed" => Some(payload::order_of(&draft.payload)?),
             "OwnerExitRequested" => {
                 let confirmation = payload::honoured_confirmation(&draft.payload)?;
-                match payload::str_of(&draft.payload, "scope") {
-                    Some("instrument") => {
-                        let subject = payload::str_of(&draft.payload, "subject")
-                            .ok_or_else(|| payload::non_canonical("subject"))?;
-                        Some(IntentBody::Flatten(escalation::exit_plan(
-                            state,
-                            payload::instrument_of(subject)?,
-                            confirmation,
-                            ports,
-                        )))
-                    }
-                    _ => {
-                        shown = confirmation;
-                        None
-                    }
+                if payload::str_of(&draft.payload, "scope") != Some("instrument") {
+                    shown = confirmation;
                 }
+                None
             }
             "KillSwitchActivated" => {
                 let initiator = payload::str_of(&draft.payload, "initiator")
@@ -239,20 +228,6 @@ fn started(
             )),
             execution: None,
         });
-    }
-    for (exit, owner) in state.untaken_owner_exits() {
-        if state.permits_rehand(Purpose::Flatten) {
-            batch.hand(IntentHandoff {
-                intent_id: exit.clone(),
-                body: IntentBody::Flatten(escalation::exit_plan(
-                    state,
-                    owner.instrument.clone(),
-                    owner.confirmation.clone(),
-                    ports,
-                )),
-                execution: None,
-            });
-        }
     }
     for (approval, pending) in state.pending_approvals() {
         batch.timer(TimerRequest::Arm {
@@ -507,9 +482,11 @@ fn expire(state: &RuntimeState, now: RiskClock, batch: &mut Batch<'_>) -> Result
     Ok(())
 }
 
-/// One evaluation (tick step 5). The order builder proposes, the mode and the mandate's instrument
-/// restrictions may narrow the proposal away, the gate's **dry run** may narrow it away again, and
-/// only then is a decision journaled and either proposed, asked, or refused. A dry-run allow
+/// One evaluation (tick step 5). The order builder proposes, the mode, the mandate's instrument
+/// restrictions and an opening of this runtime's still working in the instrument (trading spec
+/// §5.3 rule 6, DEC-2843) may narrow the proposal away with nothing journaled, the gate's **dry
+/// run** may narrow it away again, and only then is a decision journaled and either proposed,
+/// asked, or refused. A dry-run allow
 /// authorises nothing: the binding gate runs on the account stream (`AGENTS.md` rules 1 and 12).
 fn decide(
     state: &RuntimeState,
@@ -535,31 +512,123 @@ fn decide(
     {
         return Ok(());
     }
+    if proposal.purpose.adds_risk() && state.opening_works_in(&proposal.instrument) {
+        return Ok(());
+    }
     let verdict = dry_run(state, ports, &proposal, now);
-    let classified = ports.plan.classify(ports.view, &proposal);
+    let classified = overlaid(ports.plan.classify(ports.view, &proposal), &verdict);
+    let (verdict, then) = next(state, &proposal, verdict, &classified, now, ports.view);
     let decision = batch.journal(
         "DecisionMade",
         None,
         decided(&proposal, &inputs, &verdict, &classified)?,
     )?;
     match &verdict {
-        DryRunVerdict::Deny { .. } => {
+        DryRunVerdict::Deny { .. } | DryRunVerdict::DenyOnFigures { .. } => {
             batch.notify(NotificationRef {
                 subject_event: decision,
-                message_key: "decision_skipped",
+                kind: RuntimeAlert::DecisionSkipped,
             });
             Ok(())
         }
-        DryRunVerdict::Allow => allowed(state, &proposal, &classified, now, ports, decision, batch),
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
+            allowed(&proposal, then, ports, decision, batch)
+        }
     }
+}
+
+/// The policy overlay's label (mandate spec §6.2 step 5c), which a decision the overlay changed
+/// carries.
+const POLICY_OVERLAY: &str = "policy_overlay";
+
+/// `classified`, unless the dry run deferred a check: then an `auto` becomes an `ask` labelled
+/// `policy_overlay`, so an opening whose checks the dry run could not all see is never proposed
+/// without the owner (DEC-2378 item 11 condition 4, DEC-2388 item 12). An `ask` or a `deny` keeps
+/// its own label. [`settled`] leaves a deferral only on an opening or an increase, so no exit is
+/// ever asked (`AGENTS.md` rule 13).
+pub(crate) fn overlaid(classified: Classified, verdict: &DryRunVerdict) -> Classified {
+    match (verdict, classified.autonomy) {
+        (DryRunVerdict::AllowDeferring { .. }, Autonomy::Auto) => Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some(POLICY_OVERLAY.to_owned()),
+        },
+        _ => classified,
+    }
+}
+
+/// The gate's `verdict` as the journal can record it for a proposal of `purpose` (journal spec
+/// v0.85 rules 269 and 270): an exit defers nothing and carries no figures, so a deferring allow
+/// of one is an allow and a denial on figures a denial; and an allow that left nothing to the
+/// binding gate, having evaluated both liquidity checks on its figures, is an allow, written at
+/// version 1 as any other.
+fn settled(verdict: DryRunVerdict, purpose: Purpose) -> DryRunVerdict {
+    match verdict {
+        DryRunVerdict::AllowDeferring { .. } if !purpose.adds_risk() => DryRunVerdict::Allow,
+        DryRunVerdict::DenyOnFigures { reason_code, .. } if !purpose.adds_risk() => {
+            DryRunVerdict::Deny { reason_code }
+        }
+        DryRunVerdict::AllowDeferring {
+            deferred,
+            liquidity: Some(_),
+        } if deferred.is_empty() => DryRunVerdict::Allow,
+        verdict => verdict,
+    }
+}
+
+/// The names `deferred_to_binding` carries for `verdict`, in byte order (rule 269): its deferrals,
+/// and the liquidity floor and participation when no figures were evaluated (rule 270).
+fn deferred_names(verdict: &DryRunVerdict) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = match verdict {
+        DryRunVerdict::AllowDeferring {
+            deferred,
+            liquidity,
+        } => deferred
+            .iter()
+            .map(|deferral| deferral.name())
+            .chain(
+                liquidity
+                    .is_none()
+                    .then_some(["liquidity_floor", "participation"])
+                    .into_iter()
+                    .flatten(),
+            )
+            .collect(),
+        DryRunVerdict::Allow | DryRunVerdict::Deny { .. } | DryRunVerdict::DenyOnFigures { .. } => {
+            Vec::new()
+        }
+    };
+    names.sort_by_key(|name| name.as_bytes());
+    names.dedup();
+    names
+}
+
+/// Version 3's `liquidity`: the four figures as decimals and the clock they were read at.
+fn liquidity_value(read: &LiquidityRead) -> Result<Value, RuntimeError> {
+    payload::object(vec![
+        ("prior_close", payload::text(&read.prior_close.to_string())),
+        (
+            "median_dollar_volume_20d",
+            payload::text(&read.median_dollar_volume_20d.to_string()),
+        ),
+        ("adv_20d", payload::text(&read.adv_20d.to_string())),
+        (
+            "trailing_5m_volume",
+            payload::text(&read.trailing_5m_volume.to_string()),
+        ),
+        ("read_at", payload::text(&read.read_at.to_string())),
+    ])
 }
 
 /// The dry run of one proposal at `now`. An opening or increase the connection's checks do not
 /// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
 /// denies one on a connection that is not usable, and one in an instrument where an opening this
 /// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
-/// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
-/// judge (`AGENTS.md` rule 13, DEC-969 item 4).
+/// DEC-1150 item 5), which only a grant's re-validation reaches, since an evaluation is not
+/// taken then (DEC-2843); every other proposal, and every exit whatever either says, is the gate's to
+/// judge (`AGENTS.md` rule 13, DEC-969 item 4). An opening the gate allows with checks deferred but
+/// for which the builder produced no plan is denied `plan_required`: no approval request can both
+/// bind no plan and name the deferrals, so it is refused, journaled and notified rather than left
+/// unasked (DEC-2810).
 pub(crate) fn dry_run(
     state: &RuntimeState,
     ports: &Ports<'_>,
@@ -576,34 +645,81 @@ pub(crate) fn dry_run(
             reason_code: payload::WORKING_ORDER_LIMIT.to_owned(),
         };
     }
-    ports.gate.check(proposal)
+    match settled(ports.gate.check(proposal), proposal.purpose) {
+        DryRunVerdict::AllowDeferring { .. } if proposal.execution.is_none() => {
+            DryRunVerdict::Deny {
+                reason_code: payload::PLAN_REQUIRED.to_owned(),
+            }
+        }
+        verdict => verdict,
+    }
 }
 
-/// What the autonomy classification does with a proposal the dry run allowed (mandate spec §6):
-/// AUTO proposes and hands off, ASK requests an approval and arms its deadline, DENY records the
-/// refusal the `DecisionMade` already carries and stops there. An ASK of a purpose that adds no risk
-/// is proposed as AUTO is, because reducing risk never needs approval and an exit is never asked
-/// (`AGENTS.md` rules 2 and 13, DEC-278 item 1).
-fn allowed(
+/// What an allowed decision does next (mandate spec §6): ask with the request built in full,
+/// propose and hand off, or nothing, the refusal its `DecisionMade` already records.
+pub(crate) enum Next {
+    Ask(Box<escalation::Prepared>),
+    Propose,
+    Nothing,
+}
+
+/// The dry run's `verdict` and what follows it under `classified` (mandate spec §6):
+/// - an allowed opening or increase classified `ask` is asked with its request built in full
+///   before its decision is journaled, or, when the request cannot be built, the verdict becomes
+///   the dry run's denial with the reason, which the decision records and notifies (DEC-2814);
+/// - an `auto`, or an `ask` of a purpose that adds no risk, is proposed, because reducing risk never
+///   needs approval and an exit is never asked (`AGENTS.md` rules 2 and 13, DEC-278 item 1);
+/// - a `deny`, or any denied verdict, does nothing more.
+fn next(
     state: &RuntimeState,
     proposal: &Proposal,
+    verdict: DryRunVerdict,
     classified: &Classified,
     now: RiskClock,
+    view: &MandateView,
+) -> (DryRunVerdict, Next) {
+    if !matches!(
+        verdict,
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. }
+    ) {
+        return (verdict, Next::Nothing);
+    }
+    match classified.autonomy {
+        Autonomy::Ask if proposal.purpose.adds_risk() => match escalation::prepared(
+            state,
+            proposal,
+            classified.decided_by.as_deref(),
+            &deferred_names(&verdict),
+            now,
+            view,
+        ) {
+            Ok(prepared) => (verdict, Next::Ask(Box::new(prepared))),
+            Err(reason_code) => (
+                DryRunVerdict::Deny {
+                    reason_code: reason_code.to_owned(),
+                },
+                Next::Nothing,
+            ),
+        },
+        Autonomy::Auto | Autonomy::Ask => (verdict, Next::Propose),
+        Autonomy::Deny => (verdict, Next::Nothing),
+    }
+}
+
+/// Carries out an allowed decision's [`Next`]: the ASK's request, its delivery, deadline and
+/// notification; or the proposal's `IntentProposed` and hand-off; or nothing.
+fn allowed(
+    proposal: &Proposal,
+    next: Next,
     ports: &Ports<'_>,
     decision: EventId,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
-    match classified.autonomy {
-        Autonomy::Ask if proposal.purpose.adds_risk() => escalation::ask(
-            state,
-            proposal,
-            classified.decided_by.as_deref(),
-            now,
-            ports,
-            decision,
-            batch,
-        ),
-        Autonomy::Auto | Autonomy::Ask => {
+    match next {
+        Next::Ask(prepared) => {
+            escalation::ask(*prepared, ports.view.approval.timeout_s, decision, batch)
+        }
+        Next::Propose => {
             let intent = batch.journal("IntentProposed", Some(decision), proposed(proposal)?)?;
             batch.hand(IntentHandoff {
                 intent_id: intent,
@@ -611,14 +727,14 @@ fn allowed(
                     instrument: proposal.instrument.clone(),
                     side: proposal.side,
                     qty: proposal.qty,
-                    limit: proposal.limit,
+                    limit: Some(proposal.limit),
                     purpose: proposal.purpose,
                 },
                 execution: proposal.execution,
             });
             Ok(())
         }
-        Autonomy::Deny => Ok(()),
+        Next::Nothing => Ok(()),
     }
 }
 
@@ -657,24 +773,32 @@ fn decided(
     classified: &Classified,
 ) -> Result<Value, RuntimeError> {
     let (dry_run, reason_code) = match verdict {
-        DryRunVerdict::Allow => ("allow", Value::Null),
-        DryRunVerdict::Deny { reason_code } => ("deny", payload::text(reason_code)),
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => ("allow", Value::Null),
+        DryRunVerdict::Deny { reason_code } | DryRunVerdict::DenyOnFigures { reason_code, .. } => {
+            ("deny", payload::text(reason_code))
+        }
     };
+    let allowed = matches!(
+        verdict,
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. }
+    );
     let classification = match classified.autonomy {
         Autonomy::Auto => "auto",
         Autonomy::Ask => "ask",
         Autonomy::Deny => "deny",
     };
-    let classified_value = match verdict {
-        DryRunVerdict::Allow => payload::text(classification),
-        DryRunVerdict::Deny { .. } => Value::Null,
+    let classified_value = if allowed {
+        payload::text(classification)
+    } else {
+        Value::Null
     };
-    let decided_by = match verdict {
-        DryRunVerdict::Allow => classified
+    let decided_by = if allowed {
+        classified
             .decided_by
             .as_deref()
-            .map_or(Value::Null, payload::text),
-        DryRunVerdict::Deny { .. } => Value::Null,
+            .map_or(Value::Null, payload::text)
+    } else {
+        Value::Null
     };
     let outputs_used = proposal
         .outputs_used
@@ -684,10 +808,15 @@ fn decided(
                 .output_events
                 .get(model)
                 .and_then(|by_instrument| by_instrument.get(&proposal.instrument))
-                .map(|event| payload::text(&event.0))
+                .map(|event| event.0.clone())
                 .ok_or_else(|| payload::non_canonical("outputs_used"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let outputs_used = strictly_ascending(outputs_used)
+        .ok_or_else(|| payload::non_canonical("outputs_used"))?
+        .iter()
+        .map(|event| payload::text(event))
+        .collect::<Vec<_>>();
     let model_weights = proposal
         .model_weights
         .iter()
@@ -695,7 +824,7 @@ fn decided(
             payload::object(vec![("key", payload::text(key)), ("value", value.clone())])
         })
         .collect::<Result<Vec<_>, _>>()?;
-    payload::object(vec![
+    let body = payload::object(vec![
         ("instrument_id", payload::text(proposal.instrument.as_str())),
         ("side", payload::text(payload::side_name(proposal.side))),
         ("type", payload::text("limit")),
@@ -741,7 +870,36 @@ fn decided(
         ("delegation_id", Value::Null),
         ("requested_by", payload::text("agent")),
         ("client_id", Value::Null),
-    ])
+    ])?;
+    let read = match verdict {
+        DryRunVerdict::AllowDeferring { liquidity, .. } => liquidity.as_ref(),
+        DryRunVerdict::DenyOnFigures { liquidity, .. } => Some(liquidity),
+        DryRunVerdict::Allow | DryRunVerdict::Deny { .. } => None,
+    };
+    let version_3 = match verdict {
+        DryRunVerdict::AllowDeferring { .. } | DryRunVerdict::DenyOnFigures { .. } => true,
+        DryRunVerdict::Allow | DryRunVerdict::Deny { .. } => false,
+    };
+    if !version_3 {
+        return Ok(body);
+    }
+    let Value::Object(mut members) = body else {
+        return Err(payload::non_canonical("payload"));
+    };
+    let deferred = Value::Array(
+        deferred_names(verdict)
+            .into_iter()
+            .map(payload::text)
+            .collect(),
+    );
+    let liquidity = read.map_or(Ok(Value::Null), liquidity_value)?;
+    for (name, value) in [("deferred_to_binding", deferred), ("liquidity", liquidity)] {
+        members.insert(
+            mandate_canon::Key::new(name).map_err(|_| payload::non_canonical(name))?,
+            value,
+        );
+    }
+    Ok(Value::Object(members))
 }
 
 fn tif_of(proposal: &Proposal) -> TimeInForce {
@@ -754,7 +912,7 @@ fn tif_of(proposal: &Proposal) -> TimeInForce {
     )
 }
 
-fn tif_name(tif: TimeInForce) -> &'static str {
+pub(crate) fn tif_name(tif: TimeInForce) -> &'static str {
     match tif {
         TimeInForce::Day => "day",
         TimeInForce::Gtc => "gtc",
@@ -957,13 +1115,23 @@ impl<'a> Batch<'a> {
     }
 }
 
+/// `ids` sorted ascending by bytes, as journal spec rule 9 lists a decision's `outputs_used`, or
+/// `None` when two are the same: one output event cited for two models would hide a model the
+/// decision rests on, so it is refused rather than listed once.
+fn strictly_ascending(mut ids: Vec<String>) -> Option<Vec<String>> {
+    ids.sort_unstable();
+    ids.windows(2)
+        .all(|pair| matches!(pair, [earlier, later] if earlier < later))
+        .then_some(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use mandate_accounting::InstrumentId;
     use mandate_canon::{Digest, Value};
     use mandate_num::{Conviction, Unit};
 
-    use super::{clip_name, exit_origin_name, modelled};
+    use super::{clip_name, exit_origin_name, modelled, strictly_ascending};
     use crate::payload::model_output_of;
     use crate::{
         DecisionClip, EventId, ExitOrigin, ModelDirection, ModelOutput, ModelOutputIgnored,
@@ -1112,5 +1280,17 @@ mod tests {
         assert_eq!(clip_name(DecisionClip::TargetQty), "target_qty");
         assert_eq!(clip_name(DecisionClip::MaxSpendUsd), "max_spend_usd");
         assert_eq!(clip_name(DecisionClip::MaxAvgPrice), "max_avg_price");
+    }
+
+    #[test]
+    fn outputs_used_lists_ids_ascending_and_refuses_one_cited_twice() {
+        let ids = |list: &[&str]| list.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            strictly_ascending(ids(&["01B", "01A", "01C"])),
+            Some(ids(&["01A", "01B", "01C"]))
+        );
+        assert_eq!(strictly_ascending(ids(&["01A", "01B", "01A"])), None);
+        assert_eq!(strictly_ascending(ids(&["01A"])), Some(ids(&["01A"])));
+        assert_eq!(strictly_ascending(Vec::new()), Some(Vec::new()));
     }
 }

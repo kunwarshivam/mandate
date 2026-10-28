@@ -401,3 +401,177 @@ The log names the confirmation it appended, or the one it had already appended i
 again. A Job that fails leaves the challenge unconfirmed and adds nothing; the challenge expires on
 its own. The code is short-lived, but it is still not for chat or an
 issue.
+
+## K. The OpenRouter key, for research with a real model ([DEC-997](../docs/project/decisions/DEC-997.md), [DEC-2116](../docs/project/decisions/DEC-2116.md), [DEC-2396](../docs/project/decisions/DEC-2396.md))
+
+Research calls a real model only through staging's model-gateway service, which reads the
+OpenRouter key once from the vault, at `platform/model-provider-key`, and from nowhere else
+(DEC-2020, DEC-2257). No agent asks for the key, sees it or handles it. This step is yours alone.
+
+You chose the models with [DEC-2282](../docs/project/decisions/DEC-2282.md). The gateway's live
+start reads the key and serves the vetted entries, but offers none of them until its §4.3 gate
+has passed ([DEC-2216](../docs/project/decisions/DEC-2216.md)). So a key in the vault spends
+nothing until IAC runs the gate, which costs at most $7.56 for both models.
+
+1. In OpenRouter, create an API key for this purpose alone. In its settings, set the key's own
+   credit limit to the monthly cap you accepted ($50, DEC-997), with a **monthly** reset (a limit
+   with no reset is a lifetime limit), so the provider refuses past it even if the platform's meter
+   were wrong. In your account's privacy settings, turn on **Zero
+   Data Retention** only, and turn off training on your prompts.
+2. **The key** goes in one place: GitHub, repository **Settings → Environments → `infra-staging`
+   → Environment secrets → Add secret**, name `OPENROUTER_API_KEY`. Paste it there only, never
+   into a terminal, a chat, an issue or a file.
+   - The next staging `apply` reads it, masked at once.
+   - It writes it to the staging vault at `platform/model-provider-key`, on the standard input of
+     `mandate vault put model-provider-key`, through the secret-import identity.
+   - Only the model-gateway service can read it there.
+   - The run prints `model provider key: written`. Until you add it, it prints `not set` and
+     changes nothing.
+3. Dispatch `infra` with `apply` on `staging`.
+4. **To rotate it**, replace the environment secret and run `apply` again, then restart the
+   model gateway so it reads the new key (it reads the key once, at start, DEC-2257 item 3):
+   `kubectl rollout restart deployment/model-gateway -n ws-ws1`. Revoke the old key in OpenRouter
+   only after the restart. **To stop all model spend at once**, revoke the key in OpenRouter: every
+   call then ends `credential_invalid`, the safe default, with no output, so no proposal and no
+   order.
+
+## L. Does Alpaca's free data plan carry halts? (trading spec §4.4, [DEC-2380](../docs/project/decisions/DEC-2380.md) item 2)
+
+The executor's binding gate holds every Alpaca paper opening while the instrument's halt status is
+unread (`crates/mandate-executord/src/gate.rs`, `DeployedGate::input`): no halt is ever assumed
+absent (`AGENTS.md` rule 3). The fixture broker is unaffected.
+Alpaca's stock stream has `statuses` and `lulds` channels, but its documentation does not say
+whether the free `iex` feed carries them. One run of a probe tells, and an agent builds the status
+reader only if it does.
+
+1. Close any other Alpaca market-data stream on the key first: the free plan allows one
+   connection.
+2. On your own machine, with your Alpaca **paper** key (never a live one) in the environment, run
+   once from the repository root:
+
+   ```bash
+   APCA_API_KEY_ID=... APCA_API_SECRET_KEY=... \
+     uv run --no-project --with 'websockets==15.0.1' python scripts/alpaca-status-probe.py
+   ```
+
+   It connects only to Alpaca's market-data stream, places no order, and prints only what the stream
+   answered to the sign-in and the subscription, then the message types that arrived in 20 seconds:
+   types, codes and channel names, never the key, the secret, a price or a time. `websockets` is
+   fetched for this run only and added to no project. Its last line is one of:
+   - `result: subscription confirmed for statuses and lulds, delivery observed (...)`;
+   - `result: subscription confirmed for statuses and lulds, delivery not observed`: the plan
+     takes the subscription, but a halt is rare, so no status arrived to prove delivery;
+   - `result: subscription not confirmed for statuses and lulds`;
+   - `result: sign-in refused`, or `result: inconclusive (...)`: run it again later.
+3. Paste the printed lines (they hold no secret) to the coordinator. If the subscription is not
+   confirmed, Alpaca paper openings stay held. A paid feed, or reading §4.4's presumed halt (a
+   dropped status feed bars only market orders, and openings are limit orders, §5.1) as allowing
+   them, are your decisions: the second weakens a safety rule (DEC-79).
+
+## M. The Alpaca news key, for the agent to read news ([DEC-2394](../docs/project/decisions/DEC-2394.md), [DEC-2277](../docs/project/decisions/DEC-2277.md))
+
+The agent reads Alpaca's news feed with a key of its own. It never uses a trading connection's
+token. The news reader reads the key once from the vault, at `platform/news-data-key`, and from
+nowhere else. No agent asks for the key, sees it or handles it. This step is yours alone.
+
+**Runnable, but nothing reads the key yet.** The vault path, `mandate vault put news-data-key` and
+`infra`'s apply line have merged, so steps 1 to 4 store the key. The news reader that reads it is
+still to come, and its PR says so here. Until it runs, the key sits in the vault unread. Once it
+runs, and until you do this step, the reader refuses `no_key`, reads no news, and the agent works
+on without it.
+
+1. **A paper account for news alone.** In Alpaca's dashboard, open a new **paper** account for
+   this purpose only, with no strategy and no connection to the platform. Alpaca's API keys carry
+   no scopes, so this account is what the key can reach. Never use a live account (AGENTS.md
+   rule 8), and never the key of a paper account a trading connection uses. The reader refuses a
+   key whose id does not begin `PK`, Alpaca's paper prefix.
+2. **Its API key.** In that paper account, generate an API key. Alpaca shows a **key id** and a
+   **secret**. The secret is shown only once.
+3. **Both go in one place:** GitHub, repository **Settings → Environments → `infra-staging` →
+   Environment secrets → Add secret**, as `ALPACA_NEWS_KEY_ID` and `ALPACA_NEWS_SECRET`. Paste
+   them there only, never into a terminal, a chat, an issue or a file.
+   - The next staging `apply` reads them, masked at once.
+   - It writes them to the staging vault at `platform/news-data-key`, on the standard input of
+     `mandate vault put news-data-key`, through the secret-import identity.
+   - Only the news reader and the data process's bars reader (DEC-2283) can read it there.
+   - The run prints `news data key: written`. Until you add both, it prints `not set` and changes
+     nothing.
+4. Dispatch `infra` with `apply` on `staging`.
+5. **To rotate it:** generate a new key in that paper account, replace both environment secrets,
+   run `apply` again, then restart the news reader so it reads the new key (its PR adds the
+   command here). Revoke the old key in
+   Alpaca only after the restart. **To stop all news reads at once**, revoke the key in Alpaca:
+   every fetch then fails with no item, so research goes on without news, and no order depends on
+   it.
+
+## N. Staging's research agent ([DEC-2081](../docs/project/decisions/DEC-2081.md), [DEC-2282](../docs/project/decisions/DEC-2282.md))
+
+Staging's model gateway serves the hosted workspace, so the research agent runs there, on your
+existing paper connection (section H). A second workspace for it, as the local cell's demo has,
+waits on backlog E21-54h.
+
+1. **Deploy the research agent as the only agent on that paper connection.**
+   - Until per-agent attribution is complete (DEC-2849 item 9: items 2, 3, 5, 7 and 8), a second
+     agent followed on the same account holds every opening (DEC-2804 item 8,
+     `second_agent_on_account`).
+   - So add the pinned demo agent only once that attribution has landed. This step will say so.
+2. **Its models** are your DEC-2282 defaults, Sonnet 5.5 for ideas and Haiku 5.5 for monitoring,
+   and you confirm them in the envelope step.
+3. **The gateway runs only after section K.** Its image is promoted to staging only once an
+   `apply` has printed `model provider key: written`, since without the key it cannot start and
+   would hold the whole workspace release unready (DEC-2081 item 5).
+4. **Until the gate passes, it researches nothing.** The gateway offers no model, so every research
+   call is answered `policy_denied` and nothing is spent. The agent holds no position it did not
+   already have.
+
+## O. One staging apply for the data process and the model gateway ([DEC-2081](../docs/project/decisions/DEC-2081.md), [DEC-2082](../docs/project/decisions/DEC-2082.md))
+
+One `apply` writes both keys to the staging vault. Neither process is promoted until it has, since
+each stops at start without its key and would hold the whole workspace release unready. This apply
+spends nothing on models or data: the gateway offers no model until its gate passes, and the bars
+come from Alpaca's free IEX feed.
+
+**Before you start.** These are every secret the `apply` reads, all in GitHub **Settings →
+Environments → `infra-staging` → Environment secrets**, by these exact names. Preflight lists any
+that is missing.
+- **Set by earlier staging applies, so check they are still there:** `DIGITAL_OCEAN_API_KEY`,
+  `CF_INFRA_API_TOKEN`, `TOFU_STATE_PASSPHRASE`, `KUBE_API_ALLOWED_CIDRS`,
+  `ACCESS_ALLOWED_EMAILS` and `FOUNDER_OIDC_SUBJECT`.
+- **New for this apply:**
+  - `OPENROUTER_API_KEY` (section K, steps 1 and 2);
+  - `ALPACA_NEWS_KEY_ID` and `ALPACA_NEWS_SECRET` (section M, steps 1 to 3), with which the bars
+    are read too (DEC-2283);
+  - `ALPACA_OAUTH_CLIENT_SECRET` (section H, steps 1 to 3), so the web app can connect your
+    Alpaca paper account.
+- **The OAuth client id is not a secret.** Send it to the coordinator, so an agent lands the
+  one-line change to `alpacaOAuth.clientId` (section H step 4). Apply at a commit that holds it.
+- **The coordinator has told you the chart changes have landed.**
+
+**Steps**
+1. **Preflight.** In GitHub, open **Actions → infra → Run workflow**. Pick branch `main`,
+   environment `staging` and action `preflight`, leave `sha` empty, and click **Run workflow**. It
+   must list nothing missing. Fix anything it lists first.
+2. **Plan.** Run it again with action `plan`. Note the full commit it prints. In its log, look
+   for these:
+   - **The plan's summary line** (`Plan: N to add, N to change, N to destroy`). The costed
+     staging resources may change. Nothing outside staging may change.
+   - **Whether the cluster is replaced.** A line with `digitalocean_kubernetes_cluster` and
+     `must be replaced` is DEC-2047's move to `sfo2`. If you see it, tell the coordinator before
+     you apply: the journal and the vault then start fresh, which is safe on paper, but the vault
+     must be initialized again.
+   - **`monthly_estimate_usd`** in the plan's outputs. It was about $57 at the 10-19 apply, and
+     it must stay inside DEC-2011's $150 cap.
+3. **Apply.** Run it again with action `apply` and `sha` set to the commit the plan printed. When
+   the run waits on the `infra-staging` environment, click **Review deployments → Approve and
+   deploy**.
+4. **Check three lines in the run's log:** `model provider key: written`, `news data key:
+   written` and `alpaca oauth client secret: written`. If one says `not set`, stop: that
+   environment secret's name is wrong or empty.
+5. **Tell the coordinator** the run's link. IAC then lands one change that moves the gateway and
+   the data process into `promote`, and promotes staging. Flux starts both.
+6. **Then section N:** deploy the research agent.
+
+**To undo:** revoke the OpenRouter key (section K step 4) or the Alpaca data key (section M step
+5). The gateway then answers every call `credential_invalid`, and the data process stops, so
+research goes on without fresh bars and no order depends on it.
+

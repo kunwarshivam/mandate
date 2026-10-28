@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::envelope::{Record, StepUpAction, StepUpAssertion, StepUpEvidence, StepUpMethod};
 use crate::responses::Classification;
-use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_pointer};
+use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Refused, Rules, Timestamp, is_pointer};
 
 /// `POST /agents/{agent_id}/pause` (§5.4): `{}` is valid (DEC-682 item 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,7 +46,10 @@ pub struct LiftHoldRequest {
 }
 
 /// `POST /agents/{agent_id}/resume` (§5.4). A `null` step-up is forwarded, and the runtime refuses
-/// it (`OwnerCommandRefused`).
+/// it (`OwnerCommandRefused`). `step_up_assertion` is optional, an absent one read as `null`, and
+/// is carried only beside `passkey` evidence ([DEC-2128] item 1, item 6's own slice).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct ResumeRequest {
@@ -54,6 +57,8 @@ pub struct ResumeRequest {
     pub record: Option<Record>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
 }
 
 /// `POST /step-up/challenges` (§3.6, DEC-2103 item 1): the one action the challenge binds. The
@@ -65,7 +70,10 @@ pub struct StepUpChallengeRequest {
 }
 
 /// `POST /agents/{agent_id}/acknowledgments` (§4.2): the event acknowledged, declared after the
-/// nullable members so serde names a missing one of them first.
+/// nullable members so serde names a missing one of them first. `subject`, `request`, and
+/// `step_up_assertion` are optional, an absent one read as `null`, ahead of the schema that names
+/// them (journal spec §9.28 version 2, DEC-2523; the struct first, as DEC-2126 and DEC-2128 order
+/// it). An assertion is carried only beside `passkey` evidence (DEC-2128 item 1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct AcknowledgeRequest {
@@ -73,7 +81,23 @@ pub struct AcknowledgeRequest {
     pub record: Option<Record>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub subject: Option<AcknowledgeSubject>,
+    #[serde(default)]
+    pub request: Option<EventId>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub acknowledged: EventId,
+}
+
+/// What an acknowledgment answers (journal spec §9.28 version 2): a latched limit, an account
+/// restriction, or a reconciliation hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcknowledgeSubject {
+    Limit,
+    Restriction,
+    Reconciliation,
 }
 
 /// `POST /agents/{agent_id}/requests` (§4.6, DEC-682 item 16). Who asked comes from the channel,
@@ -96,9 +120,13 @@ pub enum Side {
 }
 
 crate::wire::rules!(none: PauseRequest, HoldRequest, EndDelegationRequest, LiftHoldRequest);
-crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest, StepUpChallengeRequest);
+crate::wire::rules!(none: OwnerRequest, StepUpChallengeRequest);
 
 /// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
+/// `step_up_assertion` is optional, an absent one read as `null`, and is carried only beside
+/// `passkey` evidence ([DEC-2128] item 1).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct ConfirmRequest {
@@ -108,6 +136,8 @@ pub struct ConfirmRequest {
     pub base_version: Option<Ref>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub confirmed_paths: Vec<String>,
     pub warnings_acknowledged: Vec<Id>,
     pub classification_shown: Classification,
@@ -170,7 +200,8 @@ pub enum Shape {
     KindForTime,
 }
 
-/// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning exactly with `release`.
+/// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning exactly with `release`, and
+/// a `step_up_assertion` only beside `passkey` evidence, as on a resume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct StopRequest {
@@ -180,6 +211,8 @@ pub struct StopRequest {
     pub record: Option<Record>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub release: bool,
 }
 
@@ -311,6 +344,45 @@ impl Rules for ConfirmRequest {
             let at = format!("{at}/confirmed_paths/{index}");
             check.rule(is_pointer(path, false), &at, "pattern");
         }
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+/// [`assertion_rules`] for a body the server decodes by hand (the deploy body, until its schema and
+/// its type land together, DEC-2101 item 6), so the deploy refuses an assertion exactly as a
+/// confirmation does (DEC-2128 item 1).
+///
+/// # Errors
+/// [`Refused::Invalid`] with the violations found: one at `/step_up_assertion` for an assertion
+/// beside evidence that is not `passkey`, and any of the assertion's own members.
+pub fn assertion_checked(
+    evidence: Option<&StepUpEvidence>,
+    assertion: Option<&StepUpAssertion>,
+) -> Result<(), Refused> {
+    let mut check = Check::default();
+    assertion_rules(evidence, assertion, "", &mut check);
+    check.done()
+}
+
+/// DEC-2126 item 1, as DEC-2128 item 1 applies it: an assertion is carried only beside `passkey`
+/// evidence, else one violation at `/step_up_assertion`, and its own members are checked.
+fn assertion_rules(
+    evidence: Option<&StepUpEvidence>,
+    assertion: Option<&StepUpAssertion>,
+    at: &str,
+    check: &mut Check,
+) {
+    if let Some(assertion) = assertion {
+        let rests_on_a_passkey =
+            evidence.is_some_and(|evidence| evidence.method == StepUpMethod::Passkey);
+        let at = format!("{at}/step_up_assertion");
+        check.rule(rests_on_a_passkey, &at, "condition");
+        assertion.rules(&at, check);
     }
 }
 
@@ -347,6 +419,23 @@ impl Rules for StopRequest {
     fn rules(&self, at: &str, check: &mut Check) {
         let holds = self.warning_shown.is_some() == self.release;
         check.rule(holds, &format!("{at}/warning_shown"), "condition");
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+impl Rules for ResumeRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
     }
 }
 
@@ -358,22 +447,27 @@ impl Rules for OauthStartRequest {
             && version.bytes().all(|b| b.is_ascii_digit())
             && !version.starts_with('0');
         check.rule(holds, &format!("{at}/disclosure/version"), "pattern");
-        if let Some(assertion) = &self.step_up_assertion {
-            let rests_on_a_passkey = self
-                .step_up
-                .as_ref()
-                .is_some_and(|evidence| evidence.method == StepUpMethod::Passkey);
-            check.rule(
-                rests_on_a_passkey,
-                &format!("{at}/step_up_assertion"),
-                "condition",
-            );
-            assertion.rules(&format!("{at}/step_up_assertion"), check);
-        }
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
     }
 }
 
-crate::wire::rules!(checked: StopRequest, OauthStartRequest);
+impl Rules for AcknowledgeRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+crate::wire::rules!(checked: StopRequest, ResumeRequest, OauthStartRequest, AcknowledgeRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
 
 crate::wire::object_only!(

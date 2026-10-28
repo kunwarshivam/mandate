@@ -27,6 +27,7 @@ use mandate_domain::{
     ProtectionForm as Form, QuantityForm as Qf, Retry, Row, TimeInForce as Tif,
 };
 use mandate_executor::{
+    AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
     BrokerOutcome, BrokerRequest, BrokerUpdate, Effect, Input, OrderState, OrderType, Ports,
     Purpose, SubmitOrder, TimeInForce,
 };
@@ -355,7 +356,7 @@ fn a_stop_that_never_rests_is_flattened_at_the_bound() {
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the owner is alerted at the bound: {:?}",
         bound.notifications
     );
@@ -381,6 +382,161 @@ fn flattens(ran: &Ran, quantity: &str) -> bool {
             && matches!(draft.payload.get("purpose"), Some(Value::Str(purpose)) if purpose == "risk_exit")
             && matches!(draft.payload.get("qty"), Some(Value::Str(shares)) if qty(shares) == qty(quantity))
     })
+}
+
+/// A deployment whose configuration does not read: no references for any agent's instrument
+/// (DEC-2846). An exit reads no snapshot, so none is offered.
+struct UnreadConfiguration;
+
+impl BindingGateSource for UnreadConfiguration {
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        None
+    }
+
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        None
+    }
+}
+
+/// The `ProtectionChanged` actions `ran` journaled, in order.
+fn protection_actions(ran: &Ran) -> Vec<String> {
+    ran.drafts
+        .iter()
+        .filter(|draft| draft.event_type == "ProtectionChanged")
+        .filter_map(|draft| match draft.payload.get("action") {
+            Some(Value::Str(action)) => Some(action.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// DEC-2846, the review's round 4: at the bound, an exit whose agent's configuration does not
+/// read cannot be journaled, so the bound journals nothing of it: no `interval_limit` and no
+/// `w-` intent, and the interval stays open. The owner is alerted once that the exit waits
+/// (`exit_unpriced`); the next tick alerts nothing more; and the first tick that reads the
+/// configuration reaches the bound as before, alerting it and exiting the 10 held. Before, the
+/// tick failed and the executor process stopped, every other exit with it.
+#[test]
+fn a_bound_whose_exit_configuration_does_not_read_waits_alerted_until_it_does() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let id = entry(&mut shell, &ports, "10", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    let filled = fill(&mut shell, &ports, "f-1", &id, "10");
+    let reported = report(&mut shell, &ports, entry_state(&id, "10", "10", "filled"));
+    let mut placed = stops(&filled);
+    placed.extend(stops(&reported));
+    let [stop] = placed.as_slice() else {
+        panic!("the stop is sent: {placed:?}");
+    };
+    report(
+        &mut shell,
+        &ports,
+        broker_order(
+            "s-1",
+            Some(stop.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            "10",
+            "0",
+            "rejected",
+        ),
+    );
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    let held = shell.run_with_binding(Input::Tick(clock(61)), &ports, &UnreadConfiguration);
+    assert!(!flattens(&held, "10"), "{:?}", held.draft_types());
+    assert_eq!(
+        protection_actions(&held),
+        vec!["exit_unpriced"],
+        "no interval_limit while the exit waits"
+    );
+    assert_eq!(held.notifications, vec!["exit_stalled"]);
+    let quiet = shell.run_with_binding(Input::Tick(clock(62)), &ports, &UnreadConfiguration);
+    assert!(
+        protection_actions(&quiet).is_empty() && quiet.notifications.is_empty(),
+        "alerted once: {:?} {:?}",
+        quiet.draft_types(),
+        quiet.notifications
+    );
+    let bound = shell.run(Input::Tick(clock(63)), &ports);
+    assert!(
+        bound.notifications.contains(&"protection"),
+        "{:?}",
+        bound.notifications
+    );
+    assert!(
+        protection_actions(&bound).contains(&"interval_limit".to_owned()),
+        "{:?}",
+        protection_actions(&bound)
+    );
+    assert!(flattens(&bound, "10"), "{:?}", bound.draft_types());
+}
+
+/// DEC-2846, the review's round 4: an entry that ends after its bound, while its agent's
+/// configuration does not read, journals no `unprotected_end` and hands itself no exit; the owner
+/// is alerted once that the exit waits, and the first step that reads the configuration ends the
+/// interval and exits the 4 it filled whole. Before, the step failed and the process stopped.
+#[test]
+fn an_entry_ending_after_its_bound_while_its_configuration_does_not_read_waits_alerted() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let id = entry(&mut shell, &ports, "10", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    fill(&mut shell, &ports, "f-1", &id, "4");
+    report(
+        &mut shell,
+        &ports,
+        entry_state(&id, "10", "4", "partially_filled"),
+    );
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    shell.run(Input::Tick(clock(61)), &ports);
+    let ended = shell.run_with_binding(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: id.clone(),
+        })),
+        &ports,
+        &UnreadConfiguration,
+    );
+    assert!(!flattens(&ended, "4"), "{:?}", ended.draft_types());
+    assert_eq!(protection_actions(&ended), vec!["exit_unpriced"]);
+    assert_eq!(ended.notifications, vec!["exit_stalled"]);
+    let quiet = shell.run_with_binding(Input::Tick(clock(62)), &ports, &UnreadConfiguration);
+    assert!(
+        protection_actions(&quiet).is_empty() && quiet.notifications.is_empty(),
+        "alerted once: {:?} {:?}",
+        quiet.draft_types(),
+        quiet.notifications
+    );
+    let read = shell.run(Input::Tick(clock(63)), &ports);
+    assert!(stops(&read).is_empty(), "past its bound, no stop is placed");
+    assert!(
+        protection_actions(&read).contains(&"unprotected_end".to_owned()),
+        "{:?}",
+        protection_actions(&read)
+    );
+    assert!(flattens(&read, "4"), "{:?}", read.draft_types());
 }
 
 /// DEC-966 item 4: an entry still part filled at the bound is alerted and its remainder cancelled,
@@ -409,7 +565,7 @@ fn an_entry_ending_after_its_bound_is_exited_whole_with_no_stop() {
     );
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
-    assert!(bound.notifications.contains(&"unprotected_interval_limit"));
+    assert!(bound.notifications.contains(&"protection"));
     assert!(
         bound
             .requests
@@ -511,7 +667,7 @@ fn a_second_entry_never_ends_the_interval_of_the_first() {
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the first entry's interval reaches its bound: {:?}",
         bound.notifications
     );
@@ -730,7 +886,7 @@ fn a_bracket_at_the_bound_is_alerted_and_never_flattened() {
     assert!(ended.submissions().iter().any(|order| order.oco.is_some()));
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
-    assert!(bound.notifications.contains(&"unprotected_interval_limit"));
+    assert!(bound.notifications.contains(&"protection"));
     assert!(
         !flattens(&bound, "4"),
         "a bracket is never flattened at the bound"
@@ -828,7 +984,7 @@ impl Book {
                 _ => {}
             }
         }
-        if ran.notifications.contains(&"unprotected_interval_limit") {
+        if ran.notifications.contains(&"protection") {
             self.alerted = true;
         }
         for draft in &ran.drafts {
@@ -1170,6 +1326,56 @@ fn holds(steps: Vec<Step>) -> Result<(), TestCaseError> {
         .values()
         .any(|order| order.state == OrderState::Unknown);
     prop_assert!(!unknown, "nothing here leaves an order in doubt");
+    the_owners_read_agrees(&shell)
+}
+
+/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2138 item 4) of the run's
+/// journal, against the executor's live state, the oracle: the resting stops, what they cover,
+/// their prices, and the earliest open interval's start. Plain entries' intervals end only with
+/// their own stops (DEC-966 item 2), which the read must follow too.
+fn the_owners_read_agrees(shell: &Shell) -> Result<(), TestCaseError> {
+    let mut read = mandate_gate_context::Positions::new(common::ACCOUNT_STREAM, "any-agent");
+    for event in &shell.account_journal {
+        read.fold(mandate_gate_context::Row {
+            stream: &event.stream,
+            event_type: &event.event_type,
+            payload: &event.payload,
+        })
+        .map_err(|e| TestCaseError::fail(format!("the read refused {}: {e}", event.event_type)))?;
+    }
+    let id = mandate_accounting::InstrumentId::new(AAPL)
+        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+    let served = read.protection(AAPL);
+    let folded = shell
+        .state
+        .protection(&id)
+        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+    let resting: Vec<String> = folded
+        .map(|p| p.resting.iter().map(|id| id.as_str().to_owned()).collect())
+        .unwrap_or_default();
+    prop_assert_eq!(&served.orders, &resting, "resting stops");
+    prop_assert_eq!(
+        served.covered_qty,
+        folded.map_or(Qty::ZERO, |p| p.covered_qty),
+        "covered quantity"
+    );
+    prop_assert_eq!(
+        served.stop,
+        folded.and_then(|p| p.prices).map(|prices| prices.stop),
+        "stop"
+    );
+    let open = shell
+        .state
+        .unprotected_intervals()
+        .iter()
+        .filter(|interval| interval.instrument == id && interval.ended_at.is_none())
+        .map(|interval| interval.started_at.secs())
+        .min();
+    prop_assert_eq!(
+        served.unprotected_since.map(|at| at.secs()),
+        open,
+        "the earliest open interval"
+    );
     Ok(())
 }
 

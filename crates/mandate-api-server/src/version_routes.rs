@@ -20,13 +20,13 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use mandate_api::envelope::{Record, StepUpEvidence};
+use mandate_api::envelope::{Record, StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{CurrentBase, Effect, Problem, ProblemCode, Violation};
-use mandate_api::requests::ConfirmRequest;
+use mandate_api::requests::{ConfirmRequest, assertion_checked};
 use mandate_api::responses::Classification;
 use mandate_api::wire::{EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Value, parse, to_canonical};
+use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_spec::Mandate;
@@ -35,22 +35,30 @@ use crate::commands::{Event, Settled, Writer, envelope};
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::objects::ObjectStore;
 use crate::reads::account_ref;
+use crate::real_money::{Action as Gated, gated};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
 use crate::versions::{
     CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
     deploy_digest, envelope_paths, established_v2, instruments, last_confirmed, latest, object,
     reference, screen, stopped, stored, text,
 };
 use crate::writes::{
-    Gate, appended_at, derived_for, id_text, one_key, principal_text, ref_text, strict, unknown,
+    Gate, appended_batch_at, derived_for, id_text, one_key, principal_text, ref_text, strict,
+    unknown,
 };
 
 /// The message every violation these routes report carries: the code and the pointer say what and
 /// where, and nothing from the body is echoed (rule 6).
 const MESSAGE: &str = "The request does not meet this rule.";
+/// The operation §3.4 derives a confirmation's `StepUpAsserted` id under, distinct from the
+/// confirmation's own `confirm_version` (DEC-2128 item 3).
+pub const CONFIRM_ASSERTED: &str = "confirm_version_step_up_asserted";
+/// The operation §3.4 derives a deployment's `StepUpAsserted` id under, distinct from the
+/// deployment's own `deploy` (DEC-2128 item 3).
+pub const DEPLOY_ASSERTED: &str = "deploy_step_up_asserted";
 
 /// A refused request, answered by one problem document.
 enum Answer {
@@ -257,21 +265,54 @@ fn repeat(admitted: &Admitted, drafted: &Drafted) -> Option<Result<StoredEvent, 
     Some(outcome(settled, &drafted.id))
 }
 
-/// Stores the record, then appends the draft (rule 5).
-async fn commit(app: &App, admitted: &Admitted, drafted: Drafted) -> Result<StoredEvent, Answer> {
+/// Stores the record, then appends the draft (rule 5), with the `StepUpAsserted` that authorized
+/// it, when there is one, in the same batch after it (journal spec §9.32, [DEC-2128] item 3).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+async fn commit(
+    app: &App,
+    admitted: &Admitted,
+    drafted: Drafted,
+    assertion: Option<&[u8]>,
+) -> Result<StoredEvent, Answer> {
     admitted
         .objects
         .put(&drafted.record)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let settled = appended_at(
+    let batch: Vec<&[u8]> = std::iter::once(drafted.draft.as_slice())
+        .chain(assertion)
+        .collect();
+    let settled = appended_batch_at(
         app,
         &admitted.reader,
-        (&drafted.text, &drafted.draft),
+        (&drafted.text, &batch),
         admitted.gate.now,
         drafted.pinned,
     )
     .await;
     outcome(settled, &drafted.id)
+}
+
+/// The `StepUpAsserted` a step-up `asserted` leaves to append after the event `drafted` names,
+/// under §3.4's id for `operation` (DEC-2128 item 3).
+fn assertion_drafted(
+    admitted: &Admitted,
+    drafted: &Drafted,
+    operation: &str,
+    asserted: &Asserted,
+) -> Result<Vec<u8>, Answer> {
+    let (_, event_id) = derived_for(&admitted.gate, &admitted.reader.workspace, operation)
+        .ok_or(Refused::JournalUnavailable)?;
+    let writer = Writer {
+        workspace: &admitted.reader.workspace,
+        principal: &admitted.principal,
+        event_id: &event_id,
+        environment: &admitted.environment,
+        now: admitted.gate.now,
+    };
+    asserted
+        .drafted(admitted.objects.as_ref(), &writer, &drafted.text)
+        .ok_or(Refused::JournalUnavailable.into())
 }
 
 /// An append's outcome: the stored row, or its problem.
@@ -287,13 +328,18 @@ fn outcome(settled: Settled, id: &EventId) -> Result<StoredEvent, Answer> {
     }
 }
 
-/// Judges `evidence` for `action` through the port: `step_up_required` without any (§3.5).
+/// Judges `evidence`, with the `assertion` beside it, for `action` through the port's `asserted`
+/// ([DEC-2128] item 2): `step_up_required` without any (§3.5), and `journal_unavailable` when the
+/// port cannot read what it judges by.
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 fn stepped_up(
     app: &App,
     admitted: &Admitted,
     evidence: Option<&StepUpEvidence>,
+    assertion: Option<&StepUpAssertion>,
     action: &Action,
-) -> Result<(), Answer> {
+) -> Result<Option<Asserted>, Answer> {
     let evidence = evidence.ok_or(Answer::step_up(ProblemCode::StepUpRequired))?;
     let judged = Judged {
         tenant: &admitted.reader.tenant,
@@ -301,8 +347,13 @@ fn stepped_up(
         now: admitted.gate.now,
     };
     app.step_up
-        .verify(evidence, action, &judged)
-        .map_err(Answer::step_up)
+        .asserted(evidence, assertion, action, &judged)
+        .map_err(|unverified| match unverified {
+            Unverified::Code(ProblemCode::JournalUnavailable) => {
+                Answer::from(Refused::JournalUnavailable)
+            }
+            Unverified::Code(code) => Answer::step_up(code),
+        })
 }
 
 /// `members` with the event's watermark, enveloped, as `status`.
@@ -349,6 +400,7 @@ async fn created(
     let mandate = Mandate::parse(&value).map_err(|_| Answer::schema("", "mandate"))?;
     match value.get("environment").and_then(Value::as_str) {
         Some("live") => {
+            gated(app, &admitted.reader, &admitted.gate, Gated::CreateVersion).await?;
             return Err(Answer::Code(
                 StatusCode::CONFLICT,
                 ProblemCode::LiveUnavailable,
@@ -416,7 +468,7 @@ async fn created(
     objects
         .put(&canonical)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let row = commit(app, &admitted, drafted).await?;
+    let row = commit(app, &admitted, drafted, None).await?;
     Ok(version_created(
         StatusCode::ACCEPTED,
         &admitted,
@@ -596,6 +648,18 @@ async fn confirmed(
         Vec::new(),
     )
     .ok_or(Refused::JournalUnavailable)?;
+    let passkey = request.step_up_assertion.is_some();
+    let event = match (passkey, request.step_up.as_ref()) {
+        (true, Some(evidence)) => {
+            let (record, event) = event;
+            let judged = journaled(Some(evidence)).ok_or(Refused::JournalUnavailable)?;
+            (
+                record,
+                passkey_confirmation(event, judged).ok_or(Refused::JournalUnavailable)?,
+            )
+        }
+        _ => event,
+    };
     let drafted = drafted(&admitted, "confirm_version", event)?;
     if let Some(repeated) = repeat(&admitted, &drafted) {
         return Ok(confirm_accepted(
@@ -648,9 +712,38 @@ async fn confirmed(
         kind: StepUpActionKind::ConfirmVersion,
         digest,
     };
-    stepped_up(app, &admitted, request.step_up.as_ref(), &action)?;
-    let row = commit(app, &admitted, drafted).await?;
+    let asserted = stepped_up(
+        app,
+        &admitted,
+        request.step_up.as_ref(),
+        request.step_up_assertion.as_ref(),
+        &action,
+    )?;
+    if asserted.is_some() != passkey {
+        return Err(Refused::JournalUnavailable.into());
+    }
+    let assertion = asserted
+        .map(|asserted| assertion_drafted(&admitted, &drafted, CONFIRM_ASSERTED, &asserted))
+        .transpose()?;
+    let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
     Ok(confirm_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// The confirmation committed under passkey step-up: `MandateConfirmed` version 3 ([DEC-2131]
+/// item 3, journal spec v0.84 §9.9), version 2's members (a new mandate's, so no agent link and no
+/// base), then `step_up`, the evidence the port judged, which the record also holds and §9.32's
+/// rule 253 reads. `None` when the payload is not an object.
+///
+/// [DEC-2131]: ../../../docs/project/decisions/DEC-2131.md
+fn passkey_confirmation(mut event: Event, step_up: Value) -> Option<Event> {
+    let Value::Object(members) = &mut event.payload else {
+        return None;
+    };
+    members.insert(Key::new("agent_id").ok()?, Value::Null);
+    members.insert(Key::new("base_version").ok()?, Value::Null);
+    members.insert(Key::new("step_up").ok()?, step_up);
+    event.schema_version = 3;
+    Some(event)
 }
 
 /// `commands/confirm-accepted` for a first version.
@@ -676,19 +769,22 @@ struct DeployBody {
     backtest_id: Value,
     record: Value,
     step_up: Option<StepUpEvidence>,
+    step_up_assertion: Option<StepUpAssertion>,
 }
 
-/// The members a deploy body names, in its order.
-const DEPLOY_MEMBERS: [&str; 5] = [
+/// The members a deploy body names, in its order; the last, `step_up_assertion`, is optional
+/// (DEC-2128 item 1).
+const DEPLOY_MEMBERS: [&str; 6] = [
     "agent_id",
     "mandate_version",
     "backtest_id",
     "record",
     "step_up",
+    "step_up_assertion",
 ];
 
-/// `body` as a deploy: an object of exactly [`DEPLOY_MEMBERS`], each in its type and canonical
-/// form, else `invalid` at the first member that fails.
+/// `body` as a deploy: an object of [`DEPLOY_MEMBERS`], every one but `step_up_assertion`
+/// present, each in its type and canonical form, else `invalid` at the first member that fails.
 fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
     let Ok(Value::Object(members)) = parse(body) else {
         return Err(Answer::schema("", "type"));
@@ -737,12 +833,24 @@ fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
             decode::<StepUpEvidence>(&to_canonical(other)).map_err(|_| non_canonical("step_up"))?,
         ),
     };
+    let step_up_assertion = match members.get("step_up_assertion") {
+        None | Some(Value::Null) => None,
+        Some(other) => Some(
+            decode::<StepUpAssertion>(&to_canonical(other))
+                .map_err(|_| non_canonical("step_up_assertion"))?,
+        ),
+    };
+    assertion_checked(step_up.as_ref(), step_up_assertion.as_ref()).map_err(|refused| {
+        let mandate_api::wire::Refused::Invalid { violations } = refused;
+        Answer::Invalid(violations)
+    })?;
     Ok(DeployBody {
         agent_id,
         mandate_version,
         backtest_id,
         record,
         step_up,
+        step_up_assertion,
     })
 }
 
@@ -804,6 +912,11 @@ async fn deployed(
     )
     .ok_or(Refused::JournalUnavailable)?;
     event.schema_version = if named { 2 } else { 1 };
+    let passkey = request.step_up_assertion.is_some();
+    if let (true, true, Some(evidence)) = (passkey, named, request.step_up.as_ref()) {
+        let judged = journaled(Some(evidence)).ok_or(Refused::JournalUnavailable)?;
+        event = passkey_deployment(event, judged).ok_or(Refused::JournalUnavailable)?;
+    }
     let mut drafted = drafted(&admitted, "deploy", (record, event))?;
     drafted.pinned = named
         .then(|| admitted.reader.control.last().map(|row| row.seq))
@@ -817,6 +930,7 @@ async fn deployed(
     }
     match document.get("environment").and_then(Value::as_str) {
         Some("live") => {
+            gated(app, &admitted.reader, &admitted.gate, Gated::Deploy).await?;
             return Err(Answer::Code(
                 StatusCode::CONFLICT,
                 ProblemCode::LiveUnavailable,
@@ -868,9 +982,41 @@ async fn deployed(
         kind: StepUpActionKind::Deploy,
         digest,
     };
-    stepped_up(app, &admitted, request.step_up.as_ref(), &action)?;
-    let row = commit(app, &admitted, drafted).await?;
+    if passkey && !named {
+        return Err(Answer::schema("/mandate_version", "connection_unrecorded"));
+    }
+    let asserted = stepped_up(
+        app,
+        &admitted,
+        request.step_up.as_ref(),
+        request.step_up_assertion.as_ref(),
+        &action,
+    )?;
+    if asserted.is_some() != passkey {
+        return Err(Refused::JournalUnavailable.into());
+    }
+    let assertion = asserted
+        .map(|asserted| assertion_drafted(&admitted, &drafted, DEPLOY_ASSERTED, &asserted))
+        .transpose()?;
+    let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
     Ok(command_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// The deployment committed under passkey step-up on a connection §9.24's rule 201 admits:
+/// `AgentDeployed` version 3 ([DEC-2131] item 3, journal spec v0.84 §9.24), version 2's members
+/// then `step_up`, the evidence the port judged, which the record also holds and §9.32's rule 253
+/// reads. `None` when the payload is not an object. A passkey deployment rule 201 refuses has no
+/// version to carry its evidence and is refused before step-up is judged ([DEC-2133]).
+///
+/// [DEC-2131]: ../../../docs/project/decisions/DEC-2131.md
+/// [DEC-2133]: ../../../docs/project/decisions/DEC-2133.md
+fn passkey_deployment(mut event: Event, step_up: Value) -> Option<Event> {
+    let Value::Object(members) = &mut event.payload else {
+        return None;
+    };
+    members.insert(Key::new("step_up").ok()?, step_up);
+    event.schema_version = 3;
+    Some(event)
 }
 
 /// `commands/command-accepted`.
@@ -904,8 +1050,8 @@ async fn refused_live(app: &App, headers: &HeaderMap, workspace: &str) -> Result
     if !browser(headers, &app.settings.app_origin) {
         return Err(Refused::Forbidden.into());
     }
-    one_key(headers).ok_or(Refused::Invalid)?;
-    authorized(
+    let key = one_key(headers).ok_or(Refused::Invalid)?;
+    let reader = authorized(
         app,
         &admitted,
         now,
@@ -914,6 +1060,8 @@ async fn refused_live(app: &App, headers: &HeaderMap, workspace: &str) -> Result
         Unreadable::Command,
     )
     .await?;
+    let gate = Gate { admitted, now, key };
+    gated(app, &reader, &gate, Gated::GoLive).await?;
     Err(Answer::Code(
         StatusCode::CONFLICT,
         ProblemCode::LiveUnavailable,

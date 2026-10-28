@@ -14,8 +14,8 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::cell::{self, CellDeployment, CellResearch, opt_in};
 use mandate_daemon::{
-    Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
-    ResearchWorker, RuntimeProcess, Wiring,
+    Alert, ArtifactSink, Config, ContextUnread, Refs, ResearchParts, ResearchSource,
+    ResearchWiring, ResearchWorker, RuntimeProcess, Wiring,
 };
 use mandate_gateway::money::{Usage, Usd6};
 use mandate_gateway::{CallRecord, Outcome as CallOutcome, Purpose};
@@ -26,13 +26,13 @@ use mandate_research::{
     PolicyOverlay, ResearchEnvelope, SourceAllowlist, SourceId, ValidatedMandate, WorkingUniverse,
 };
 use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool};
-use mandate_research_run::{ModelPin, OutputBounds, RetrievalPlan, Symbol};
+use mandate_research_run::{ModelPin, OutputBounds, RetrievalPlan, RetrievedItem, Symbol};
 use mandate_runtime::{
-    AgentId, AgenticConfig, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
-    DryRunVerdict, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun,
-    IdGen, JournalCatalog, MandateView, OrderPlan, Preconditions, Proposal, ResearchConfig,
-    ResearchInput, ResearchRequest, RiskClock, RuntimeState, Seq, SignalInputs, TurnRequest,
-    WorkspaceId, WriterEpoch,
+    ActiveThesis, AgentId, AgenticConfig, ApprovalSettings, Autonomy, Classified, ConnectionId,
+    Deployment, DryRunVerdict, EventDraft, EventId, EventTriggers, FlattenPlan, FlattenPlanner,
+    FlattenRequest, GateDryRun, IdGen, JournalCatalog, MandateView, OrderPlan, Preconditions,
+    Proposal, ResearchConfig, ResearchInput, ResearchRequest, RiskClock, RuntimeState, Seq,
+    SignalInputs, TurnRequest, WorkspaceId, WriterEpoch,
 };
 use mandate_spec::document::Mandate;
 use mandate_store::{MemoryStore, Store};
@@ -218,15 +218,26 @@ pub fn facts() -> AdmissionFacts {
 pub struct Open {
     pub asked: Rc<Cell<u32>>,
     pub off: Rc<Cell<bool>>,
+    /// Event triggers, the items arrived, and the active theses each pass gives, when set.
+    pub evented: Rc<RefCell<Option<Evented>>>,
+}
+
+/// What an evented pass adds to the open context (DEC-2392).
+#[derive(Clone)]
+pub struct Evented {
+    pub triggers: Option<EventTriggers>,
+    pub events: Vec<RetrievedItem>,
+    pub active: Vec<ActiveThesis>,
 }
 
 impl ResearchSource for Open {
-    fn parts(&self, _: &RuntimeState) -> Option<ResearchParts> {
+    fn parts(&self, _: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
         self.asked.set(self.asked.get() + 1);
         if self.off.get() {
-            return None;
+            return Err(ContextUnread::Clock);
         }
-        Some(ResearchParts {
+        let evented = self.evented.borrow().clone();
+        Ok(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope()),
             overlay: PolicyOverlay::internal_research_profile(),
@@ -236,12 +247,17 @@ impl ResearchSource for Open {
             },
             facts: facts(),
             lineages: LineageState::default(),
-            active: Vec::new(),
+            active: evented
+                .as_ref()
+                .map(|e| e.active.clone())
+                .unwrap_or_default(),
             last_reservation: None,
             data_symbols: BTreeSet::from([
                 Symbol::new("AAPL").unwrap(),
                 Symbol::new("MSFT").unwrap(),
             ]),
+            event_triggers: evented.as_ref().and_then(|e| e.triggers.clone()),
+            events: evented.map(|e| e.events).unwrap_or_default(),
         })
     }
 }
@@ -354,6 +370,9 @@ pub fn wiring_with(research: Option<ResearchWiring>, refs: Box<dyn Refs>) -> Wir
             },
         },
         research,
+        models: None,
+        facts: None,
+        approvers: None,
     }
 }
 

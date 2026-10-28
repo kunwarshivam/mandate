@@ -19,10 +19,12 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddrV4;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 
+use crate::cell::await_active;
 use crate::gitops::WORKSPACE_NAMESPACE;
 use crate::mask;
 use crate::vault_init::{Kubectl, RECOVERY_NAMESPACE, RECOVERY_SECRET};
@@ -39,12 +41,14 @@ const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-vault-provision";
 /// The Secrets of the identities that are not per connection, as `mandate_vault::kube::secret_name`
 /// names them, the role provisioner's among them, which `--secrets-namespace` issues (DEC-2350). A
 /// vault provisioned before it was listed lacks it, so the next apply provisions once more.
-const PLATFORM_SECRETS: [&str; 7] = [
+const PLATFORM_SECRETS: [&str; 9] = [
     "vault-approle-api",
     "vault-approle-connection-manager",
     "vault-approle-runtime",
     "vault-approle-secret-import",
     "vault-approle-model-gateway",
+    "vault-approle-news-reader",
+    "vault-approle-bars-reader",
     "vault-approle-email-sender",
     "vault-approle-provisioner",
 ];
@@ -67,11 +71,13 @@ pub(crate) type Put<'a> = &'a dyn Fn(&str, &str) -> Result<(bool, String)>;
 
 /// What the step needs: `kubectl` against staging, and `mandate vault provision` and `mandate vault
 /// put` run against the vault with the given standard input, each answering whether it succeeded
-/// and what it printed: the Secrets, or one status line.
+/// and what it printed: the Secrets, or one status line; and a pause between the reads of the
+/// vault's status while it is not yet active.
 pub(crate) struct Steps<'a> {
     pub(crate) kubectl: Kubectl<'a>,
     pub(crate) provision: Provision<'a>,
     pub(crate) put: Put<'a>,
+    pub(crate) pause: &'a dyn Fn(Duration),
 }
 
 /// The name of an executor's Secret, as `mandate_vault::kube::secret_name` writes it: the
@@ -521,6 +527,29 @@ pub(crate) fn kubernetes_command(host: &str) -> Vec<String> {
 /// The `mandate vault put` name of the model provider's key (DEC-2630).
 pub(crate) const MODEL_KEY_SECRET: &str = "model-provider-key";
 
+/// The `mandate vault put` name of the news reader's Alpaca paper data key (DEC-2277).
+pub(crate) const NEWS_KEY_SECRET: &str = "news-data-key";
+
+/// The one line `mandate vault put news-data-key` writes, `<key id>:<secret>`, from the two
+/// environment secrets: empty when both are, so the vault keeps what it holds. One without the
+/// other, or a part that holds `:`, whitespace or a control character, as a paste can leave, fails
+/// the step, so a key the reader would refuse is never written (DEC-2277).
+pub(crate) fn news_data_key(key_id: &str, secret: &str) -> Result<String> {
+    let clean = |part: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c != ':' && !c.is_whitespace() && !c.is_control())
+    };
+    match (key_id.is_empty(), secret.is_empty()) {
+        (true, true) => Ok(String::new()),
+        _ if clean(key_id) && clean(secret) => Ok(format!("{key_id}:{secret}")),
+        _ => bail!(
+            "the news data key needs both ALPACA_NEWS_KEY_ID and ALPACA_NEWS_SECRET, each one line with no `:`"
+        ),
+    }
+}
+
 /// The `mandate vault put` name of the Alpaca OAuth client secret (DEC-2636).
 pub(crate) const ALPACA_CLIENT_SECRET: &str = "alpaca-oauth-client-secret";
 
@@ -558,7 +587,8 @@ fn secret_import(steps: &Steps<'_>) -> Result<String> {
 /// Service's address, unless every Secret is already there; sets Kubernetes auth alone up when
 /// they are but [`MARKER`] does not name that address; records the address once either is done;
 /// and revokes the root token on every path, a failure's included. Then it writes
-/// each of `model_key` (DEC-2630) and `alpaca_client_secret` (DEC-2636) that is not empty through
+/// each of `model_key` (DEC-2630), `alpaca_client_secret` (DEC-2636) and `news_key` (DEC-2277) that
+/// is not empty through
 /// the secret-import identity on every run, so a rotation is the secret replaced and the apply run
 /// again; an empty one is left as the vault holds it, never deleted. Answers the status words to
 /// print.
@@ -567,6 +597,7 @@ pub(crate) fn vault_provision(
     connections: &[&str],
     model_key: &str,
     alpaca_client_secret: &str,
+    news_key: &str,
 ) -> Result<Vec<&'static str>> {
     let mut words = Vec::new();
     let host = kubernetes_host(steps)?;
@@ -576,6 +607,10 @@ pub(crate) fn vault_provision(
         words.extend(["credentials: present", "kubernetes auth: present"]);
     } else {
         let keys = recovery_keys(steps)?;
+        await_active(
+            || in_vault(steps, &["bao", "status", "-format=json"], None).map(|(_, status)| status),
+            |pause| (steps.pause)(pause),
+        )?;
         let root = root(steps, &keys)?;
         let token = root.token.clone().unwrap_or_default();
         let stdin = format!("{token}\n");
@@ -611,6 +646,12 @@ pub(crate) fn vault_provision(
             "alpaca oauth client secret: not set",
             "alpaca oauth client secret: written",
         ],
+    )?);
+    words.push(import(
+        steps,
+        NEWS_KEY_SECRET,
+        news_key,
+        ["news data key: not set", "news data key: written"],
     )?);
     Ok(words)
 }
@@ -671,12 +712,17 @@ mod tests {
         revoke_spawn_failures: Cell<u32>,
         model_key: &'static str,
         client_secret: &'static str,
+        news_key: &'static str,
         /// What `kubectl` reads as the `kubernetes` Service's address; empty is `10.43.0.1:443`.
         api_server: &'static str,
         /// What [`MARKER`] names; `None` is the default address, as a provisioned vault records.
         marker: Option<&'static str>,
         kubernetes_only_fails: bool,
         marker_apply_fails: bool,
+        /// How many reads of the vault's status answer it a standby before it is active.
+        standby_reads: u32,
+        status_reads: Cell<u32>,
+        paused: Cell<Duration>,
         calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
         provisioned_with: RefCell<Vec<String>>,
         commands: RefCell<Vec<Vec<String>>>,
@@ -691,6 +737,14 @@ mod tests {
             ));
             let has = |word: &str| args.contains(&word);
             Ok(match args.first().copied().unwrap_or_default() {
+                "exec" if has("status") => {
+                    let read = self.status_reads.get() + 1;
+                    self.status_reads.set(read);
+                    let active = read > self.standby_reads;
+                    let status = json!({"initialized": true, "sealed": false,
+                        "storage_type": "raft", "ha_enabled": true, "is_self": active});
+                    (true, status.to_string())
+                }
                 "get" if has("secrets") => (true, self.present.join(" ")),
                 "get" if has("service") => (
                     true,
@@ -764,10 +818,12 @@ mod tests {
                     kubectl: &|args, stdin| self.kubectl(args, stdin),
                     provision: &provision,
                     put: &put,
+                    pause: &|pause| self.paused.set(self.paused.get() + pause),
                 },
                 connections,
                 self.model_key,
                 self.client_secret,
+                self.news_key,
             )
         }
 
@@ -857,11 +913,46 @@ mod tests {
                 "credentials: present",
                 "kubernetes auth: present",
                 "model provider key: not set",
-                "alpaca oauth client secret: not set"
+                "alpaca oauth client secret: not set",
+                "news data key: not set"
             ]
         );
         assert_eq!(fake.calls.borrow().len(), 3);
+        assert_eq!(
+            fake.status_reads.get(),
+            0,
+            "a provisioned vault is not waited on"
+        );
         assert!(fake.commands.borrow().is_empty());
+        Ok(())
+    }
+
+    /// A vault to provision that is not yet active is waited on, its status read again after each
+    /// pause, before any root generation begins (E21-32v); one that never becomes active stops the
+    /// step after sixty seconds with no root generated and nothing provisioned.
+    #[test]
+    fn the_step_waits_for_an_active_vault_and_stops_if_it_never_is() -> Result<()> {
+        let waited = Fake {
+            standby_reads: 2,
+            ..Fake::default()
+        };
+        waited.run(&["c1"])?;
+        assert_eq!(waited.status_reads.get(), 3);
+        assert_eq!(waited.paused.get(), Duration::from_secs(4));
+        assert!(waited.revoked(), "provisioned after the wait");
+        let never = Fake {
+            standby_reads: u32::MAX,
+            ..Fake::default()
+        };
+        assert!(never.run(&["c1"]).is_err());
+        assert_eq!(never.status_reads.get(), 31);
+        assert_eq!(never.paused.get(), Duration::from_secs(60));
+        assert!(
+            never.calls_with("sys/generate-root/attempt").is_empty(),
+            "no root generated"
+        );
+        assert!(never.commands.borrow().is_empty());
+        assert!(never.calls_with("apply").is_empty());
         Ok(())
     }
 
@@ -906,7 +997,8 @@ mod tests {
                 "kubernetes auth: set up",
                 "root token: revoked",
                 "model provider key: not set",
-                "alpaca oauth client secret: not set"
+                "alpaca oauth client secret: not set",
+                "news data key: not set"
             ]
         );
         let updates = fake.calls_with("sys/generate-root/update");
@@ -977,7 +1069,8 @@ mod tests {
                     "kubernetes auth: set up",
                     "root token: revoked",
                     "model provider key: not set",
-                    "alpaca oauth client secret: not set"
+                    "alpaca oauth client secret: not set",
+                    "news data key: not set"
                 ],
                 "{marker:?}"
             );
@@ -1172,7 +1265,8 @@ mod tests {
                 "credentials: present",
                 "kubernetes auth: present",
                 "model provider key: written",
-                "alpaca oauth client secret: not set"
+                "alpaca oauth client secret: not set",
+                "news data key: not set"
             ]
         );
         assert_eq!(
@@ -1227,7 +1321,8 @@ mod tests {
                 "credentials: present",
                 "kubernetes auth: present",
                 "model provider key: not set",
-                "alpaca oauth client secret: written"
+                "alpaca oauth client secret: written",
+                "news data key: not set"
             ]
         );
         assert_eq!(
@@ -1288,6 +1383,72 @@ mod tests {
         assert!(fake.run(&[]).is_err());
     }
 
+    /// DEC-2277: the news data key set is written through the secret-import identity on every run,
+    /// as one line `<key id>:<secret>` on the CLI's stdin alone, after the other two, and no part of
+    /// it reaches an argument.
+    #[test]
+    fn a_set_news_data_key_is_written_on_every_run() -> Result<()> {
+        const NEWS_KEY: &str = "PKCANARYKEYID:news-secret-canary";
+        let fake = Fake {
+            present: all_present(&["c1"]),
+            news_key: NEWS_KEY,
+            ..Fake::default()
+        };
+        assert_eq!(
+            fake.run(&["c1"])?,
+            [
+                "credentials: present",
+                "kubernetes auth: present",
+                "model provider key: not set",
+                "alpaca oauth client secret: not set",
+                "news data key: written"
+            ]
+        );
+        assert_eq!(
+            *fake.put_with.borrow(),
+            [format!("news-data-key:{IMPORT}\n{NEWS_KEY}\n")]
+        );
+        for (args, _) in fake.calls.borrow().iter() {
+            assert!(
+                !args
+                    .iter()
+                    .any(|arg| arg.contains("canary") || arg.contains("PKCANARY")),
+                "{args:?}"
+            );
+        }
+        let failing = Fake {
+            present: all_present(&[]),
+            news_key: NEWS_KEY,
+            put_fails: true,
+            ..Fake::default()
+        };
+        assert!(failing.run(&[]).is_err());
+        Ok(())
+    }
+
+    /// The two environment secrets make one line, both or neither: a half key, or a part holding
+    /// the separator or a line break, fails the step rather than writing a key the reader cannot
+    /// use (DEC-2277).
+    #[test]
+    fn the_news_data_key_is_both_parts_or_nothing() -> Result<()> {
+        assert_eq!(news_data_key("", "")?, "");
+        assert_eq!(news_data_key("PKID", "secret")?, "PKID:secret");
+        for (id, secret) in [
+            ("PKID", ""),
+            ("", "secret"),
+            ("PK:ID", "secret"),
+            ("PKID", "sec:ret"),
+            ("PKID\n", "secret"),
+            ("PKID", "secret\r"),
+            ("PKID ", "secret"),
+            ("PKID", " secret"),
+            ("PKID", "sec\tret"),
+        ] {
+            assert!(news_data_key(id, secret).is_err(), "{id:?} {secret:?}");
+        }
+        Ok(())
+    }
+
     #[test]
     fn the_commands_are_the_clis() {
         assert_eq!(
@@ -1318,6 +1479,7 @@ mod tests {
             put_command(ALPACA_CLIENT_SECRET),
             ["put", "alpaca-oauth-client-secret"]
         );
+        assert_eq!(put_command(NEWS_KEY_SECRET), ["put", "news-data-key"]);
     }
 
     /// A generation that completes with a token the pad cannot decode fails saying the token may

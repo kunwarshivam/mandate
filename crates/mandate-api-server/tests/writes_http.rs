@@ -16,6 +16,7 @@ use mandate_api::wire::{Id, decode};
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_authn::{Algorithm, IssuerConfig};
@@ -86,12 +87,13 @@ fn fixture() -> Fixture {
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
-        artifacts: None,
+        artifacts: Some(mandates()),
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let drain = Drain::new();
     let f = Fixture {
@@ -104,6 +106,25 @@ fn fixture() -> Fixture {
     };
     seed(&f);
     f
+}
+
+/// The mandate document every approval here binds, which lists the approver role
+/// ([DEC-2129](../../../docs/project/decisions/DEC-2129.md) item 7).
+const DOCUMENT: &str = include_str!("fixtures/mandate.json");
+
+/// The document's version reference.
+fn bound_version() -> String {
+    let document = to_canonical(&parse(DOCUMENT.as_bytes()).expect("JSON"));
+    format!("sha256:{}", Digest::of(&document).to_hex())
+}
+
+/// An artifact store holding [`DOCUMENT`].
+fn mandates() -> Arc<dyn mandate_journal::ArtifactSource + Send + Sync> {
+    let store = Objects::new(std::collections::BTreeMap::<Digest, Vec<u8>>::new());
+    store
+        .put(&to_canonical(&parse(DOCUMENT.as_bytes()).expect("JSON")))
+        .expect("stored");
+    Arc::new(store)
 }
 
 fn alice() -> PrincipalId {
@@ -361,6 +382,54 @@ fn a_kill_switch_names_its_scope() {
         assert_eq!(member(event, &["payload", "agent"]), agent);
         assert_eq!(member(event, &["payload", "step_up"]), &Value::Null);
     }
+}
+
+/// E8-9k (notifications spec §3.2 and §3.4; journal spec §9.15 rules 119, 120 and 130): a user's
+/// kill switch commits, in the `OwnerCommandIssued`'s own batch and right after it, one
+/// `OwnerAlertSent` of kind `kill_switch` whose `subject`, `causation_id` and `owner_command` are
+/// the command, so the dispatcher gives the command exactly one notice. A repeat under the key
+/// replays and adds no second alert.
+#[test]
+fn a_kill_switch_commits_one_owner_alert_naming_its_command_in_its_batch() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    let key = "kill-key-0000000099";
+    let body = br#"{"scope":{"kind":"workspace","id":null}}"#;
+    accepted(&post(&f, &ws("/kill-switch"), &cookie, Some(key), body));
+    let command = derived("kill_switch", ALICE, key);
+    let rows = f.journal.rows_of(&ctl());
+    let at = rows
+        .iter()
+        .position(|row| row.event_id == command)
+        .expect("the command");
+    let alerts: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type == "OwnerAlertSent")
+        .collect();
+    assert_eq!(alerts.len(), 1, "one alert for the command");
+    let alert = alerts[0];
+    assert_eq!(
+        rows.get(at + 1).map(|row| row.event_id.as_str()),
+        Some(alert.event_id.as_str()),
+        "right after its command, in its batch"
+    );
+    assert_eq!(alert.event_id, derived("kill_switch_alert", ALICE, key));
+    let event = parse(&alert.body).expect("JSON");
+    assert_eq!(text(&event, &["causation_id"]), command);
+    assert_eq!(text(&event, &["payload", "subject"]), command);
+    assert_eq!(text(&event, &["payload", "kind"]), "kill_switch");
+    assert_eq!(text(&event, &["payload", "owner_command"]), command);
+
+    accepted(&post(&f, &ws("/kill-switch"), &cookie, Some(key), body));
+    let again = f.journal.rows_of(&ctl());
+    assert_eq!(
+        again
+            .iter()
+            .filter(|row| row.event_type == "OwnerAlertSent")
+            .count(),
+        1,
+        "a repeat replays and alerts nothing more"
+    );
 }
 
 #[test]
@@ -767,15 +836,30 @@ fn hash(byte: &str) -> String {
     format!("sha256:{}", byte.repeat(32))
 }
 
-/// `agt_a`'s stream with one approval request, and Alice an approver.
+/// The `DecisionMade` [`APPROVAL`] names as its cause, deferring nothing, as the runtime writes a
+/// version 1 request's (DEC-2521).
+const DECISION: &str = "01JBH3BTZ8K2M4N6P8R0S2T7A9";
+
+/// `agt_a`'s stream with one approval request bound to [`DOCUMENT`], after the decision that asked
+/// it, and Alice an approver.
 fn approvable(f: &Fixture) {
     let stream = format!("agent:{WORKSPACE}:agt_a");
+    let decided = format!(
+        r#"{{"environment":"paper","event_id":"{DECISION}","event_type":"DecisionMade","payload":{{"dry_run":"allow"}},"stream_id":"{stream}"}}"#
+    );
+    let decided = to_canonical(&parse(decided.as_bytes()).expect("JSON"));
+    let mut decision = row(1, "DecisionMade", "{}");
+    decision.stream_id = stream.clone();
+    decision.event_id = DECISION.to_owned();
+    decision.hash = Digest::of(&decided);
+    decision.body = decided;
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
+        r#"{{"causation_id":"{DECISION}","environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{"trigger":{{"mandate_version":"{}"}}}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
+        bound_version(),
         hash("ab")
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
-    let mut requested = row(1, "ApprovalRequested", "{}");
+    let mut requested = row(2, "ApprovalRequested", "{}");
     requested.stream_id = stream.clone();
     requested.event_id = APPROVAL.to_owned();
     requested.hash = Digest::of(&body);
@@ -784,7 +868,7 @@ fn approvable(f: &Fixture) {
         .streams
         .lock()
         .expect("unpoisoned")
-        .insert(stream, vec![requested]);
+        .insert(stream, vec![decision, requested]);
     *f.records.lock().expect("unpoisoned") = Ok(vec![
         activated(1, alice(), &[Role::Approver]),
         activated(2, bob(), &[Role::Operator]),

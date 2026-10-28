@@ -4,7 +4,7 @@
 //! process on it opens its stream, acts on the owner's kill switch, and follows the clock, and can
 //! never propose an order.
 
-use mandate_canon::{Digest, Key, Object, Value};
+use mandate_canon::{Digest, Key, Object, Value, stream_event_id};
 use mandate_journal::Environment;
 use mandate_runtime::{
     ApprovalSettings, Autonomy, Classified, DryRunVerdict, EventDraft, EventId, FlattenPlan,
@@ -14,12 +14,25 @@ use mandate_runtime::{
 
 use crate::runtime::{Refs, Wiring};
 
-/// The agent stream's deterministic event ids: space `0`, then epoch, head, and ordinal.
-struct Ids;
+/// The agent stream's deterministic event ids, derived from the stream as well as the epoch, head
+/// and ordinal ([`stream_event_id`]), so two agents' streams in one journal never share an id
+/// (journal spec §3) and a retry re-derives the same one (§5.1).
+pub struct Ids {
+    stream: String,
+}
+
+impl Ids {
+    /// The ids of `stream`, the agent stream the process writes.
+    pub fn on(stream: &str) -> Self {
+        Self {
+            stream: stream.to_owned(),
+        }
+    }
+}
 
 impl IdGen for Ids {
     fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
-        EventId(format!("0{:05}{:014}{ordinal:06}", epoch.0, head.0))
+        EventId(stream_event_id(&self.stream, epoch.0, head.0, ordinal))
     }
 }
 
@@ -64,28 +77,30 @@ impl FlattenPlanner for NothingHeld {
     }
 }
 
-/// Every draft at schema version 1 with the fixture's one mandate version.
+/// Every draft at the draft's own [`EventDraft::schema_version`] with the fixture's one mandate version.
 struct FixtureMandate;
 
 impl Refs for FixtureMandate {
-    fn refs(&self, _: &EventDraft) -> Option<(u64, Object)> {
+    fn refs(&self, draft: &EventDraft) -> Option<(u64, Object)> {
         let version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
         let mut refs = Object::new();
         refs.insert(Key::new("mandate_version").ok()?, Value::Str(version));
-        Some((1, refs))
+        Some((draft.schema_version(), refs))
     }
 }
 
-/// The fixture wiring, with `owner` as the deployment's one approver and author.
-pub fn wiring(owner: &str) -> Wiring {
-    wiring_for(&[owner.to_owned()], owner)
+/// The fixture wiring for the agent stream `stream`, with `owner` as the deployment's one
+/// approver and author.
+pub fn wiring(owner: &str, stream: &str) -> Wiring {
+    wiring_for(&[owner.to_owned()], owner, stream)
 }
 
-/// The fixture wiring with the deployment's `approvers` and `author` (DEC-1016). An empty approver
-/// set grants no approval, which the deny-all wiring never asks for anyway.
-pub fn wiring_for(approvers: &[String], author: &str) -> Wiring {
+/// The fixture wiring for the agent stream `stream`, with the deployment's `approvers` and
+/// `author` (DEC-1016). An empty approver set grants no approval, which the deny-all wiring never
+/// asks for anyway.
+pub fn wiring_for(approvers: &[String], author: &str, stream: &str) -> Wiring {
     Wiring {
-        ids: Box::new(Ids),
+        ids: Box::new(Ids::on(stream)),
         gate: Box::new(DenyAll),
         plan: Box::new(NoPlan),
         flatten: Box::new(NothingHeld),
@@ -103,5 +118,8 @@ pub fn wiring_for(approvers: &[String], author: &str) -> Wiring {
             },
         },
         research: None,
+        models: None,
+        facts: None,
+        approvers: None,
     }
 }

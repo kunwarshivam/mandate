@@ -9,11 +9,14 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use mandate_canon::{Digest, parse};
+use mandate_daemon::ContextUnread;
 use mandate_daemon::ResearchSource;
 use mandate_daemon::meter::CellMeter;
-use mandate_daemon::recorded::Bundle;
+use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::FoldError;
-use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope, last_research_reservation};
+use mandate_daemon::source::{
+    CellSource, Rows, SourceFor, envelope, event_triggers, last_research_reservation,
+};
 use mandate_gateway::Outcome as CallOutcome;
 use mandate_gateway::kinds::{KeyOwner, Purpose};
 use mandate_gateway::meter::{MeterRecord, MeterStore, Reservation, Settlement, SharedMeter};
@@ -384,19 +387,39 @@ fn no_context_without_a_deployed_mandate_it_can_read() {
         Box::new(journal.clone()),
         Box::new(BTreeMap::<Digest, Vec<u8>>::new()),
     );
-    assert!(source.parts(&state()).is_none(), "never deployed");
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::Deployment),
+        "never deployed"
+    );
     journal.deployed(AGENT, &format!("sha256:{}", "ab".repeat(32)), "paper");
-    assert!(source.parts(&state()).is_none(), "document missing");
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::Deployment),
+        "document missing"
+    );
 
     let (journal, source) = deployed(&bundle, &researching());
     journal.stopped(AGENT);
-    assert!(source.parts(&state()).is_none(), "stopped");
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::Deployment),
+        "stopped"
+    );
 
     let (journal, source) = deployed(&bundle, &researching());
-    assert!(source.parts(&state()).is_some());
-    for stream in ["ctl:ws1", "agent:ws1:agent-a"] {
+    assert!(source.parts(&state()).is_ok());
+    for (stream, reason) in [
+        ("ctl:ws1", ContextUnread::Control),
+        ("agent:ws1:agent-a", ContextUnread::AgentStream),
+        ("meter:ws1", ContextUnread::Meter),
+    ] {
         journal.unreadable.borrow_mut().insert(stream.to_owned());
-        assert!(source.parts(&state()).is_none(), "{stream} unreadable");
+        assert_eq!(
+            source.parts(&state()).err(),
+            Some(reason),
+            "{stream} unreadable"
+        );
         journal.unreadable.borrow_mut().clear();
     }
 }
@@ -407,12 +430,15 @@ fn no_context_without_a_deployed_mandate_it_can_read() {
 fn no_context_while_another_agent_is_deployed() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.deployed("agent-b", &format!("sha256:{}", "cd".repeat(32)), "paper");
-    assert!(source.parts(&state()).is_none());
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::AnotherAgent)
+    );
     journal.stopped("agent-b");
-    assert!(source.parts(&state()).is_some(), "agent-b stopped");
+    assert!(source.parts(&state()).is_ok(), "agent-b stopped");
     journal.deployed("agent-b", &format!("sha256:{}", "cd".repeat(32)), "live");
     assert!(
-        source.parts(&state()).is_some(),
+        source.parts(&state()).is_ok(),
         "another environment's deployment is not this one's"
     );
 }
@@ -426,12 +452,16 @@ fn research_pauses_once_the_stream_holds_a_record_it_cannot_fold() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent("RunStarted", r#"{"run_id":"01RUN"}"#);
     journal.agent("ObservationRecorded", r#"{"source":"src.newswire"}"#);
-    assert!(source.parts(&state()).is_some(), "a run under way");
+    assert!(source.parts(&state()).is_ok(), "a run under way");
 
     for kind in ["ThesisProposed", "ThesisRevised", "ThesisInvalidated"] {
         let (journal, source) = deployed(&bundle(), &researching());
         journal.agent(kind, r#"{}"#);
-        assert!(source.parts(&state()).is_none(), "{kind}");
+        assert_eq!(
+            source.parts(&state()).err(),
+            Some(ContextUnread::Theses),
+            "{kind}"
+        );
     }
 
     let (journal, source) = deployed(&bundle(), &researching());
@@ -439,7 +469,11 @@ fn research_pauses_once_the_stream_holds_a_record_it_cannot_fold() {
         "ModelInvocationRecorded",
         r#"{"cost_usd":"0.25","reservation":"01J8Z3MR000000000000000001"}"#,
     );
-    assert!(source.parts(&state()).is_none(), "a metered call");
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::Spend),
+        "a metered call"
+    );
 }
 
 /// Today's spend is at most every unmetered call's recorded cost, summed; a cost it cannot read
@@ -459,7 +493,7 @@ fn spend_sums_the_recorded_costs_and_refuses_one_it_cannot_read() {
         "ModelInvocationRecorded",
         r#"{"cost_usd":"a lot","reservation":null}"#,
     );
-    assert!(source.parts(&state()).is_none());
+    assert_eq!(source.parts(&state()).err(), Some(ContextUnread::Spend));
 }
 
 /// Today's spend is the risk day's (DEC-2214 items 2 and 3): a cost recorded on an earlier New York
@@ -491,7 +525,7 @@ fn spend_counts_only_the_risk_day_s_recorded_costs() {
          the next midnight included, counts while the clock still reads today"
     );
     assert!(
-        source.parts(&unclocked()).is_none(),
+        source.parts(&unclocked()).err() == Some(ContextUnread::Clock),
         "no risk clock, no today"
     );
 }
@@ -531,7 +565,11 @@ fn every_cost_record_is_read_strictly() {
     for (case, payload, event_time) in cases {
         let (journal, source) = deployed(&bundle(), &researching());
         journal.agent_at("ModelInvocationRecorded", payload, event_time);
-        assert!(source.parts(&state()).is_none(), "{case}");
+        assert_eq!(
+            source.parts(&state()).err(),
+            Some(ContextUnread::Spend),
+            "{case}"
+        );
     }
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent(
@@ -539,7 +577,7 @@ fn every_cost_record_is_read_strictly() {
         r#"{"cost_usd":"0","reservation":null}"#,
     );
     assert!(
-        source.parts(&state()).is_some(),
+        source.parts(&state()).is_ok(),
         "a null reservation and a zero cost are read"
     );
 }
@@ -656,9 +694,13 @@ fn a_restarted_source_gives_no_context_until_the_next_risk_day() {
         "ModelInvocationRecorded",
         r#"{"cost_usd":"0.25","reservation":"R9"}"#,
     );
-    assert!(source.parts(&state()).is_none(), "R9 is not in the meter");
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::Spend),
+        "R9 is not in the meter"
+    );
     assert!(
-        source.parts(&state_at("2026-10-17T03:59:59Z")).is_none(),
+        source.parts(&state_at("2026-10-17T03:59:59Z")).err() == Some(ContextUnread::Spend),
         "the 16th's last second in New York"
     );
     let parts = source
@@ -771,7 +813,7 @@ fn a_universe_change_never_reaches_the_agent_stream_and_pauses_nothing() {
     ));
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent("UniverseChanged", r#"{}"#);
-    assert!(source.parts(&state()).is_some());
+    assert!(source.parts(&state()).is_ok());
 }
 
 /// A pinned envelope researches nothing, so a thesis record under one, admitted or refused, is not
@@ -786,14 +828,17 @@ fn a_pinned_envelope_with_a_thesis_record_gives_no_context() {
     );
     let (journal, source) = deployed(&bundle(), &document);
     assert!(
-        source.parts(&state()).is_some(),
+        source.parts(&state()).is_ok(),
         "pinned, with nothing to fold"
     );
     journal.agent(
         "ThesisProposed",
         &thesis_payload("th-1", "th-1", 0, AAPL, true, "null", &after_clock(3_600)),
     );
-    assert!(source.parts(&state()).is_none());
+    assert_eq!(
+        source.parts(&state()).err(),
+        Some(ContextUnread::PinnedWithTheses)
+    );
     let (journal, source) = deployed(&bundle(), &document);
     journal.agent(
         "ThesisProposed",
@@ -808,7 +853,7 @@ fn a_pinned_envelope_with_a_thesis_record_gives_no_context() {
         ),
     );
     assert!(
-        source.parts(&state()).is_none(),
+        source.parts(&state()).err() == Some(ContextUnread::PinnedWithTheses),
         "a refused thesis leaves a known lineage and no active one, and still gives no context"
     );
 }
@@ -1068,5 +1113,159 @@ fn the_pass_carries_the_last_research_reservation_from_the_meter_stream() {
         .unreadable
         .borrow_mut()
         .insert("meter:ws1".to_owned());
-    assert!(source.parts(&state()).is_none());
+    assert_eq!(source.parts(&state()).err(), Some(ContextUnread::Meter));
+}
+
+/// A copy of the fixture bundle with `feed` written as its `feed.json`.
+fn bundle_fed(name: &str, feed: &Json) -> Result<Bundle, BundleError> {
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("daemon-{}-feed-{name}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for entry in fs::read_dir(FIXTURE).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+    }
+    fs::write(dir.join("feed.json"), feed.to_string()).unwrap();
+    Bundle::load(&dir)
+}
+
+fn feed_item(id: &str, symbol: &str, arrives_s: u64) -> Json {
+    json!({
+        "item_id": id,
+        "source": "src.newswire",
+        "symbols": [symbol],
+        "arrives_s": arrives_s,
+        "headline": format!("{symbol} guidance withdrawn"),
+        "summary": "The company withdrew its full-year guidance.",
+        "link": format!("https://news.example/{id}"),
+        "licensed": false
+    })
+}
+
+/// The fixture research mandate with `behavior.research.event_triggers` set to news.
+fn triggered() -> Json {
+    let mut document = researching();
+    document["behavior"]["research"]["event_triggers"] = json!({
+        "sources": ["news"],
+        "debounce_s": 900,
+        "max_runs_per_day": 4
+    });
+    document
+}
+
+/// The feed's items reach the pass once arrived, each known and published at the agent's
+/// `AgentDeployed` (13:00) plus its `arrives_s`, and only when the version sets event triggers
+/// (DEC-2392); the pass at 15:00 holds the item due at 14:00 and not the one due at 16:00.
+#[test]
+fn an_arrived_feed_item_reaches_the_pass_only_under_event_triggers() {
+    let feed = json!([
+        feed_item("nw-feed-early", "AAPL", 3_600),
+        feed_item("nw-feed-late", "MSFT", 10_800)
+    ]);
+    let bundle = bundle_fed("arrived", &feed).unwrap();
+    assert_eq!(bundle.feed.len(), 2);
+    let (_, source) = deployed(&bundle, &triggered());
+    let parts = source.parts(&state()).unwrap();
+    let triggers = parts.event_triggers.as_ref().unwrap();
+    assert_eq!(
+        triggers.kinds,
+        BTreeSet::from([mandate_research_run::ItemKind::News])
+    );
+    assert_eq!((triggers.debounce_s, triggers.max_runs_per_day), (900, 4));
+    let arrived: Vec<(String, i64, i64)> = parts
+        .events
+        .iter()
+        .map(|item| match item {
+            mandate_research_run::RetrievedItem::News(news) => (
+                news.item_id.as_str().to_owned(),
+                news.knowledge_at.secs(),
+                news.published_at.secs(),
+            ),
+            other => panic!("a news item, not {other:?}"),
+        })
+        .collect();
+    let due = UtcNanos::parse_rfc3339("2026-10-16T14:00:00Z")
+        .unwrap()
+        .secs();
+    assert_eq!(arrived, vec![("nw-feed-early".to_owned(), due, due)]);
+    let (_, again) = deployed(&bundle, &triggered());
+    assert_eq!(
+        again.parts(&state()).unwrap().events,
+        parts.events,
+        "a restarted source offers the same item with the same bytes"
+    );
+    let (_, untriggered) = deployed(&bundle, &researching());
+    let parts = untriggered.parts(&state()).unwrap();
+    assert_eq!(parts.event_triggers, None);
+    assert!(parts.events.is_empty());
+}
+
+/// The member as the core reads it: absent and `null` are off, and filings map to the filing kind.
+#[test]
+fn event_triggers_read_as_the_document_states_them() {
+    let read = |document: &Json| event_triggers(&parse(document.to_string().as_bytes()).unwrap());
+    assert_eq!(read(&researching()), Ok(None));
+    let mut null = researching();
+    null["behavior"]["research"]["event_triggers"] = Json::Null;
+    assert_eq!(read(&null), Ok(None));
+    let mut both = triggered();
+    both["behavior"]["research"]["event_triggers"]["sources"] = json!(["filings", "news"]);
+    assert_eq!(
+        read(&both).unwrap().unwrap().kinds,
+        BTreeSet::from([
+            mandate_research_run::ItemKind::News,
+            mandate_research_run::ItemKind::Filing
+        ])
+    );
+    assert!(read(&json!({"not": "a mandate"})).is_err());
+}
+
+/// A bundle without `feed.json` has an empty feed; a feed row missing a member refuses the load,
+/// naming it.
+#[test]
+fn the_feed_is_optional_and_read_strictly() {
+    assert!(bundle().feed.is_empty());
+    let mut row = feed_item("nw-feed-bad", "AAPL", 60);
+    row.as_object_mut().unwrap().remove("arrives_s");
+    assert_eq!(
+        bundle_fed("malformed", &json!([row])),
+        Err(BundleError::Malformed {
+            file: "feed.json",
+            member: "arrives_s"
+        })
+    );
+}
+
+/// An item's arrival hangs on this agent's `AgentDeployed` in this environment only: another
+/// environment's deployment of the same agent, later, moves nothing, and a control record of
+/// another type is passed over.
+#[test]
+fn an_arrival_hangs_on_this_environment_s_deployment_only() {
+    let feed = json!([feed_item("nw-feed-early", "AAPL", 3_600)]);
+    let bundle = bundle_fed("environment", &feed).unwrap();
+    let (journal, source) = deployed(&bundle, &triggered());
+    let before = source.parts(&state()).unwrap().events;
+    let seq = u64::try_from(journal.control.borrow().len()).unwrap() + 1;
+    journal.control.borrow_mut().push(row_at(
+        "ctl:ws1",
+        seq,
+        "AgentDeployed",
+        "live",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","mandate_version":"sha256:{}"}}"#,
+            "0".repeat(64)
+        ),
+        "2026-10-16T09:00:00.000000000Z",
+    ));
+    journal.control.borrow_mut().push(row_at(
+        "ctl:ws1",
+        seq + 1,
+        "ConfigSnapshotRegistered",
+        "paper",
+        r#"{"kind":"rule_set"}"#,
+        "2026-10-16T10:00:00.000000000Z",
+    ));
+    let after = source.parts(&state()).unwrap().events;
+    assert_eq!(after, before);
+    assert_eq!(after.len(), 1);
 }

@@ -88,6 +88,16 @@ impl Position {
         self.basis
     }
 
+    /// The position after a fill of signed quantity `q` at `price`, with the fill's gross realized
+    /// P&L, by the one §8.1 rule the account fold applies, so a sub-ledger read elsewhere never
+    /// re-derives it (DEC-2138 item 1).
+    ///
+    /// # Errors
+    /// Whatever the §8.1 arithmetic overflows on.
+    pub fn after_fill(self, q: SignedQty, price: Price) -> Result<(Self, Usd), AccountingError> {
+        self.apply(q, price)
+    }
+
     /// Applies a fill of signed quantity `q` at `price`; returns the new position and the gross
     /// realized P&L. A fill that crosses zero is split into a close and an open. A reduction removes
     /// at most the basis held, so the basis never crosses zero (DEC-86).

@@ -60,14 +60,92 @@ test("Approve shows a code to confirm on the host, and the approve that follows 
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });
 
+test("a grant the runtime refused not_an_approver reads as refused in words, never as approved, and is not sent again (DEC-2818)", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.route(`**/v1/workspaces/${WS}/commands/*`, async (route) => {
+    const served = await route.fetch();
+    const body = (await served.json()) as Record<string, unknown>;
+    const step = { stream_id: "agent", seq: 9, event_type: "ApprovalResponded", recorded_at: "2026-10-26T15:00:00.000000000Z", reason: "not_an_approver" };
+    await route.fulfill({ response: served, json: { ...body, phase: "refused", steps: [step] } });
+  });
+  await page.goto("/?scenario=approvals");
+  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("region", { name: "Confirm on the host" }).getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Refused: you are not an approver of this request now. Nothing was approved." })).toBeVisible();
+  await expect(page.getByText("Recorded in the journal: you approved")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+  const answers = () => calls.filter((c) => c.method() === "POST" && new URL(c.url()).pathname.endsWith("/responses"));
+  await page.waitForTimeout(500);
+  expect(answers()).toHaveLength(1);
+});
+
+test("Connect Alpaca paper shows the disclosure and a host code, starts with that challenge's evidence, and lands on the connection (DEC-2623, DEC-2626)", async ({ page }) => {
+  const calls = apiCalls(page);
+  let authorize = "";
+  await page.route("https://paper-oauth.mock.invalid/**", async (route) => {
+    authorize = route.request().url();
+    await route.fulfill({ status: 200, contentType: "text/html", body: "<title>Alpaca (mock)</title>" });
+  });
+  await page.goto("/connections");
+  await expect(page.getByRole("list", { name: "Broker accounts" })).toContainText("Connected.");
+  await page.getByRole("button", { name: "Connect Alpaca paper" }).click();
+  await expect(page.getByRole("region", { name: "Before you connect Alpaca paper trading" })).toHaveAttribute("data-version", "1");
+  await page.getByRole("button", { name: "Connect with Alpaca" }).click();
+  const panel = page.getByRole("region", { name: "Confirm on the host" });
+  await expect(panel.locator("[data-slot=host-confirm-command]")).toContainText(`mandate step-up confirm-connect --workspace ${WS} --principal `);
+  let started = { connection_id: "" };
+  await page.route(`**/v1/workspaces/${WS}/connections/oauth/start`, async (route) => {
+    const response = await route.fetch();
+    started = (await response.json()) as typeof started;
+    await route.fulfill({ response });
+  });
+  await panel.getByRole("button", { name: "Connect with Alpaca" }).click();
+  await expect(page).toHaveTitle("Alpaca (mock)");
+  expect(started.connection_id).toMatch(/^conn_[0-9A-HJKMNP-TV-Z]{26}$/);
+  expect(new URL(authorize).origin).toBe("https://paper-oauth.mock.invalid");
+  const start = calls.find((c) => c.method() === "POST" && new URL(c.url()).pathname.endsWith("/connections/oauth/start"));
+  expect(start?.postDataJSON()).toMatchObject({ broker: "alpaca", environment: "paper", disclosure: { document: "alpaca_oauth_token_breadth", version: "1" }, step_up: { method: "cli_confirm" } });
+  await page.goto(`/connections/${started.connection_id}`);
+  await expect(page.getByRole("status").filter({ hasText: /^(Connecting|Connected)/ })).toBeVisible();
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});
+
 test("a deployment that does not answer shows unreachable, not the fixtures", async ({ page }) => {
   await page.goto("/?scenario=unreachable");
   await expect(page.getByRole("heading", { name: "Cannot reach your deployment" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
 
+test("setting up an agent is served over the API: the conversation, read without a model, with no fixture tag", async ({ page }) => {
+  await page.goto("/agents/new?scenario=normal");
+  await expect(page.getByRole("textbox", { name: "Your answer" })).toBeVisible();
+  await expect(page.getByText("Your deployment doesn't serve a model to read your words yet")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toHaveCount(0);
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
+test("positions are read from the API: each agent's own, with what is not served said so, and no fixture tag", async ({ page }) => {
+  await page.goto("/positions?scenario=normal");
+  await expect(page.getByRole("table", { name: "The account's holdings" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
+test("the audit timeline reads the journal's streams from the API, newest first, with no fixture tag", async ({ page }) => {
+  await page.goto("/audit/timeline?scenario=normal");
+  await expect(page.getByRole("list", { name: "Journal records" }).getByRole("listitem").first()).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
+test("the gate decisions are read from the journal, with no fixture tag", async ({ page }) => {
+  await page.goto("/audit/decisions?scenario=approvals");
+  await expect(page.getByRole("list", { name: "Gate decisions" }).getByRole("listitem").first()).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
 test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
-  await page.goto("/positions?scenario=approvals");
+  await page.goto("/agents/agt_01JB3K8Y4N7QW2M6R9T5V0XZAC/orders?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });

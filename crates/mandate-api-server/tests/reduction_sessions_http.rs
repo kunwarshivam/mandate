@@ -114,6 +114,7 @@ fn fixture_behind(signer: &Signer, signed_in: bool, ingress: Vec<IpAddr>) -> Fix
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::clone(&reduction),
+        folds: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

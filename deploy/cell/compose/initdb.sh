@@ -23,5 +23,7 @@ set_password mandate_role_provisioner journal-role-mandate-role-provisioner
 set_password mandate_connect_finish journal-role-mandate-connect-finish
 set_password mandate_runtime journal-role-mandate-runtime
 set_password mandate_scheduler journal-role-mandate-scheduler
+set_password mandate_dispatcher journal-role-mandate-dispatcher
 set_password mandate_gateway journal-role-mandate-gateway
 set_password mandate_exporter journal-role-mandate-exporter
+set_password mandate_data journal-role-mandate-data

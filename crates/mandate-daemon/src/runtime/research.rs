@@ -13,10 +13,11 @@ use mandate_research::{
 use mandate_research_driver::{
     AppendFailure, Driver, DriverError, JournalWriter, RuntimeCore, StepBatch, Stepped, Worker,
 };
-use mandate_research_run::Symbol;
+use mandate_research_run::{RetrievedItem, Symbol};
 use mandate_runtime::{
-    ActiveThesis, Effect, EventDraft, FoldedEvent, Preconditions, ResearchConfig, ResearchContext,
-    ResearchInput, ResearchRequest, ResearchState, RiskClock, RuntimeState, tailed,
+    ActiveThesis, Effect, EventDraft, EventTriggers, FoldedEvent, Preconditions, ResearchConfig,
+    ResearchContext, ResearchInput, ResearchRequest, ResearchState, RetrievedObservation,
+    RiskClock, RuntimeState, tailed,
 };
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes};
@@ -37,11 +38,86 @@ pub struct ResearchParts {
     pub active: Vec<ActiveThesis>,
     pub last_reservation: Option<RiskClock>,
     pub data_symbols: BTreeSet<Symbol>,
+    /// The version in effect's `behavior.research.event_triggers` (mandate spec §8.4, DEC-2392).
+    pub event_triggers: Option<EventTriggers>,
+    /// The items that have arrived by the pass, each at its arrival, which the pass offers the
+    /// core as event triggers (agent harness spec §5.3).
+    pub events: Vec<RetrievedItem>,
 }
 
-/// The research context of one pass; `None` runs no research on that pass.
+/// The research context of one pass, or the first input it could not read, which runs no research
+/// on that pass and names why (DEC-2825).
 pub trait ResearchSource {
-    fn parts(&self, state: &RuntimeState) -> Option<ResearchParts>;
+    /// # Errors
+    /// The first input of the context that could not be read.
+    fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread>;
+}
+
+/// The first input a research pass could not read, so it ran no research (DEC-2825). Each names an
+/// input, never its content, so the alert that carries its code holds generic text alone
+/// (`AGENTS.md` rule 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextUnread {
+    /// A stream id the workspace and agent do not make.
+    StreamName,
+    /// The workspace's control stream.
+    Control,
+    /// The agent's own stream.
+    AgentStream,
+    /// The workspace's meter stream.
+    Meter,
+    /// The agent's last research reservation on the meter stream.
+    Reservation,
+    /// The agent's deployment, or its stored mandate document.
+    Deployment,
+    /// The deployed mandate's envelope.
+    Envelope,
+    /// The deployed mandate's event triggers.
+    EventTriggers,
+    /// Whether another agent is deployed in the workspace.
+    Deployments,
+    /// Another agent is deployed in the workspace, which research does not run beside.
+    AnotherAgent,
+    /// The runtime's risk clock: no tick folded yet.
+    Clock,
+    /// The agent's research spend today.
+    Spend,
+    /// The agent's thesis records.
+    Theses,
+    /// A pinned universe whose agent stream holds theses.
+    PinnedWithTheses,
+    /// The research bundle's instrument facts: an asset id or an instrument group.
+    InstrumentFacts,
+    /// The research bundle's halted instruments.
+    Halted,
+    /// The items that have arrived, which the pass offers as event triggers.
+    Arrivals,
+}
+
+impl ContextUnread {
+    /// The reason's stable code (ADR-0001 ES-09), the alert's subject.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::StreamName => "stream_name",
+            Self::Control => "control",
+            Self::AgentStream => "agent_stream",
+            Self::Meter => "meter",
+            Self::Reservation => "reservation",
+            Self::Deployment => "deployment",
+            Self::Envelope => "envelope",
+            Self::EventTriggers => "event_triggers",
+            Self::Deployments => "deployments",
+            Self::AnotherAgent => "another_agent",
+            Self::Clock => "clock",
+            Self::Spend => "spend",
+            Self::Theses => "theses",
+            Self::PinnedWithTheses => "pinned_with_theses",
+            Self::InstrumentFacts => "instrument_facts",
+            Self::Halted => "halted",
+            Self::Arrivals => "arrivals",
+        }
+    }
 }
 
 /// The research worker: retrieval and the gateway's calls. It stores the artifacts its answers name
@@ -88,6 +164,11 @@ pub(super) struct Research {
     inbox: VecDeque<ResearchInput>,
     doubted_at: Option<UtcNanos>,
     doubted_parts: Option<ResearchParts>,
+    /// The records of arrived items this process has stored, so each is put once (DEC-2275).
+    stored: BTreeSet<Digest>,
+    /// The input the source last could not read, already alerted: a pass that reads its context
+    /// clears it, so the next one it cannot read alerts again (DEC-2825).
+    unread: Option<ContextUnread>,
 }
 
 impl Research {
@@ -99,6 +180,30 @@ impl Research {
             inbox: VecDeque::new(),
             doubted_at: None,
             doubted_parts: None,
+            stored: BTreeSet::new(),
+            unread: None,
+        }
+    }
+
+    /// The pass's research context from the source, or `None` when it could not read one: then the
+    /// operator is alerted once, `research_context_unread` with the unread input's code, each time
+    /// that input changes, never once a pass (DEC-2825).
+    fn context(&mut self, state: &RuntimeState, alerts: &mut Vec<Alert>) -> Option<ResearchParts> {
+        match self.wiring.source.parts(state) {
+            Ok(parts) => {
+                self.unread = None;
+                Some(parts)
+            }
+            Err(reason) => {
+                if self.unread != Some(reason) {
+                    self.unread = Some(reason);
+                    alerts.push(Alert {
+                        key: "research_context_unread",
+                        subject: Some(reason.code().to_owned()),
+                    });
+                }
+                None
+            }
         }
     }
 }
@@ -227,6 +332,16 @@ fn bytes(
     )
 }
 
+impl Research {
+    /// Folds one replayed agent-stream event into the core's research state, as the start replays
+    /// the stream into the runtime's: a restarted process keeps the runs in flight, the last
+    /// research call, the debounce, the day's event runs, and the items that started runs (agent
+    /// harness spec §5.3's restart row, journal spec rule 271). `None` when the fold refuses it.
+    pub(super) fn replay(&mut self, event: &FoldedEvent) -> Option<()> {
+        self.state.fold(event).ok()
+    }
+}
+
 impl<S: Store> RuntimeProcess<S> {
     /// The research input in doubt, handed again before anything else (DEC-2208 item 4). Whether
     /// nothing research wrote is in doubt any more.
@@ -257,6 +372,9 @@ impl<S: Store> RuntimeProcess<S> {
         }
         let answers = research.wiring.worker.answers(at);
         research.inbox.extend(answers);
+        if !self.research_offer(now, at, alerts) {
+            return;
+        }
         if !matches!(
             self.research_hand(now, now, ResearchInput::Poll(at), alerts),
             Outcome::Done
@@ -286,6 +404,52 @@ impl<S: Store> RuntimeProcess<S> {
         }
     }
 
+    /// The pass's event triggers (agent harness spec §5.3, DEC-2392, DEC-2275): every arrived item
+    /// the source gives, in arrival order, captured as of its arrival, its record stored first so
+    /// the `ObservationRecorded` an event run starts with names stored bytes, then handed to the
+    /// core, which alone decides whether it brings a `monitor` run forward. Each pass offers them
+    /// all again: an item's bytes hang on the deployment, so the core refuses one whose run is
+    /// journaled (rule 271) and one older than the last research call, and an item the debounce or
+    /// a run in flight held is judged again on a later pass. An item whose record cannot be stored
+    /// is not offered on this pass. Whether the pass may go on.
+    fn research_offer(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
+        let Some(research) = self.research.as_mut() else {
+            return true;
+        };
+        let Some(parts) = research.context(&self.state, alerts) else {
+            return true;
+        };
+        if parts.event_triggers.is_none() {
+            return true;
+        }
+        let mut arrived: Vec<&RetrievedItem> = parts.events.iter().collect();
+        arrived.sort_by_key(|item| (item.knowledge_at(), item.item_id().ok()));
+        let mut offers = Vec::new();
+        for item in arrived {
+            let arrival = RiskClock::from_secs(item.knowledge_at().secs());
+            let Ok((observation, record)) = RetrievedObservation::capture(item, arrival) else {
+                continue;
+            };
+            let digest = Digest::of(&record);
+            if !research.stored.contains(&digest) {
+                if !research.wiring.artifacts.put(&record) {
+                    continue;
+                }
+                research.stored.insert(digest);
+            }
+            offers.push(observation);
+        }
+        for item in offers {
+            if !matches!(
+                self.research_hand(now, now, ResearchInput::Event { at, item }, alerts),
+                Outcome::Done
+            ) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// One research input through the driver, its drafts written at `written_at`.
     fn research_hand(
         &mut self,
@@ -302,9 +466,7 @@ impl<S: Store> RuntimeProcess<S> {
         };
         let retry = research.driver.pending().is_some();
         let Some(parts) = research
-            .wiring
-            .source
-            .parts(&self.state)
+            .context(&self.state, alerts)
             .or_else(|| research.doubted_parts.clone().filter(|_| retry))
         else {
             return Outcome::Held;
@@ -320,6 +482,7 @@ impl<S: Store> RuntimeProcess<S> {
             active_theses: &parts.active,
             last_reservation: parts.last_reservation,
             data_symbols: &parts.data_symbols,
+            event_triggers: parts.event_triggers.as_ref(),
         };
         let ports = self.wiring.ports();
         let head = self.state.head(agent.as_str()).map_or(0, |seq| seq.0);
@@ -364,7 +527,7 @@ impl<S: Store> RuntimeProcess<S> {
                 for effect in effects {
                     if let Effect::Notify(notice) = effect {
                         alerts.push(Alert {
-                            key: notice.message_key,
+                            key: notice.kind.key(),
                             subject: Some(notice.subject_event.0),
                         });
                     }

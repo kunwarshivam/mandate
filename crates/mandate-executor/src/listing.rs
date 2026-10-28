@@ -121,24 +121,28 @@ pub(crate) fn query_unknown(
 /// One listing of `id`'s instrument from DEC-862 item 2's margin before its `OrderSubmitted`, or
 /// nothing when the order or its submission is not in the fold.
 fn list(batch: &mut Batch<'_, '_>, id: ClientOrderId) {
-    let Some(order) = batch.view.orders.get(&id) else {
-        return;
-    };
-    let Some(at) = batch
-        .view
-        .details
-        .get(&id)
-        .and_then(|detail| detail.submitted_at)
-    else {
-        return;
-    };
-    let listing = OrderListing {
-        client_order_id: id,
-        instrument: order.instrument.clone(),
-        origin: OrderOrigin::Agentic,
-        created_since: RiskClock::from_secs(at.secs().saturating_sub(LISTING_MARGIN_S)),
-    };
-    batch.broker(BrokerRequest::ListOrders(listing));
+    if let Some(listing) = batch.view.listing(&id) {
+        batch.broker(BrokerRequest::ListOrders(listing));
+    }
+}
+
+impl ExecutorState {
+    /// The listing of `id`'s instrument the core asks for when it lists `id` (DEC-862 item 2):
+    /// orders an agent placed, from the margin before its `OrderSubmitted`. `None` when the order
+    /// or its submission is not in the fold.
+    pub fn listing(&self, id: &ClientOrderId) -> Option<OrderListing> {
+        let order = self.orders.get(id)?;
+        let at = self
+            .details
+            .get(id)
+            .and_then(|detail| detail.submitted_at)?;
+        Some(OrderListing {
+            client_order_id: id.clone(),
+            instrument: order.instrument.clone(),
+            origin: OrderOrigin::Agentic,
+            created_since: RiskClock::from_secs(at.secs().saturating_sub(LISTING_MARGIN_S)),
+        })
+    }
 }
 
 /// DEC-863 item 3: another order the account stream holds that a record with no client order id
@@ -164,7 +168,10 @@ fn lookalike(view: &ExecutorState, id: &ClientOrderId, ours: &SubmitOrder) -> bo
 }
 
 /// DEC-862 item 4 and DEC-863: the record is the order as journaled, carries no client order id
-/// or ours, and, carrying none, looks like no other order of ours.
+/// or ours, and, carrying none, looks like no other order of ours. Its stop price is ours too
+/// ([DEC-2395](../../../docs/project/decisions/DEC-2395.md) item 2): an order edited in the app
+/// to another stop is not the order we placed, so its filled quantity never reaches the journal
+/// and a sell is never booked at a limit it may no longer carry (DEC-2300 item 1).
 fn matches(
     view: &ExecutorState,
     id: &ClientOrderId,
@@ -175,6 +182,7 @@ fn matches(
         && record.order.side == ours.side
         && record.order.qty == ours.qty
         && record.order.limit_price == ours.limit_price
+        && record.order.stop_price == ours.stop_price
         && record.order_type == ours.order_type
         && record.tif == ours.tif;
     let named = match record.order.client_order_id.as_deref() {

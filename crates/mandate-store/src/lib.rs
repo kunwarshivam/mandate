@@ -20,7 +20,7 @@ pub mod meter;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId, TrustedStart};
 use mandate_journal_pg::PgJournal;
 use mandate_time::UtcNanos;
 use tokio::runtime::Runtime;
@@ -33,6 +33,29 @@ pub trait Store {
 
     /// The stream's records, verified from its first. `None` when the store cannot answer.
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>>;
+
+    /// The stream's records from `start.from_seq` on, for a reader that holds the stream up to
+    /// the seq before it with that record's hash (DEC-2847): `None` when the store cannot answer
+    /// or the first of them does not follow `start`, as a reader whose held head is not this
+    /// journal's must read the whole stream again. A store that reads only whole streams answers
+    /// from [`Self::rows`], whose records are verified from their first, so a read from the first
+    /// record is that read; the journal's own stores read only what follows.
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        if start == TrustedStart::GENESIS {
+            return self.rows(stream);
+        }
+        let since: Vec<StoredEvent> = self
+            .rows(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        match since.first() {
+            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
+                None
+            }
+            _ => Some(since),
+        }
+    }
 
     /// Appends `drafts` at `expected_head` under `epoch`, recorded at `recorded_at`.
     fn append(
@@ -81,7 +104,7 @@ pub struct PgStore {
 }
 
 impl PgStore {
-    /// Connects to `dsn`.
+    /// Connects to `dsn` over one connection ([`PgJournal::single_writer`]).
     ///
     /// # Errors
     /// The runtime's or the connection's, as a stable code only: a DSN is a credential and never
@@ -93,7 +116,7 @@ impl PgStore {
             .map_err(|_| "runtime_unavailable")?;
         let journal = {
             let _entered = runtime.enter();
-            PgJournal::from_dsn(dsn).map_err(|e| e.code())?
+            PgJournal::single_writer(dsn).map_err(|e| e.code())?
         };
         Ok(Self { journal, runtime })
     }
@@ -108,6 +131,14 @@ impl Store for PgStore {
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
         self.runtime.block_on(self.journal.rows(stream)).ok()
+    }
+
+    /// The stream's records from `start.from_seq` on, their chain checked from `start`
+    /// ([`PgJournal::rows_from`]). `None` when the store cannot answer or the chain fails.
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        self.runtime
+            .block_on(self.journal.rows_from(stream, start))
+            .ok()
     }
 
     fn append(

@@ -5,24 +5,39 @@
 //! that holds nothing, is applied as ever.
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_canon::stream_event_id;
 use mandate_executor::{
-    AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, EventId, ExecutorConfig,
-    ExitTier, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices, Seq,
-    WriterEpoch,
+    AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot,
+    MandateVersion, MandateView, ProtectionPrices, Seq, WriterEpoch,
 };
 use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, ShareIncrement};
 use mandate_time::{Date, TradingCalendar};
 
+use crate::marks::NoMarks;
 use crate::quotes::NoQuotes;
+use crate::risk::Unopened;
 use crate::{Protections, Unplanned, Wiring};
 
-/// The account stream's deterministic event ids: space `1`, then epoch, head, and ordinal, 26
-/// digits as a ULID is (the agent stream's runtime uses space `0`).
-pub struct Ids;
+/// The account stream's deterministic event ids, derived from the stream as well as the epoch,
+/// head and ordinal ([`stream_event_id`]), so two accounts' streams in one journal never share an
+/// id (journal spec §3) and a retry re-derives the same one (§5.1).
+pub struct Ids {
+    stream: String,
+}
+
+impl Ids {
+    /// The ids of `scope`'s account stream, `acct:<workspace>:<account>`.
+    pub fn of(scope: &AccountScope) -> Self {
+        Self {
+            stream: format!("acct:{}:{}", scope.workspace.0, scope.account.0),
+        }
+    }
+}
 
 impl IdGen for Ids {
     fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
-        EventId(format!("1{:05}{:014}{ordinal:06}", epoch.0, head.0))
+        EventId(stream_event_id(&self.stream, epoch.0, head.0, ordinal))
     }
 }
 
@@ -67,6 +82,16 @@ impl BindingGateSource for NoFacts {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
     }
+
+    /// No deployment, so no configuration: an exit is held, alerted, rather than journaled in a
+    /// form the journal refuses (DEC-2846).
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        None
+    }
 }
 
 /// No mandate version, so no protection to read. An opening handed without one is held at the
@@ -84,13 +109,13 @@ impl Protections for NoProtection {
     }
 }
 
-/// The fixture wiring.
+/// The fixture wiring for `scope`'s account.
 ///
 /// # Errors
 /// `fee_config_invalid` when the fixture's fee configuration does not read, which is a defect.
-pub fn wiring() -> Result<Wiring, &'static str> {
+pub fn wiring(scope: &AccountScope) -> Result<Wiring, &'static str> {
     Ok(Wiring {
-        ids: Box::new(Ids),
+        ids: Box::new(Ids::of(scope)),
         mandates: Box::new(NoMandate),
         instruments: Box::new(NoInstruments),
         config: ExecutorConfig::PROPOSED,
@@ -98,6 +123,8 @@ pub fn wiring() -> Result<Wiring, &'static str> {
         gate: Box::new(NoFacts),
         protections: Box::new(NoProtection),
         quotes: Box::new(NoQuotes),
+        marked: Box::new(NoMarks),
+        risk: Box::new(Unopened),
     })
 }
 
@@ -136,10 +163,13 @@ mod tests {
     use super::*;
 
     /// The fixture wiring knows nothing: no mandate version, offset or covered instrument, no
-    /// instrument fact, and no binding-gate fact, so no opening can be admitted on it.
+    /// instrument fact, and no binding-gate fact or reference, so no opening can be admitted on it.
     #[test]
     fn the_fixture_wiring_knows_nothing() -> Result<(), Box<dyn std::error::Error>> {
-        let wiring = wiring()?;
+        let wiring = wiring(&AccountScope {
+            account: mandate_executor::AccountRef("acct-a".to_owned()),
+            workspace: mandate_executor::WorkspaceId("ws1".to_owned()),
+        })?;
         let agent = AgentId("agenta".to_owned());
         let instrument = InstrumentId::new("AAPL")?;
         assert_eq!(wiring.mandates.version(&agent), None);
@@ -159,13 +189,23 @@ mod tests {
             protection: None,
         };
         assert!(wiring.gate.input(&request).is_none());
+        assert!(wiring.gate.config_refs(&agent, &instrument).is_none());
         Ok(())
     }
 
-    /// The account stream's ids: space `1`, then epoch, head and ordinal, 26 digits.
+    /// The account stream's ids are its stream's [`stream_event_id`]s, so two accounts' first
+    /// batches never share one (lane DR's X9).
     #[test]
-    fn the_ids_are_26_digits_in_space_one() {
-        let id = Ids.event_id(WriterEpoch(2), Seq(31), 4);
-        assert_eq!(id.0, "10000200000000000031000004");
+    fn the_ids_are_the_account_streams_own() {
+        let scope = |account: &str| AccountScope {
+            account: mandate_executor::AccountRef(account.to_owned()),
+            workspace: mandate_executor::WorkspaceId("ws1".to_owned()),
+        };
+        let id = Ids::of(&scope("acct-a")).event_id(WriterEpoch(2), Seq(31), 4);
+        assert_eq!(id.0, stream_event_id("acct:ws1:acct-a", 2, 31, 4));
+        assert_ne!(
+            Ids::of(&scope("acct-a")).event_id(WriterEpoch(1), Seq(0), 0),
+            Ids::of(&scope("acct-b")).event_id(WriterEpoch(1), Seq(0), 0)
+        );
     }
 }

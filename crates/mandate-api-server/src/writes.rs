@@ -15,32 +15,35 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use mandate_api::envelope::StepUpEvidence;
+use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
 use mandate_api::problem::Violation;
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::requests::{
-    KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest, Scope, StopRequest,
+    ApprovalResponseRequest, KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest,
+    Scope, StopRequest,
 };
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_identity::{Permission, StepUpActionKind};
+use mandate_canon::{Digest, Int, Value, parse, to_canonical};
+use mandate_identity::{Permission, PrincipalId, Roster, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
+use crate::backtests::paper;
 use crate::commands::{
-    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same,
-    settle_batch_at,
+    Command, Event, Issued, KillScope, Settled, Writer, caused_envelope, draft, in_workspace,
+    release_warning, same, settle_batch_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
-use crate::reads::deployed;
+use crate::reads::{deferrals_agree, deployed};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
+use crate::versions::stored;
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -211,6 +214,32 @@ async fn committed(
     dropped: &[String],
     status: Option<&str>,
 ) -> Response {
+    commit_with(app, gate, reader, command, (dropped, status), None).await
+}
+
+/// [`committed`] for a command a passkey step-up authorized: its `StepUpAsserted`, under §3.4's id
+/// for the operation named beside it, follows the command in its batch ([DEC-2128] item 3).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+async fn committed_asserted(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    command: &Command,
+    asserted: Option<(&Asserted, &'static str)>,
+) -> Response {
+    commit_with(app, gate, reader, command, (&[], None), asserted).await
+}
+
+/// The record [`committed`] and [`committed_asserted`] share.
+async fn commit_with(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    command: &Command,
+    (dropped, status): (&[String], Option<&str>),
+    asserted: Option<(&Asserted, &'static str)>,
+) -> Response {
     let Some(environment) = reader.control.first().map(|row| row.environment.as_str()) else {
         return Refused::NotFound.response();
     };
@@ -231,7 +260,27 @@ async fn committed(
     let Some(bytes) = draft(&issued) else {
         return Refused::JournalUnavailable.response();
     };
-    match appended(app, reader, &text, &bytes, gate.now).await {
+    let alert = match command {
+        Command::KillSwitch(_) => match kill_switch_alert(gate, &issued) {
+            Some(alert) => Some(alert),
+            None => return Refused::JournalUnavailable.response(),
+        },
+        _ => None,
+    };
+    let assertion = match asserted {
+        Some((asserted, operation)) => {
+            match assertion_draft(app, gate, &issued, asserted, operation) {
+                Some(assertion) => Some(assertion),
+                None => return Refused::JournalUnavailable.response(),
+            }
+        }
+        None => None,
+    };
+    let batch: Vec<&[u8]> = std::iter::once(bytes.as_slice())
+        .chain(alert.as_deref())
+        .chain(assertion.as_deref())
+        .collect();
+    match appended_batch_at(app, reader, (&text, &batch), gate.now, None).await {
         Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
         Settled::Conflict => problem(
             StatusCode::CONFLICT,
@@ -242,31 +291,75 @@ async fn committed(
     }
 }
 
-/// `draft`, whose id is `id`, on the control stream `reader` read: the event already stored under
-/// the id, replayed or a conflict (§3.4 step 1), or the append's outcome (DEC-1007 item 6).
-pub(crate) async fn appended(
+/// The `StepUpAsserted` recording the passkey step-up that authorized `issued`, its id derived under
+/// `operation`, its raw assertion stored first. `None` when no id derives, no store is bound, or
+/// the store refuses it.
+fn assertion_draft(
     app: &App,
-    reader: &Reader,
-    id: &str,
-    draft: &[u8],
-    now: UtcNanos,
-) -> Settled {
-    appended_at(app, reader, (id, draft), now, None).await
+    gate: &Gate,
+    issued: &Issued<'_>,
+    asserted: &Asserted,
+    operation: &str,
+) -> Option<Vec<u8>> {
+    let (_, id) = derived_for(gate, issued.workspace, operation)?;
+    let writer = Writer {
+        workspace: issued.workspace,
+        principal: issued.principal,
+        event_id: &id,
+        environment: issued.environment,
+        now: issued.now,
+    };
+    asserted.drafted(app.objects.as_deref()?, &writer, issued.event_id)
 }
 
-/// [`appended`], appended at `pinned` when it names a head (`settle_at`).
-pub(crate) async fn appended_at(
-    app: &App,
-    reader: &Reader,
-    (id, draft): (&str, &[u8]),
-    now: UtcNanos,
-    pinned: Option<u64>,
-) -> Settled {
-    appended_batch_at(app, reader, (id, &[draft]), now, pinned).await
+/// The operation §3.4 derives a resume's `StepUpAsserted` id under ([DEC-2128] item 3).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+pub const RESUME_ASSERTED: &str = "resume_step_up_asserted";
+/// The operation §3.4 derives a Stop's `StepUpAsserted` id under.
+pub const STOP_ASSERTED: &str = "stop_step_up_asserted";
+
+/// The operation §3.4 derives a user kill switch's `OwnerAlertSent` id under, distinct from the
+/// command's own `kill_switch` (E8-9k).
+const KILL_SWITCH_ALERT: &str = "kill_switch_alert";
+
+/// The `OwnerAlertSent` a user's kill switch commits in its own batch, right after its
+/// `OwnerCommandIssued` (E8-9k; notifications spec §3.2 and §3.4, journal spec §9.15 rules 119,
+/// 120 and 130): kind `kill_switch`, its `subject`, `causation_id` and `owner_command` the command,
+/// on which the dispatcher gives the command exactly one notice. `None` when no id derives or the
+/// canonical form cannot hold it.
+fn kill_switch_alert(gate: &Gate, issued: &Issued<'_>) -> Option<Vec<u8>> {
+    let (_, id) = derived_for(gate, issued.workspace, KILL_SWITCH_ALERT)?;
+    let writer = Writer {
+        workspace: issued.workspace,
+        principal: issued.principal,
+        event_id: &id,
+        environment: issued.environment,
+        now: issued.now,
+    };
+    let command = string(issued.event_id);
+    let mut payload = mandate_canon::Object::new();
+    for (name, value) in [
+        ("kind", string("kill_switch")),
+        ("owner_command", command.clone()),
+        ("subject", command),
+    ] {
+        payload.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    let event = Event {
+        event_type: "OwnerAlertSent",
+        schema_version: 1,
+        payload: Value::Object(payload),
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    caused_envelope(&writer, &event, Some(issued.event_id))
 }
 
-/// [`appended_at`] for `drafts` appended in one batch, all or none, the first of which has the id
-/// `id` and settles it: a retry finds that one stored.
+/// `drafts`, the first of which has the id `id`, on the control stream `reader` read, appended in
+/// one batch, all or none, at `pinned` when it names a head: the event already stored under the id,
+/// replayed or a conflict (§3.4 step 1), or the append's outcome (DEC-1007 item 6). A retry finds
+/// the first stored.
 pub(crate) async fn appended_batch_at(
     app: &App,
     reader: &Reader,
@@ -371,8 +464,10 @@ pub(crate) fn unknown(id: EventId) -> Response {
 }
 
 /// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10): a Skip is
-/// recorded; a grant is refused for its step-up, which the server cannot verify yet, once the
-/// approval is found.
+/// recorded; a grant, in paper only and once the approval is found and its deferred checks are
+/// exactly its decision's (`deferral_mismatch` otherwise, DEC-2521), is recorded with its
+/// `cli_confirm` evidence when the port verifies it as an `approve` bound to the request's content
+/// hash (DEC-2104), and refused with the port's code otherwise.
 pub async fn respond(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -404,19 +499,31 @@ pub async fn respond(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
-    let agent = match requester(&app, &reader, &approval).await {
-        Ok(Some(agent)) => agent,
+    let (agent, version, agrees) = match requester(&app, &reader, &approval).await {
+        Ok(Some(found)) => found,
         Ok(None) => return Refused::NotFound.response(),
         Err(refusal) => return refusal.response(),
     };
     let skip = match &kept.value {
         ApprovalAnswer::Skipped(skip) => skip,
         ApprovalAnswer::Approved(grant) => {
-            let code = match grant.step_up {
-                Some(_) => ProblemCode::StepUpMissing,
-                None => ProblemCode::StepUpRequired,
+            match approves(&app, &reader, version.as_deref(), gate.admitted.principal) {
+                Ok(true) => {}
+                Ok(false) => return Refused::Forbidden.response(),
+                Err(refusal) => return refusal.response(),
+            }
+            if !agrees {
+                return problem(
+                    StatusCode::CONFLICT,
+                    problem_body(ProblemCode::DeferralMismatch),
+                );
+            }
+            let asked = Asked {
+                agent,
+                approval,
+                grant,
             };
-            return problem(StatusCode::UNAUTHORIZED, problem_body(code));
+            return granted(&app, &gate, &reader, &asked).await;
         }
     };
     let Some(content_hash) = ref_text(&skip.content_hash) else {
@@ -430,11 +537,141 @@ pub async fn respond(
     committed(&app, &gate, &reader, &command, &kept.dropped, None).await
 }
 
+/// A grant of the approval `approval` an agent requested.
+struct Asked<'a> {
+    agent: String,
+    approval: String,
+    grant: &'a ApprovalResponseRequest,
+}
+
+/// The grant `asked` recorded with its evidence once the port verifies it as an `approve` bound to
+/// the request's content hash (§3.6, identity spec §7.2 step 1, DEC-2104 item 6), or refused with
+/// the port's code. A grant naming a delegation is §5.3's batch, not served here, and `invalid`.
+/// A repeat whose key holds the same grant replays before the port is asked, since the port spent
+/// the challenge with the first (§3.4 step 1).
+async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> Response {
+    if asked.grant.delegation.is_some() {
+        return invalid(vec![schema_violation("/delegation", "delegation_unserved")]);
+    }
+    if !paper(&reader.control) {
+        return problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::LiveUnavailable),
+        );
+    }
+    let Some(evidence) = &asked.grant.step_up else {
+        return problem(
+            StatusCode::UNAUTHORIZED,
+            problem_body(ProblemCode::StepUpRequired),
+        );
+    };
+    let Some(content_hash) = ref_text(&asked.grant.content_hash) else {
+        return Refused::Invalid.response();
+    };
+    let Some(digest) = content_hash
+        .strip_prefix("sha256:")
+        .and_then(Digest::from_hex)
+    else {
+        return Refused::Invalid.response();
+    };
+    let Some(step_up) = answered(evidence) else {
+        return problem(
+            StatusCode::UNAUTHORIZED,
+            problem_body(ProblemCode::StepUpStale),
+        );
+    };
+    let command = Command::Grant {
+        agent: asked.agent.clone(),
+        approval: asked.approval.clone(),
+        content_hash,
+        step_up,
+    };
+    if let Some(row) = replayed(gate, reader, &command) {
+        return accepted(command.id_member(), &row, gate.now, &[], None);
+    }
+    let action = Action {
+        kind: StepUpActionKind::Approve,
+        digest,
+    };
+    let judged = Judged {
+        tenant: &reader.tenant,
+        control: &reader.control,
+        now: gate.now,
+    };
+    match app.step_up.asserted(evidence, None, &action, &judged) {
+        Ok(None) => committed(app, gate, reader, &command, &[], None).await,
+        Ok(Some(_)) | Err(Unverified::Code(ProblemCode::JournalUnavailable)) => {
+            Refused::JournalUnavailable.response()
+        }
+        Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
+    }
+}
+
+/// `evidence` as `ApprovalResponseSubmitted` records it (journal spec §9.7): its assertion id and
+/// method, and `authenticated_at` as the integer second the CLI writes, the second it falls in, so
+/// the recorded evidence is never fresher than the presented; `None` only for an instant the
+/// canonical integer cannot hold.
+fn answered(evidence: &StepUpEvidence) -> Option<Value> {
+    let presented = journaled(Some(evidence))?;
+    let at = UtcNanos::parse(presented.get("authenticated_at")?.as_str()?).ok()?;
+    let second = Value::Int(Int::new(u64::try_from(at.secs()).ok()?)?);
+    let mut object = mandate_canon::Object::new();
+    let members = [
+        ("assertion_id", presented.get("assertion_id")?.clone()),
+        ("authenticated_at", second),
+        ("method", presented.get("method")?.clone()),
+    ];
+    for (name, value) in members {
+        object.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    Some(Value::Object(object))
+}
+
+/// Whether the principal is one the mandate version an approval binds lists in
+/// `autonomy.approval.approvers` ([DEC-2129] item 7, as [DEC-2130] item 1 reads it): the
+/// references resolved by [`Roster::approvers`] over the control stream's membership records at
+/// the request's instant (DEC-2130 item 3, DEC-2384 item 3), the set the runtime's admission check
+/// 3 compares a responder with. A version that is not named, not stored, or not a mandate, or a fold
+/// that cannot be read, is `journal_unavailable`, never a pass.
+///
+/// [DEC-2129]: ../../../docs/project/decisions/DEC-2129.md
+/// [DEC-2130]: ../../../docs/project/decisions/DEC-2130.md
+fn approves(
+    app: &App,
+    reader: &Reader,
+    version: Option<&str>,
+    principal: PrincipalId,
+) -> Result<bool, Refused> {
+    let store = app
+        .artifacts
+        .as_deref()
+        .ok_or(Refused::JournalUnavailable)?;
+    let (_, mandate) = version
+        .and_then(|version| stored(store, version))
+        .ok_or(Refused::JournalUnavailable)?;
+    let records = (app.members)(&reader.control).map_err(|_| Refused::JournalUnavailable)?;
+    let roster = Roster::read(records, reader.now).map_err(|_| Refused::JournalUnavailable)?;
+    let references: Vec<&str> = mandate
+        .autonomy
+        .approval
+        .approvers
+        .iter()
+        .map(|approver| approver.as_str())
+        .collect();
+    Ok(roster.approvers(&references).contains(&principal))
+}
+
 /// The deployed agent whose stream requested `approval`, found by equality with an
-/// `ApprovalRequested` event id. A stream that cannot be read does not hide the approval on another
-/// that can; only when none that was read holds it and one could not be read is the answer
-/// `journal_unavailable` rather than `not_found`.
-async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<String>, Refused> {
+/// `ApprovalRequested` event id, with the mandate version its content binds
+/// (`trigger.mandate_version`) when it names one, and whether its deferred checks are exactly its
+/// decision's ([`deferrals_agree`], DEC-2521). A stream that cannot be read does not hide the
+/// approval on another that can; only when none that was read holds it and one could not be read
+/// is the answer `journal_unavailable` rather than `not_found`.
+async fn requester(
+    app: &App,
+    reader: &Reader,
+    approval: &str,
+) -> Result<Option<(String, Option<String>, bool)>, Refused> {
     let mut unreadable = false;
     for deployment in deployed(&reader.control) {
         let stream = format!("agent:{}:{}", reader.workspace, deployment.0);
@@ -444,9 +681,17 @@ async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<
         };
         let requested = rows
             .iter()
-            .any(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
-        if requested {
-            return Ok(Some(deployment.0));
+            .find(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
+        if let Some(row) = requested {
+            let version = parse(&row.body).ok().and_then(|event| {
+                ["payload", "content", "trigger", "mandate_version"]
+                    .iter()
+                    .try_fold(&event, |value, name| value.get(name))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+            let agrees = deferrals_agree(row, &rows);
+            return Ok(Some((deployment.0, version, agrees)));
         }
     }
     match unreadable {
@@ -484,6 +729,8 @@ pub async fn resume(
         kind: StepUpActionKind::Resume,
         bound,
         presented: request.step_up.as_ref(),
+        assertion: request.step_up_assertion.as_ref(),
+        asserted_as: RESUME_ASSERTED,
     };
     stepped(&app, &gate, &workspace, &make, &forwarded).await
 }
@@ -518,6 +765,8 @@ pub async fn stop(
         kind: StepUpActionKind::Stop,
         bound: Bound::command(confirms, &agent),
         presented: request.step_up.as_ref(),
+        assertion: request.step_up_assertion.as_ref(),
+        asserted_as: STOP_ASSERTED,
     };
     stepped(&app, &gate, &workspace, &make, &forwarded).await
 }
@@ -626,16 +875,23 @@ fn text_value(value: &str) -> Value {
     Value::Str(value.to_owned())
 }
 
-/// What a step-up command forwards: its kind, its bound object, and the evidence presented.
+/// What a step-up command forwards: its kind, its bound object, the evidence presented, the passkey
+/// assertion beside it, and the operation §3.4 derives that assertion's `StepUpAsserted` id under.
 struct Forwarded<'a> {
     kind: StepUpActionKind,
     bound: Bound,
     presented: Option<&'a StepUpEvidence>,
+    assertion: Option<&'a StepUpAssertion>,
+    asserted_as: &'static str,
 }
 
 /// Authorizes the command `make` builds and records it with the presented evidence when the port
-/// verifies it, else with `null` (DEC-2102 item 4). A repeat whose key holds the command with the
-/// evidence as presented replays before the port is asked again (§3.4 step 1).
+/// verifies it, else with `null` (DEC-2102 item 4). Evidence with a passkey assertion beside it is
+/// judged by the port's `asserted`, and a verified one commits its `StepUpAsserted` after the
+/// command in the same batch ([DEC-2128] items 2 and 3). A repeat whose key holds the command with
+/// the evidence as presented replays before the port is asked again (§3.4 step 1).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 async fn stepped(
     app: &App,
     gate: &Gate,
@@ -668,23 +924,41 @@ async fn stepped(
         return accepted(as_presented.id_member(), &row, gate.now, &[], None);
     }
     let head = reader.control.last().map_or(0, |row| row.seq);
-    let verified = match (forwarded.presented, forwarded.bound.digest(head)) {
-        (Some(evidence), Some(digest)) => {
-            let action = Action {
-                kind: forwarded.kind,
-                digest,
-            };
-            let judged = Judged {
-                tenant: &reader.tenant,
-                control: &reader.control,
-                now: gate.now,
-            };
-            app.step_up.verify(evidence, &action, &judged).is_ok()
+    let verified: Option<Option<Asserted>> =
+        match (forwarded.presented, forwarded.bound.digest(head)) {
+            (Some(evidence), Some(digest)) => {
+                let action = Action {
+                    kind: forwarded.kind,
+                    digest,
+                };
+                let judged = Judged {
+                    tenant: &reader.tenant,
+                    control: &reader.control,
+                    now: gate.now,
+                };
+                match forwarded.assertion {
+                    Some(assertion) => app
+                        .step_up
+                        .asserted(evidence, Some(assertion), &action, &judged)
+                        .ok()
+                        .flatten()
+                        .map(Some),
+                    None => app
+                        .step_up
+                        .verify(evidence, &action, &judged)
+                        .is_ok()
+                        .then_some(None),
+                }
+            }
+            _ => None,
+        };
+    match verified {
+        Some(asserted) => {
+            let asserted = asserted.as_ref().map(|a| (a, forwarded.asserted_as));
+            committed_asserted(app, gate, &reader, &as_presented, asserted).await
         }
-        _ => false,
-    };
-    let command = if verified { as_presented } else { null };
-    committed(app, gate, &reader, &command, &[], None).await
+        None => committed(app, gate, &reader, &null, &[], None).await,
+    }
 }
 
 /// The row the gate's key already holds for `command`, when it is that command.

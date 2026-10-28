@@ -28,8 +28,11 @@ import yaml
 from common import (
     BOOL,
     DEC,
+    DEFERRED_PARTS,
     ENVELOPE,
+    LIQUIDITY_PAIR,
     ULID,
+    INTENT,
     INT,
     REF,
     STEP_UP,
@@ -93,13 +96,16 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 # §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
 CONFIRM_CODE = T("confirm_code")
 CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
+# §9.36 (DEC-2134): the accepted decision an enabled real-money gate cites.
+DECISION_ID = T("decision_id")
+DECISION_ID_FORM = re.compile(r"^DEC-[1-9][0-9]{0,4}\Z")
 # §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
 # authenticator's 32-bit signature counter.
 CREDENTIAL_ID = T("credential_id")
 CREDENTIAL_ID_FORM = re.compile(r"^[A-Za-z0-9_-]{22,1364}\Z")
 SIGN_COUNT = T("sign_count")
 SIGN_COUNT_MAX = 4294967295
-STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
+STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2, "dmeter": 2, "news": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
@@ -124,6 +130,37 @@ RULE_21_REORDERINGS = {
     "order.rule_21_admits_first": ("model_version", "admits_instruments"),
 }
 RULE_21_PARAMS_FIRST = "order.rule_21_params_first"
+
+
+# §9.2's `AccountSnapshotRecorded`: the broker's account members, then the cash comparison. Version 2
+# (§9.35, DEC-2398) adds the connector's declared account type and day-trading regime, `null` when it
+# declares none, and the broker's prior-close equity and maintenance margin between the two.
+SNAPSHOT_ACCOUNT_MEMBERS = (
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+)
+SNAPSHOT_CASH_MEMBERS = (
+    ("model_cash", opt(DEC)),
+    ("cash_band", opt(DEC)),
+    ("cash_in_band", opt(BOOL)),
+)
+SNAPSHOT_ACCOUNT_TYPES = ("cash", "margin")
+SNAPSHOT_REGIMES = ("intraday_margin", "legacy_pdt")
+SNAPSHOT_MARGIN_MEMBERS = (
+    ("account_type", opt(one_of(*SNAPSHOT_ACCOUNT_TYPES))),
+    ("day_trading_regime", opt(one_of(*SNAPSHOT_REGIMES))),
+    ("last_equity", DEC),
+    ("maintenance_margin", DEC),
+)
 
 SCHEMAS: dict[tuple[str, str], T] = {
     ("ctl", "StreamOpened"): rec(("stream_type", one_of("control")), ("workspace_id", IDENT_T)),
@@ -162,21 +199,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("loss_added", DEC),
     ),
     ("acct", "AccountSnapshotRecorded"): rec(
-        ("status", STR),
-        ("crypto_status", STR),
-        ("trading_blocked", BOOL),
-        ("account_blocked", BOOL),
-        ("trade_suspended_by_user", BOOL),
-        ("multiplier", INT),
-        ("equity", DEC),
-        ("cash", DEC),
-        ("buying_power", DEC),
-        ("non_marginable_buying_power", DEC),
-        ("accrued_fees", DEC),
-        ("model_cash", opt(DEC)),
-        ("cash_band", opt(DEC)),
-        ("cash_in_band", opt(BOOL)),
-        ("risk_clock", RISK_CLOCK),
+        *SNAPSHOT_ACCOUNT_MEMBERS, *SNAPSHOT_CASH_MEMBERS, ("risk_clock", RISK_CLOCK)
     ),
 }
 REFUSAL = rec(
@@ -217,6 +240,25 @@ for _kind in ("ctl", "acct"):
     SCHEMAS[(_kind, "OwnerAcknowledgmentRequested")] = ACK_REQUESTED
     SCHEMAS[(_kind, "OwnerAcknowledged")] = ACKNOWLEDGED
 
+# v0.102 §9.28 (DEC-2824): version 2 of both adds `subject`, so an acknowledgment can name an
+# account restriction (`restriction`) as well as a triggered limit (`limit`). Version 1 reads as
+# `limit`, and rule 239 judges both versions alike.
+ACK_SUBJECTS = ("limit", "restriction", "reconciliation")
+
+
+def with_subject(record: T) -> T:
+    """Version 1's members with `subject` after `event`, the member it qualifies."""
+    fields = []
+    for name, ty in record.fields:
+        fields.append((name, ty))
+        if name == "event":
+            fields.append(("subject", one_of(*ACK_SUBJECTS)))
+    return rec(*fields)
+
+
+ACK_REQUESTED_V2 = with_subject(ACK_REQUESTED)
+ACKNOWLEDGED_V2 = with_subject(ACKNOWLEDGED)
+
 REQUIRED_REFS = {
     "ApprovalRequested": ("mandate_version",),
     "ApprovalResponded": ("mandate_version",),
@@ -240,6 +282,8 @@ REQUIRED_REFS = {
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
     "ThesisInvalidated": ("mandate_version",),
+    **{event_type: ("fee_config", "trading_calendar", "settlement_calendar", "instrument_snapshot")
+       for event_type in ("FillApplied", "LateFillApplied")},
 }
 
 # §9.3 (DEC-403): the account stream's risk-state records.
@@ -526,6 +570,20 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("confirmed_at", INT),
 )
 
+# §9.36 v0.91 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
+# workspace API's refusal of a request that named another environment while it was off.
+SCHEMAS[("ctl", "RealMoneyGateChanged")] = rec(
+    ("enabled", BOOL),
+    ("operator", ULID),
+    ("decision", opt(DECISION_ID)),
+)
+SCHEMAS[("ctl", "RealMoneyRefused")] = rec(
+    ("action", one_of("create_version", "deploy", "connect", "go_live")),
+    ("requested", one_of("live")),
+    ("principal", ULID),
+    ("reason", one_of("gate_off")),
+)
+
 # §9.31 v0.69 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
 # passkey verifier judges an assertion against.
 SCHEMAS[("ctl", "CredentialEnrolled")] = rec(
@@ -711,10 +769,14 @@ CONFIRMED_V2 = rec(
     ("agent_id", opt(IDENT_T)),
     ("base_version", opt(REF)),
 )
+# v0.84 §9.9 (DEC-2131): version 2's members, then the passkey step-up rule 253 reads; never null.
+CONFIRMED_V3 = rec(*CONFIRMED_V2.fields, ("step_up", STEP_UP))
 REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
 
 # §9.19 (DEC-998): the agent stream's `ModelInvocationRecorded` and the model gateway's meter stream.
 AGENT_PURPOSES = ("research", "llm_signal", "fast_signal")
+# The purposes of a call with no agent: the compiler's and an evaluation's (rule 156, DEC-2216).
+NO_AGENT_PURPOSES = ("compiler", "evaluation")
 HARNESS_RESULTS = (
     "judged",
     "unknown_instrument",
@@ -761,7 +823,7 @@ SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("wor
 SCHEMAS[("meter", "MeterReserved")] = rec(
     ("call_id", ULID),
     ("agent_id", opt(IDENT_T)),
-    ("purpose", one_of(*AGENT_PURPOSES, "compiler")),
+    ("purpose", one_of(*AGENT_PURPOSES, *NO_AGENT_PURPOSES)),
     ("model", MODEL_REF),
     ("endpoint", STR),
     ("key_owner", one_of("platform", "customer")),
@@ -769,6 +831,21 @@ SCHEMAS[("meter", "MeterReserved")] = rec(
     ("max_cost_usd", DEC),
     ("risk_day", DATE),
 )
+# §9.37 (v0.97, DEC-2278): the news reader's stream and the one record it writes per stored item.
+SCHEMAS[("news", "StreamOpened")] = rec(("stream_type", one_of("news")), ("workspace_id", IDENT_T))
+SCHEMAS[("news", "NewsItemStored")] = rec(
+    ("source", STR),
+    ("allowlist_version", INT),
+    ("item_id", STR),
+    ("symbols", list_of(STR)),
+    ("published_at", TS),
+    ("knowledge_at", TS),
+    ("item_ref", REF),
+    ("licensed", BOOL),
+)
+NEWS_ITEM_ID_FORM = re.compile(r"^[A-Za-z0-9._:-]{1,128}\Z")
+NEWS_RESERVED_PREFIXES = ("bar:", "quote:", "instrument:")
+NEWS_MAX_SYMBOLS = 32
 SCHEMAS[("meter", "MeterSettled")] = rec(
     ("call_id", ULID),
     ("reservation", ULID),
@@ -951,6 +1028,7 @@ EVENT_CHECKS = (
     "held_mismatch",
     "connection_lifecycle_mismatch",
     "connection_cause_mismatch",
+    "approval_deferral_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
 # v0.38 (DEC-894): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
@@ -1206,7 +1284,7 @@ GATE_CHECK_IDS = tuple(
     "mark_freshness collar conduct buying_power gross_exposure day_trade_budget".split()
 )
 INTENT_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("agent_id", IDENT_T),
     ("instrument_id", STR),
     ("side", STR),
@@ -1217,7 +1295,7 @@ INTENT_V1 = rec(
     ("purpose", STR),
 )
 GATE_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("verdict", STR),
     ("reason_code", opt(STR)),
     ("data_profile", STR),
@@ -1237,7 +1315,7 @@ SUBMITTED_V1 = rec(
 )
 COMPANION = rec(
     ("agent_id", IDENT_T),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("purpose", one_of("open", "increase", "discretionary_exit", "risk_exit", "owner_exit", "protective", "flatten")),
     ("extended_hours", BOOL),
     ("stop_price", opt(DEC)),
@@ -1256,7 +1334,7 @@ PROTECTION_CHANGED = rec(
     ("qty", opt(DEC)),
     ("stop", opt(DEC)),
     ("take_profit", opt(DEC)),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("bracket", opt(STR)),
     ("entry", opt(STR)),
     ("agent_id", opt(IDENT_T)),
@@ -1288,22 +1366,31 @@ ESTABLISHED_V2 = rec(
 VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "StreamOpened"): (1,),
     ("acct", "IntentReceived"): (1, 2),
-    ("acct", "GateDecided"): (1, 2),
+    ("acct", "GateDecided"): (1, 2, 3),
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
     ("acct", "AccountCloseRequested"): (1,),
+    ("acct", "AccountRestrictionChanged"): (1,),
+    ("acct", "KillSwitchActivated"): (1,),
+    ("acct", "ExternalActivityIngested"): (1,),
+    ("acct", "RejectObserved"): (1,),
+    ("acct", "OrderAbandoned"): (1,),
+    ("acct", "FillApplied"): (1, 2),
+    ("acct", "LateFillApplied"): (1,),
+    ("acct", "ClockAdvanced"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
-    ("ctl", "MandateConfirmed"): (1, 2),
+    ("ctl", "MandateConfirmed"): (1, 2, 3),
     ("ctl", "ConnectionRevoked"): (1, 2),
     ("agent", "AgentModeChanged"): (1, 2),
     ("agent", "OwnerCommandRefused"): (1, 2),
     ("ctl", "VerificationRun"): (1, 2),
-    ("ctl", "AgentDeployed"): (1, 2),
+    ("ctl", "AgentDeployed"): (1, 2, 3),
     ("acct", "MarkUpdated"): (1, 2),
     ("ctl", "ConnectionRequested"): (1, 2),
+    ("acct", "AccountSnapshotRecorded"): (1, 2),
 }
 # §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
 # session to version 1's members, with `risk_clock` last; version 1 stays registered.
@@ -1321,7 +1408,48 @@ MARK_UPDATED_V2 = rec(
     ("session", one_of(*MARK_SESSIONS)),
     ("risk_clock", RISK_CLOCK),
 )
+FILL_FEE = rec(("kind", STR), ("amount", DEC), ("asset", STR), ("status", STR))
+
+
+def fill_applied(client_order_id: T) -> T:
+    return rec(
+        ("fill_id", STR),
+        ("client_order_id", client_order_id),
+        ("instrument_id", STR),
+        ("side", STR),
+        ("qty_gross", DEC),
+        ("price", DEC),
+        ("trade_date", DATE),
+        ("risk_clock", RISK_CLOCK),
+        ("fees", list_of(FILL_FEE)),
+    )
+
+
+FILL_APPLIED_V1 = fill_applied(STR)
+FILL_APPLIED_V2 = fill_applied(opt(STR))
+# v0.98 §9.5 (DEC-2817): `FillApplied` version 2 requires the instrument snapshot only of a fill
+# that names an order of ours, which rule 300 checks; an unattributed fill may be in an instrument
+# the platform holds no snapshot of.
+FILL_V2_REQUIRED_REFS = ("fee_config", "trading_calendar", "settlement_calendar")
+
+
+def required_refs(event_type: str, version: int) -> tuple[str, ...]:
+    if event_type == "FillApplied" and version == 2:
+        return FILL_V2_REQUIRED_REFS
+    return REQUIRED_REFS.get(event_type, ())
+
+
+# Trading spec §2.3 (v0.21): every client order id of ours is `md-` and one or more ASCII letters,
+# digits or hyphens, at most 128 characters in all.
+OUR_CLIENT_ORDER_ID = re.compile(r"md-[A-Za-z0-9-]+")
+OUR_CLIENT_ORDER_ID_MAX = 128
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
+    ("acct", "AccountSnapshotRecorded", 2): rec(
+        *SNAPSHOT_ACCOUNT_MEMBERS,
+        *SNAPSHOT_MARGIN_MEMBERS,
+        *SNAPSHOT_CASH_MEMBERS,
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "MarkUpdated", 1): rec(*MARK_UPDATED_V1_MEMBERS, ("risk_clock", RISK_CLOCK)),
     ("acct", "MarkUpdated", 2): MARK_UPDATED_V2,
     ("acct", "StreamOpened", 1): rec(
@@ -1334,6 +1462,13 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "IntentReceived", 2): rec(*INTENT_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "GateDecided", 1): GATE_V1,
     ("acct", "GateDecided", 2): rec(*GATE_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "GateDecided", 3): rec(
+        *GATE_V1.fields,
+        ("sized_qty", opt(DEC)),
+        ("parked", opt(BOOL)),
+        ("held_long", opt(BOOL)),
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "OrderSubmitted", 1): SUBMITTED_V1,
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
@@ -1350,6 +1485,68 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("copied_from", ULID),
         ("risk_clock", RISK_CLOCK),
     ),
+    # §9.5 (DEC-2139): a kill switch the executor applied on its account, as it writes it.
+    ("acct", "KillSwitchActivated", 1): rec(
+        ("scope", one_of("agent", "account")),
+        ("subject", IDENT_T),
+        ("initiator", one_of("owner", "risk_limit", "platform_operator")),
+        ("purpose", one_of("risk_exit", "owner_exit")),
+        ("cancels", list_of(STR)),
+        ("closes", list_of(STR)),
+        ("deferred", list_of(STR)),
+        ("floor", opt(DEC)),
+        ("bid", opt(DEC)),
+        ("bid_size", opt(DEC)),
+        ("copied_from", opt(ULID)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # §9.5 (DEC-2137): an account restriction the executor detected, with its closed cause
+    # (trading spec §7.3, DEC-441 item 23), journaled before the modes it applies.
+    ("acct", "AccountRestrictionChanged", 1): rec(
+        ("restriction", one_of("closing_only", "blocked")),
+        ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
+        ("reason_code", one_of("account_trading_blocked", "account_restricted")),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.90 §9.5 (DEC-2803): the broker's activity the executor did not originate, a reject it
+    # answered with, and an intent the executor gave up on. Every broker-supplied member is
+    # nullable: the executor writes an empty one as null.
+    ("acct", "ExternalActivityIngested", 1): rec(
+        ("source", one_of("open_order", "fill")),
+        ("broker_order_id", opt(STR)),
+        ("fill_id", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("instrument", opt(STR)),
+        ("side", opt(one_of("buy", "sell"))),
+        ("qty", opt(DEC)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "RejectObserved", 1): rec(
+        ("http_status", INT),
+        ("code", opt(STR)),
+        ("message", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "OrderAbandoned", 1): rec(
+        ("client_order_id", STR),
+        ("intent_id", IDENT_T),
+        ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.95 §9.5 (DEC-2812): one broker fill. Version 2 is version 1's members with
+    # `client_order_id` nullable, `null` for a fill that names no order of ours; `LateFillApplied`
+    # stays at version 1, since a late fill is always of an order of ours.
+    ("acct", "FillApplied", 1): FILL_APPLIED_V1,
+    ("acct", "FillApplied", 2): FILL_APPLIED_V2,
+    ("acct", "LateFillApplied", 1): FILL_APPLIED_V1,
+    # v0.94 §9.5 (DEC-2808): the executor's copy of the scheduler's tick, journaled when the tick
+    # returns a risk record or crosses New York midnight. It carries the tick as `clock` and, like
+    # every account-stream row the executor's fold reads, as `risk_clock`: rules 301 and 302.
+    ("acct", "ClockAdvanced", 1): rec(
+        ("clock", RISK_CLOCK),
+        ("risk_clock", RISK_CLOCK),
+    ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
     # journaled before it is sent.
     ("acct", "AccountCloseRequested", 1): rec(
@@ -1362,6 +1559,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
     ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
+    ("ctl", "MandateConfirmed", 3): CONFIRMED_V3,
     ("ctl", "ConnectionRevoked", 2): REVOKED_V2,
     ("agent", "AgentModeChanged", 1): rec(
         ("from", one_of(*MODE_ORDER)),
@@ -1374,6 +1572,8 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
     # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
     ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
+    # v0.84 §9.24 (DEC-2131): version 2's members, then the passkey step-up rule 253 reads.
+    ("ctl", "AgentDeployed", 3): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T), ("step_up", STEP_UP)),
     # v0.68 §9.8 (DEC-2621): version 1's members, then how the credential is obtained and, for an
     # OAuth connect, the token's possible breadth and the disclosure the owner confirmed.
     ("ctl", "ConnectionRequested", 2): rec(
@@ -1474,14 +1674,67 @@ REQUEST_TOP = (
     ("on_timeout", one_of("skip")),
 )
 VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
+for _kind in ("ctl", "acct"):
+    VERSIONED_VERSIONS[(_kind, "OwnerAcknowledgmentRequested")] = (1, 2)
+    VERSIONED_VERSIONS[(_kind, "OwnerAcknowledged")] = (1, 2)
+    VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledgmentRequested", 2)] = ACK_REQUESTED_V2
+    VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledged", 2)] = ACKNOWLEDGED_V2
+# v0.102 §9.5 (DEC-2824): one cause of an account restriction lifted, naming the accepted
+# acknowledgment copy and the evidence that completes it, and the account state the causes left set.
+VERSIONED_SCHEMAS[("acct", "AccountRestrictionLifted", 1)] = rec(
+    ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
+    ("acknowledgment", ULID),
+    ("evidence", ULID),
+    ("restriction", one_of("active", "closing_only", "blocked")),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9's `AgentModeApplied` on the account stream, closed at version 1 as `mandate-journal` registers
+# it: the mode an agent (`*` for every agent) is moved to under a named restriction. v0.104 rule
+# reads it as the reconciliation hold an acknowledgment names (DEC-2830).
+SCHEMAS[("acct", "AgentModeApplied")] = rec(
+    ("agent", STR),
+    ("to", one_of("normal", "exits_only", "paused", "stopped")),
+    ("restriction", STR),
+    ("originated", BOOL),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9 (DEC-458): the broker's account report, closed at version 1, which a broker cause's lift reads
+# as its refresh (v0.102 rule 312). Registered here as `mandate-journal` registers it.
+SCHEMAS[("acct", "AccountStateObserved")] = rec(
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+    ("risk_clock", RISK_CLOCK),
+)
 VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
-VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2)
+VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2, 3)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
     *REQUEST_TOP, ("content", REQUEST_CONTENT_V1), ("content_hash", REF)
 )
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 2)] = rec(
     *REQUEST_TOP,
     ("content", rec(*REQUEST_CONTENT_V1.fields, ("execution", REQUEST_EXECUTION))),
+    ("content_hash", REF),
+)
+# v0.92 (DEC-2515): version 2's content, then the checks the dry run deferred to the binding gate.
+VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 3)] = rec(
+    *REQUEST_TOP,
+    (
+        "content",
+        rec(
+            *REQUEST_CONTENT_V1.fields,
+            ("execution", REQUEST_EXECUTION),
+            ("deferred_to_binding", list_of(one_of(*DEFERRED_PARTS))),
+        ),
+    ),
     ("content_hash", REF),
 )
 # §9.6's mirrors: each top-level member and the content member it repeats.
@@ -1597,12 +1850,16 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if whole and 0 <= value <= top:
             return []
         return [Violation("types", "schema", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id", "decision_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "credential_id":
             padless = len(value) % 4 != 1 or "types.credential_id_length" in skip
             ok = bool(CREDENTIAL_ID_FORM.match(value)) and padless
+        elif ty.kind == "decision_id":
+            ok = bool(DECISION_ID_FORM.match(value)) or (
+                "types.decision_id_zero" in skip and bool(re.match(r"^DEC-[0-9]{1,5}\Z", value))
+            )
         elif ty.kind == "confirm_code":
             ok = bool(CONFIRM_CODE_FORM.match(value)) or (
                 "types.confirm_code_case" in skip and bool(CONFIRM_CODE_FORM.match(value.upper()))
@@ -1842,6 +2099,29 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "GateDecided" and draft["schema_version"] == 3:
+        # Rules 313 to 315 (DEC-2848): the executor's own members, each only where it writes it.
+        sized = p["sized_qty"]
+        allow = p["verdict"] == "allow" or "rule.313.allow" in skip
+        positive = sized is None or normalize_decimal(sized) is None or Decimal(sized) > 0 or "rule.313.positive" in skip
+        rule("313", sized is None or (allow and positive), "schema", "payload.sized_qty")
+        held_long = p["held_long"]
+        rule(
+            "314",
+            held_long is None
+            or ((held_long is True or "rule.314.true" in skip) and (p["verdict"] == "hold" or "rule.314.hold" in skip)),
+            "schema",
+            "payload.held_long",
+        )
+        parked = p["parked"]
+        sessions = ("session_closed",) if "rule.315.closed_only" in skip else ("session_closed", "session_unknown")
+        parked_ok = parked is None or (
+            (parked is True or "rule.315.true" in skip)
+            and p["verdict"] == "hold"
+            and (p["reason_code"] in sessions or "rule.315.reason" in skip)
+            and (held_long is True or "rule.315.held_long" in skip)
+        )
+        rule("315", parked_ok, "schema", "payload.parked")
     if event_type == "ConnectionRequested" and draft["schema_version"] == 2:
         oauth = p["credential"] == "oauth"
         breadth = p["breadth"]
@@ -1878,6 +2158,58 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "KillSwitchActivated" and draft["stream_id"].startswith("acct:"):
+        account_switch_rules(draft, skip, rule)
+    if event_type == "AccountRestrictionChanged":
+        blocked = p["restriction"] == "blocked"
+        if "rule.279.closing_only_any_code" in skip:
+            coded = not blocked or p["reason_code"] == "account_trading_blocked"
+        else:
+            coded = blocked == (p["reason_code"] == "account_trading_blocked")
+        noticed = p["cause"] == "broker_notice" or (
+            "rule.280.any_reject" in skip and p["cause"] == "broker_reject"
+        )
+        if not coded:
+            rule("279", coded, "schema", "payload.reason_code")
+        else:
+            rule("280", not blocked or noticed, "schema", "payload.cause")
+    if event_type == "ClockAdvanced":
+        account_clock_rules(draft, skip, rule)
+    if draft["stream_id"].startswith("news:"):
+        news_rules(event_type, draft, skip, rule)
+    if event_type == "ExternalActivityIngested":
+        fill = p["source"] == "fill"
+        if fill:
+            members = ("client_order_id", "instrument", "side", "qty")
+            if "rule.297.order" in skip:
+                members = ("instrument", "client_order_id", "side", "qty")
+            if "rule.297.broker_order_id" not in skip:
+                members = ("broker_order_id",) + members
+            wrong = next((m for m in members if p[m] is not None), None)
+            rule("297", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+        else:
+            required = ("instrument", "side", "qty")
+            if "rule.298.order" in skip:
+                required = ("side", "instrument", "qty")
+            if "rule.298.side" in skip:
+                required = ("instrument", "qty")
+            fill_null = p["fill_id"] is None or "rule.298.fill_id" in skip
+            missing = next((m for m in required if p[m] is None), None)
+            if not fill_null:
+                rule("298", False, "schema", "payload.fill_id")
+            else:
+                rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
+    if event_type == "OrderAbandoned":
+        derived = "md-" + p["intent_id"] if isinstance(p["intent_id"], str) else None
+        rule("303", p["client_order_id"] is None or p["client_order_id"] == derived, "schema",
+             "payload.client_order_id")
+    if event_type == "FillApplied" and draft["schema_version"] == 2:
+        named = p["client_order_id"]
+        limit = OUR_CLIENT_ORDER_ID_MAX + (1 if "boundary.rule_299_length" in skip else 0)
+        ours = named is None or (OUR_CLIENT_ORDER_ID.fullmatch(named) is not None and len(named) <= limit)
+        rule("299", ours, "schema", "payload.client_order_id")
+        snapshot = "instrument_snapshot" in draft["config_refs"]
+        rule("300", named is None or snapshot, "missing_config_ref", "config_refs.instrument_snapshot")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
@@ -2116,6 +2448,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += deployment_manager_violations(event_type, draft, skip)
     out += connection_role_violations(event_type, draft, skip)
     out += retirement_held_violations(event_type, draft, skip)
+    out += real_money_violations(event_type, draft, skip)
     return out
 
 
@@ -2184,7 +2517,8 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
 
 def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.6's `ApprovalRequested` rules, on a well-typed payload, in the journal's order: each mirror,
-    then rule 136 (version 2's plan names the order's asset class), the deadline, the label, the
+    then rule 136 (version 2's plan names the order's asset class), rule 291 (version 3's deferrals
+    are ascending, never empty, and pair the liquidity checks), the deadline, the label, the
     default, the choices, and last the content hash over the whole content, the plan included."""
     if event_type != "ApprovalRequested":
         return []
@@ -2204,6 +2538,13 @@ def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     if "execution" in content:
         same = content["execution"]["asset_class"] == p["asset_class"]
         rule("136", same, "payload.content.execution.asset_class")
+    if "deferred_to_binding" in content:
+        named = content["deferred_to_binding"]
+        path = "payload.content.deferred_to_binding"
+        if not ascending(named) and "rule.291.ascending" not in skip:
+            out.append(Violation("rule.291.ascending", "non_canonical", path))
+        rule("291.nonempty", bool(named), path)
+        rule("291.pair", len(set(LIQUIDITY_PAIR) & set(named)) != 1, path)
     rule("9.6.deadline", p["deadline"] == epoch_seconds(content["deadline"]), "payload.deadline")
     label = content["evidence"]["combined_score"]["label"]
     rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")
@@ -2373,7 +2714,7 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("155", actor["kind"] == "system", "actor.kind")
     if event_type == "MeterReserved":
         (
-            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] == "compiler"), "payload.agent_id")
+            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] in (NO_AGENT_PURPOSES if "rule.156.evaluation" not in skip else ("compiler",))), "payload.agent_id")
             and rule("156.cost", Decimal(p["max_cost_usd"]) >= 0, "payload.max_cost_usd")
         )
     if event_type == "MeterSettled":
@@ -2384,13 +2725,20 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             and (p["attempts"] != 0 or rule("157.tokens", all(v == 0 for v in p["tokens"].values()), "payload.tokens"))
             and (p["attempts"] != 0 or rule("157.free", Decimal(p["cost_usd"]) == 0, "payload.cost_usd"))
         )
-    if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
+    linked = (2,) if "rule.77.v2_only" in skip else (2, 3)
+    if event_type == "MandateConfirmed" and draft["schema_version"] in linked:
         (
             rule("77.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
             and rule("77.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
         )
         confirmer = actor["kind"] != "system" if "rule.78.not_system_only" in skip else actor["kind"] == "user"
         rule("78", confirmer, "actor.kind")
+    if event_type == "MandateConfirmed" and draft["schema_version"] == 3:
+        passkey_step_up("267", draft, skip, rule)
+    if event_type == "AgentDeployed" and draft["schema_version"] == 3:
+        deployer = actor["kind"] in ("user", "system") if "loose.268.system" in skip else actor["kind"] == "user"
+        if rule("268.user", deployer, "actor.kind"):
+            passkey_step_up("268", draft, skip, rule)
     if event_type == "OwnerRequestSubmitted":
         expected = {"user": "owner", "client": "client"}.get(actor["kind"])
         if "rule.79.not_system_only" in skip and actor["kind"] != "system":
@@ -2559,6 +2907,99 @@ def gap_nanos(start, end) -> int | None:
     if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
         return None
     return instant_nanos(end) - instant_nanos(start)
+
+
+KILL_SWITCH_PURPOSE = {"owner": "owner_exit", "risk_limit": "risk_exit", "platform_operator": "risk_exit"}
+CONFIRMED = ("floor", "bid", "bid_size")
+
+
+def account_switch_rules(draft: dict, skip: frozenset[str], rule) -> None:
+    """Rules 281, 282 and 293 to 296 (DEC-2139) on the account stream's `KillSwitchActivated`, in
+    that order, the first that fails reported."""
+    p = draft["payload"]
+    owner = p["initiator"] == "owner"
+    purpose = KILL_SWITCH_PURPOSE[p["initiator"]]
+    if "rule.281.any_exit" in skip:
+        purpose = p["purpose"]
+    confirmed = [m for m in CONFIRMED if p[m] is not None]
+    if "order.rule_282_bid_first" in skip:
+        mixed = next((m for m in ("bid_size", "bid") if (p[m] is None) != (p["floor"] is None)), None)
+    else:
+        mixed = next((m for m in ("bid", "bid_size") if (p[m] is None) != (p["floor"] is None)), None)
+    account = p["scope"] == "account"
+    overlap = set(p["closes"]) & set(p["deferred"])
+    clauses = [
+        ("281", p["purpose"] == purpose, "payload.purpose"),
+        ("282", mixed is None, f"payload.{mixed}"),
+        ("293", owner or not confirmed or "rule.293.any_initiator" in skip, "payload.floor"),
+        ("294.cancels", not account or not p["cancels"], "payload.cancels"),
+        ("294.deferred", not account or not p["deferred"], "payload.deferred"),
+        ("295", draft["causation_id"] is not None, "causation_id"),
+        ("296", not overlap, "payload.deferred"),
+    ]
+    for name, holds, path in clauses:
+        if not holds and f"rule.{name}" not in skip:
+            rule(name, False, "schema", path)
+            return
+
+
+def account_clock_rules(draft: dict, skip: frozenset[str], rule) -> None:
+    """Rules 301 and 302 (DEC-2808) on the account stream's `ClockAdvanced` copy, in that order, the
+    first that fails reported."""
+    p = draft["payload"]
+    same = p["risk_clock"] == p["clock"]
+    if "loose.301.later" in skip:
+        same = p["risk_clock"] <= p["clock"]
+    clauses = [
+        ("301", same, "payload.risk_clock"),
+        ("302", draft["causation_id"] is not None, "causation_id"),
+    ]
+    if "order.rule_302_first" in skip:
+        clauses.reverse()
+    for name, holds, path in clauses:
+        if not holds and f"rule.{name}" not in skip:
+            rule(name, False, "schema", path)
+            return
+
+
+def news_rules(event_type: str, draft: dict, skip: frozenset[str], rule) -> None:
+    """Rule 283 on `NewsItemStored` (v0.97 §9.37, DEC-2278), its clauses in the spec's order, the
+    first that fails reported; then rule 286's writer, a `system` actor, on every news-stream record."""
+    if event_type == "NewsItemStored":
+        p = draft["payload"]
+        symbols = p["symbols"]
+        least = 0 if "boundary.rule_283_none" in skip else 1
+        most = NEWS_MAX_SYMBOLS + 1 if "boundary.rule_283_33" in skip else NEWS_MAX_SYMBOLS
+        item = p["item_id"]
+        grammar = bool(NEWS_ITEM_ID_FORM.match(item)) or "rule.283.grammar" in skip
+        reserved = item.startswith(NEWS_RESERVED_PREFIXES) and "rule.283.prefix" not in skip
+        clauses = [
+            ("symbols", symbols == sorted(symbols) or "rule.283.sorted" in skip),
+            ("symbols", len(set(symbols)) == len(symbols) or "rule.283.unique" in skip),
+            ("symbols", least <= len(symbols) <= most),
+            ("item_id", grammar and not reserved),
+            ("knowledge_at", p["knowledge_at"] >= p["published_at"] or "rule.283.known" in skip),
+        ]
+        if "order.rule_283_known_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("283", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    rule("286.actor", draft["actor"]["kind"] == "system", "schema", "actor.kind")
+
+
+def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
+    """Rules 267 and 268's evidence clauses (v0.84, DEC-2131): a passkey's step-up, authenticated 0
+    to 300 seconds before the envelope's `event_time`, the method judged first."""
+    step_up = draft["payload"]["step_up"]
+    passkey = step_up["method"] in ("passkey", "cli_confirm") if f"loose.{number}.cli_confirm" in skip else step_up["method"] == "passkey"
+    if not rule(f"{number}.method", passkey, "payload.step_up.method"):
+        return False
+    gap = gap_nanos(step_up["authenticated_at"], draft["event_time"])
+    if gap is not None and f"boundary.rule_{number}_after" in skip:
+        gap = abs(gap)
+    limit = STEP_UP_WINDOW_SECONDS * 10**9 + (1 if f"boundary.rule_{number}_window" in skip else 0)
+    fresh = gap is not None and 0 <= gap <= limit
+    return rule(f"{number}.fresh", fresh, "payload.step_up.authenticated_at")
 
 
 def step_up_fresh(authenticated_at, at, skip: frozenset[str]) -> bool:
@@ -2930,6 +3371,31 @@ def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str
     return out
 
 
+def real_money_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.35's rules 273 and 274, on a well-typed payload: the gate is set by a platform operator as
+    itself, and turned on only with a decision; a refusal is recorded as the principal refused."""
+    if event_type not in ("RealMoneyGateChanged", "RealMoneyRefused"):
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> bool:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+            return False
+        return True
+
+    actor = draft["actor"]
+    if event_type == "RealMoneyGateChanged":
+        if rule("273.operator", actor["kind"] == "platform_operator", "actor.kind"):
+            rule("273.self", actor["id"] == p["operator"], "actor.id")
+        rule("273.decision", p["enabled"] is not True or p["decision"] is not None, "payload.decision")
+    else:
+        if rule("274.user", actor["kind"] == "user", "actor.kind"):
+            rule("274.self", actor["id"] == p["principal"], "actor.id")
+    return out
+
+
 def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.34's rule 265, on a well-typed payload: the runtime's own record, caused by what began
     the retirement; a period from 1, no sooner than 24 hours after it began (the 24 hours between
@@ -3259,12 +3725,12 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     p = draft["payload"]
     kind = draft["stream_id"].split(":")[0]
     out = []
-    name = "rule.154" if kind == "meter" else "rule.25"
+    name = {"meter": "rule.154", "news": "rule.286"}.get(kind, "rule.25")
     if event_type == "StreamOpened" and name not in skip:
         if kind == "acct":
             opened = f"acct:{p['workspace_id']}:{p['account_ref']}"
-        elif kind == "meter":
-            opened = f"meter:{p['workspace_id']}"
+        elif kind in ("meter", "news"):
+            opened = f"{kind}:{p['workspace_id']}"
         else:
             opened = f"ctl:{p['workspace_id']}"
         if draft["stream_id"] != opened:
@@ -3371,7 +3837,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     kinds |= {k for k, e, _ in VERSIONED_SCHEMAS if e == event_type}
     if not kinds:
         return [Violation("catalogue", "unknown_event_type", "event_type")]
-    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2}.get(stream[0])
+    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2, "news": 2}.get(stream[0])
     if shape != len(stream) or not all(IDENT_RE.match(s) for s in stream[1:]):
         return [Violation("stream", "non_canonical", "stream_id")]
     if stream[0] not in kinds:
@@ -3388,14 +3854,18 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         elif not (isinstance(refs[kind], str) and DIGEST_REF.match(refs[kind])):
             out.append(Violation("config_refs", "non_canonical", f"config_refs.{kind}"))
     if "config_refs.required" not in skip:
-        missing = [k for k in REQUIRED_REFS.get(event_type, ()) if k not in refs]
+        missing = [k for k in required_refs(event_type, draft["schema_version"]) if k not in refs]
         out += [
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if event_type == "AgentDeployed" and "versions.agent_deployed_v2" in skip:
         versions = (1,)
+    if event_type in ("MandateConfirmed", "AgentDeployed") and "versions.v3" in skip:
+        versions = tuple(v for v in versions if v != 3)
     if event_type == "CredentialEnrolled" and "versions.credential_enrolled_v2" in skip:
+        versions = (1,)
+    if event_type == "AccountSnapshotRecorded" and "versions.snapshot_v2" in skip:
         versions = (1,)
     if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:
         versions = (2,)

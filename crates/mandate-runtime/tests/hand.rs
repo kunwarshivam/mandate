@@ -218,6 +218,24 @@ fn the_golden_journal_folds_to_the_committed_state() {
             .unwrap_or_default(),
         "and that nothing is outstanding"
     );
+    let ended: Vec<String> = state
+        .risk_clock()
+        .map(|now| state.ended_theses(now))
+        .unwrap_or_default()
+        .iter()
+        .map(|instrument| instrument.as_str().to_owned())
+        .collect();
+    let expected_ended: Vec<String> = expected
+        .get("ended_theses")
+        .and_then(|v| v.as_array())
+        .expect("the ended theses are pinned")
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        ended, expected_ended,
+        "and the instruments whose thesis ended (mandate spec §8.6, DEC-2391)"
+    );
     assert_eq!(
         FOLD_VERSION,
         u32::try_from(
@@ -235,7 +253,7 @@ fn the_golden_journal_folds_to_the_committed_state() {
 #[test]
 fn the_fold_version_is_pinned_with_the_golden_journal() {
     assert_eq!(
-        FOLD_VERSION, 1,
+        FOLD_VERSION, 3,
         "a change to fold output bumps this and regenerates the golden journal (ES-21)"
     );
     let mut state = RuntimeState::new(common::deployment());
@@ -1902,7 +1920,7 @@ fn a_notification_carries_only_opaque_ids() {
 
     for effect in &ran.effects {
         if let Effect::Notify(reference) = effect {
-            let rendered = format!("{} {}", reference.subject_event.0, reference.message_key);
+            let rendered = format!("{} {}", reference.subject_event.0, reference.kind.key());
             for secret in ["AAPL", "150", "10", "buy"] {
                 assert!(
                     !rendered.contains(secret),
@@ -2277,7 +2295,7 @@ fn a_retried_append_hands_the_exit_its_draft_authorises() {
             purpose: Purpose::DiscretionaryExit,
         }) if instrument.as_str() == "AAPL"
             && qty.to_string() == "10"
-            && limit.to_string() == "149"
+            && limit.map(|limit| limit.to_string()).as_deref() == Some("149")
     ));
 }
 

@@ -1,0 +1,50 @@
+[
+  {
+    "label": "no acknowledged event",
+    "remove": [
+      "/acknowledged"
+    ]
+  },
+  {
+    "label": "no subject",
+    "remove": [
+      "/subject"
+    ]
+  },
+  {
+    "label": "a subject no hold has",
+    "set": {
+      "/subject": "mutant_value"
+    }
+  },
+  {
+    "label": "a request member, which a request never names",
+    "set": {
+      "/request": null
+    }
+  },
+  {
+    "label": "no record",
+    "remove": [
+      "/record"
+    ]
+  },
+  {
+    "label": "no step_up",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "an assertion beside cli_confirm",
+    "set": {
+      "/step_up/method": "cli_confirm"
+    }
+  },
+  {
+    "label": "an id that is not an event id",
+    "set": {
+      "/acknowledged": "evt_1"
+    }
+  }
+]

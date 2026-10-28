@@ -31,6 +31,39 @@ use mandate_canon::Value;
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
 
+mod counters;
+mod positions;
+mod rule_set;
+
+pub use counters::Counted;
+pub use positions::{CountedSession, Positions, Protection, RiskMark};
+pub use rule_set::{RuleSetError, gate_rule_set};
+
+/// Why every opening of an agent's is held whatever the order ([`Journaled::opening_hold`],
+/// DEC-2143). A hold for one order (its quote, the session, a limit) is the gate's verdict on that
+/// order, not one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpeningHold {
+    /// The account has traded, and the fold cannot answer an opening beside the account risk
+    /// view's snapshot (DEC-2380 item 2, DEC-2804, DEC-2833): the account holds a position or
+    /// works an order, the counters do not read, or the workspace relates another account.
+    AccountTraded,
+    /// The account has traded and the agent's mandate is unpinned: the account risk view binds an
+    /// instrument at deployment, and a research agent has none (DEC-2819 item 4).
+    ResearchAgentTraded,
+}
+
+impl OpeningHold {
+    /// The reason as `read-models/agent`'s `openings_held` names it.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::AccountTraded => "account_traded",
+            Self::ResearchAgentTraded => "research_agent_traded",
+        }
+    }
+}
+
 /// One journal row, as its store hands it over, in journal order.
 #[derive(Debug, Clone, Copy)]
 pub struct Row<'a> {
@@ -62,7 +95,47 @@ pub struct AccountFacts {
     pub cash: Usd,
     pub buying_power: Usd,
     pub non_marginable_buying_power: Usd,
+    /// What a version 2 snapshot adds (journal spec v0.89 §9.35, DEC-2398): `None` for a version
+    /// 1 snapshot, which carries none of it, so a reader that needs the figures holds or defers.
+    pub figures: Option<SnapshotFigures>,
     pub at: UtcNanos,
+}
+
+/// The day-trade budget's inputs a version 2 `AccountSnapshotRecorded` carries (trading spec
+/// §9.2): the connector's declared account type and day-trading regime, each `None` when it
+/// declares none, and the broker's prior-close equity and maintenance margin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotFigures {
+    pub account_type: Option<DeclaredAccount>,
+    pub day_trading_regime: Option<DeclaredRegime>,
+    pub last_equity: Usd,
+    pub maintenance_margin: Usd,
+}
+
+impl SnapshotFigures {
+    /// The maintenance excess `intraday_margin` checks: `equity` less the maintenance margin,
+    /// signed, and `None` when the margin is negative, which no broker means (§9.35's reading).
+    #[must_use]
+    pub fn maintenance_excess(&self, equity: Usd) -> Option<Usd> {
+        if self.maintenance_margin.is_negative() {
+            return None;
+        }
+        equity.checked_sub(self.maintenance_margin).ok()
+    }
+}
+
+/// The account type a connector declares (trading spec §7.2, DEC-840).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclaredAccount {
+    Cash,
+    Margin,
+}
+
+/// The day-trading regime a connector declares (trading spec §9.2, DEC-840).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclaredRegime {
+    IntradayMargin,
+    LegacyPdt,
 }
 
 /// An instrument's latest sane risk mark from a counted session (journal spec §9.30).
@@ -125,15 +198,21 @@ pub struct Journaled {
     clock_stream: String,
     account_now: Option<UtcNanos>,
     scheduler_now: Option<UtcNanos>,
-    mandate: Option<String>,
+    deployed: Option<String>,
+    applied: Option<String>,
+    stopped: bool,
     account: Option<AccountFacts>,
     marks: BTreeMap<String, Latest>,
     requested_by: Option<String>,
-    orders: BTreeSet<String>,
+    orders: BTreeMap<String, String>,
+    ended: BTreeSet<String>,
     fills: BTreeSet<String>,
+    ordered: bool,
     positions: BTreeMap<String, SignedQty>,
     released: BTreeMap<String, Qty>,
+    models: BTreeMap<(String, String), String>,
     account_positions: BTreeMap<String, SignedQty>,
+    ledger: counters::Ledger,
     unreadable: bool,
 }
 
@@ -147,15 +226,21 @@ impl Journaled {
             clock_stream: clock_stream.to_owned(),
             account_now: None,
             scheduler_now: None,
-            mandate: None,
+            deployed: None,
+            applied: None,
+            stopped: false,
             account: None,
             marks: BTreeMap::new(),
             requested_by: None,
-            orders: BTreeSet::new(),
+            orders: BTreeMap::new(),
+            ended: BTreeSet::new(),
             fills: BTreeSet::new(),
+            ordered: false,
             positions: BTreeMap::new(),
             released: BTreeMap::new(),
+            models: BTreeMap::new(),
             account_positions: BTreeMap::new(),
+            ledger: counters::Ledger::default(),
             unreadable: false,
         }
     }
@@ -163,11 +248,54 @@ impl Journaled {
     /// Folds one row. A row of a type the fold reads that does not parse is refused and holds
     /// every later [`Journaled::facts`], since it may have changed a fact.
     pub fn fold(&mut self, row: Row<'_>) -> Result<(), Unreadable> {
+        self.fold_recorded(row, None)
+    }
+
+    /// Folds one row the store recorded at `recorded`, which the counters an opening on a traded
+    /// account reads time its fills by (DEC-2833 item 3). A fill folded with none leaves the
+    /// counters unread, which holds such an opening; every other fact reads as [`Self::fold`]'s.
+    pub fn fold_recorded(
+        &mut self,
+        row: Row<'_>,
+        recorded: Option<UtcNanos>,
+    ) -> Result<(), Unreadable> {
+        let on_account = row.stream == self.account_stream;
+        if row.stream != self.clock_stream {
+            self.ledger.fold(
+                on_account,
+                row.event_type,
+                row.payload,
+                recorded,
+                &self.agent,
+            );
+        }
         let folded = self.read(row);
         if folded.is_err() {
             self.unreadable = true;
         }
         folded
+    }
+
+    /// Whether the account is flat (DEC-2833 item 3): every row the facts read did, every
+    /// instrument's fills on the account net to no position, and every order seen on it, of any
+    /// agent, a protective leg or the owner's, has ended.
+    pub fn flat(&self) -> bool {
+        !self.unreadable
+            && self
+                .account_positions
+                .values()
+                .all(|position| *position == SignedQty::ZERO)
+            && self.ledger.none_working()
+    }
+
+    /// The counters an opening on a traded, flat account reads beside the agent's risk, in the
+    /// risk day of `now` (DEC-2833 item 3); `None` while any row they read, or any row the facts
+    /// read, did not, or while the workspace relates another account (item 4).
+    pub fn counted(&self, now: UtcNanos) -> Option<Counted> {
+        if self.unreadable {
+            return None;
+        }
+        self.ledger.counted(now)
     }
 
     /// The agent's sub-ledger, as the executor's `sub_ledger` computes it (DEC-2378 item 7): per
@@ -192,6 +320,70 @@ impl Journaled {
             .collect()
     }
 
+    /// The agent's own orders that no terminal state has ended: each `client_order_id` with its
+    /// instrument, which a flatten cancels (DEC-2378 item 7).
+    pub fn working(&self) -> BTreeMap<String, String> {
+        self.orders
+            .iter()
+            .filter(|(order, _)| !self.ended.contains(*order))
+            .map(|(order, instrument)| (order.clone(), instrument.clone()))
+            .collect()
+    }
+
+    /// Each model the workspace registered (`ConfigSnapshotRegistered` of kind `model_version`),
+    /// by its id and version, with the content hash it was registered under, the latest one
+    /// where it was registered again. The builder sizes only outputs of a model listed here
+    /// (DEC-2378 item 10).
+    pub fn models(&self) -> BTreeMap<(String, String), String> {
+        self.models.clone()
+    }
+
+    /// The mandate version in force: the latest one applied on the account stream, else the one
+    /// deployed, and none once the agent is stopped. The streams are folded in any interleaving,
+    /// so the answer is the same whichever stream reaches the fold first: a deployment comes once
+    /// and before every version applied over it, and a stop is final (DEC-1173).
+    fn mandate(&self) -> Option<String> {
+        if self.stopped {
+            return None;
+        }
+        self.applied.clone().or_else(|| self.deployed.clone())
+    }
+
+    /// Whether nothing has traded on the account: its stream holds no fill and no order request
+    /// or submission, of any agent. Only then are the agent's allocation and empty counters its
+    /// risk, and the account flat with no order working, as the binding gate reads them before
+    /// the account risk view does (DEC-2380 item 2).
+    pub fn untraded(&self) -> bool {
+        self.fills.is_empty() && !self.ordered
+    }
+
+    /// Why every opening of the agent's is held whatever the order, as the binding gate's source
+    /// binds on it and the workspace API's agent read serves it (DEC-2143): `None` while nothing
+    /// has traded on the account, or while a pinned agent's traded account is [`Self::flat`] and
+    /// its counters read (DEC-2833 items 1 and 8), when the account risk view's snapshot is what
+    /// the gate reads beside them; otherwise the account risk view does not yet read the opening
+    /// (DEC-2380 item 2), and an unpinned mandate's agent binds no instrument for it (DEC-2819 item
+    /// 4). No exit, protective order or kill switch reads it (`AGENTS.md` rule 13).
+    #[must_use]
+    pub fn opening_hold(&self, pinned: bool) -> Option<OpeningHold> {
+        if self.untraded() {
+            None
+        } else if !pinned {
+            Some(OpeningHold::ResearchAgentTraded)
+        } else if self.flat() && self.ledger.readable() {
+            None
+        } else {
+            Some(OpeningHold::AccountTraded)
+        }
+    }
+
+    /// The account as its latest snapshot states it, current or not; `facts` is what judges it
+    /// current for an opening.
+    #[must_use]
+    pub fn account(&self) -> Option<&AccountFacts> {
+        self.account.as_ref()
+    }
+
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
     pub fn now(&self) -> Option<UtcNanos> {
         self.account_now.max(self.scheduler_now)
@@ -206,7 +398,7 @@ impl Journaled {
             return Err(Held::NoClock);
         }
         let now = self.now().ok_or(Held::NoClock)?;
-        let mandate_version = self.mandate.clone().ok_or(Held::NoMandate)?;
+        let mandate_version = self.mandate().ok_or(Held::NoMandate)?;
         let account = self.account.clone().ok_or(Held::NoSnapshot)?;
         if reached(now, account.at, fresh.snapshot_max_age_s) {
             return Err(Held::StaleSnapshot);
@@ -252,11 +444,11 @@ impl Journaled {
         let ours = || payload.text("agent_id").map(|agent| agent == self.agent);
         match (row.event_type, at) {
             ("AgentDeployed", _) if ours()? => {
-                self.mandate = Some(payload.text("mandate_version")?.to_owned());
+                self.deployed = Some(payload.text("mandate_version")?.to_owned());
             }
-            ("AgentStopped", _) if ours()? => self.mandate = None,
+            ("AgentStopped", _) if ours()? => self.stopped = true,
             ("MandateVersionApplied", Some(_)) if ours()? => match payload.text("result")? {
-                "applied" => self.mandate = Some(payload.text("new_version")?.to_owned()),
+                "applied" => self.applied = Some(payload.text("new_version")?.to_owned()),
                 "rejected" => {}
                 _ => return Err(refused("result")),
             },
@@ -276,21 +468,38 @@ impl Journaled {
                     cash: payload.usd("cash")?,
                     buying_power: payload.usd("buying_power")?,
                     non_marginable_buying_power: payload.usd("non_marginable_buying_power")?,
+                    figures: figures(&payload)?,
                     at,
                 });
             }
             ("MarkUpdated", Some(at)) => self.mark(&payload, at)?,
             ("OrderRequestRecorded", _) if on_account => {
+                self.ordered = true;
                 self.requested_by = Some(payload.text("agent_id")?.to_owned());
             }
             ("OrderSubmitted", _) if on_account => {
+                self.ordered = true;
                 let order = payload.text("client_order_id")?.to_owned();
+                let instrument = payload.text("instrument_id")?.to_owned();
                 if self.requested_by.take().as_deref() == Some(self.agent.as_str()) {
-                    self.orders.insert(order);
+                    self.orders.insert(order, instrument);
                 }
             }
             ("FillApplied" | "LateFillApplied", _) if on_account => self.fill(&payload)?,
+            ("OrderStateChanged", _) if on_account => self.changed(&payload)?,
+            ("OrderAbandoned", _) if on_account => {
+                self.ended
+                    .insert(payload.text("client_order_id")?.to_owned());
+            }
             ("PositionReleased", _) if on_account => self.released(&payload)?,
+            ("ConfigSnapshotRegistered", _) if payload.text("kind")? == "model_version" => {
+                let model = (
+                    payload.text("model_id")?.to_owned(),
+                    payload.text("model_version")?.to_owned(),
+                );
+                let hash = payload.text("content_hash")?.to_owned();
+                self.models.insert(model, hash);
+            }
             ("FeesCharged", _) if on_account => self.fees(&payload)?,
             ("CorporateActionApplied", _) if on_account => {
                 return Err(refused("corporate_action"));
@@ -327,9 +536,11 @@ impl Journaled {
 
     /// A fill of one of the agent's own orders, each `fill_id` once. An order is the agent's when
     /// the `OrderRequestRecorded` journaled immediately before its `OrderSubmitted` names the agent
-    /// (journal spec rule 45).
+    /// (journal spec rule 45). A fill that names no order (`FillApplied` version 2's `null`,
+    /// DEC-2812) moves the account's position and no agent's.
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
-        let ours = self.orders.contains(payload.text("client_order_id")?);
+        let ours = positions::optional_text(payload, "client_order_id")?
+            .is_some_and(|order| self.orders.contains_key(order));
         let id = payload.text("fill_id")?.to_owned();
         let qty =
             Qty::parse(payload.text("qty_gross")?).map_err(|_| (payload.refused)("qty_gross"))?;
@@ -345,6 +556,30 @@ impl Journaled {
         add(&mut self.account_positions, &instrument, signed, payload)?;
         if ours {
             add(&mut self.positions, &instrument, signed, payload)?;
+        }
+        Ok(())
+    }
+
+    /// An order's change of state. A terminal state ends the order, and a replacement of one of
+    /// the agent's orders is the agent's too. A change the executor journaled as `ignored`
+    /// changes nothing.
+    fn changed(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
+        let order = payload.text("client_order_id")?.to_owned();
+        let state = payload.text("state")?;
+        let ignored = payload.flag("ignored")?;
+        let successor = match payload.value.get("replaced_by") {
+            None | Some(Value::Null) => None,
+            Some(Value::Str(successor)) => Some(successor.clone()),
+            Some(_) => return Err((payload.refused)("replaced_by")),
+        };
+        let Some(instrument) = self.orders.get(&order).cloned().filter(|_| !ignored) else {
+            return Ok(());
+        };
+        if TERMINAL.contains(&state) {
+            self.ended.insert(order);
+        }
+        if let Some(successor) = successor {
+            self.orders.insert(successor, instrument);
         }
         Ok(())
     }
@@ -383,33 +618,26 @@ impl Journaled {
     }
 
     fn mark(&mut self, payload: &Payload<'_>, at: UtcNanos) -> Result<(), Unreadable> {
-        let Some(sane) = payload.value.get("sane") else {
-            return Ok(());
-        };
-        let counted = match payload.text("session")? {
-            "regular" | "crypto" => true,
-            "overnight" | "pre_market" | "after_hours" => false,
-            _ => return Err((payload.refused)("session")),
-        };
-        let latest = match sane {
-            Value::Bool(true) => {
-                let bid = payload
-                    .text("bid")
-                    .ok()
-                    .and_then(|bid| Price::parse(bid).ok())
-                    .ok_or_else(|| (payload.refused)("bid"))?;
-                Latest::Sane(Mark { bid, at })
-            }
-            Value::Bool(false) => Latest::NotSane,
-            _ => return Err((payload.refused)("sane")),
-        };
-        if counted {
-            let instrument = payload.text("instrument_id")?.to_owned();
+        if let Some((instrument, mark)) = positions::counted_mark(payload, at)? {
+            let latest = match mark.bid.filter(|_| mark.sane) {
+                Some(bid) => Latest::Sane(Mark { bid, at }),
+                None => Latest::NotSane,
+            };
             self.marks.insert(instrument, latest);
         }
         Ok(())
     }
 }
+
+/// The order states that end an order (trading-domain spec §5.7), `abandoned` among them.
+const TERMINAL: [&str; 6] = [
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
 
 /// The account-stream types the fold reads at their own `risk_clock`, which each must carry.
 const CLOCKED: [&str; 4] = [
@@ -462,6 +690,37 @@ fn later(
 /// Whether a fact observed at `at` has reached `max_age_s` by `now`.
 fn reached(now: UtcNanos, at: UtcNanos, max_age_s: u32) -> bool {
     now.secs().saturating_sub(at.secs()) >= i64::from(max_age_s)
+}
+
+/// A snapshot's [`SnapshotFigures`]: present exactly when it carries `last_equity`, which only a
+/// version 2 does, its closed schema refusing the member at version 1.
+fn figures(payload: &Payload<'_>) -> Result<Option<SnapshotFigures>, Unreadable> {
+    if payload.value.get("last_equity").is_none() {
+        return Ok(None);
+    }
+    let declared = |member: &'static str| match payload.value.get(member) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::Str(name)) => Ok(Some(name.as_str())),
+        _ => Err((payload.refused)(member)),
+    };
+    let account_type = match declared("account_type")? {
+        None => None,
+        Some("cash") => Some(DeclaredAccount::Cash),
+        Some("margin") => Some(DeclaredAccount::Margin),
+        Some(_) => return Err((payload.refused)("account_type")),
+    };
+    let day_trading_regime = match declared("day_trading_regime")? {
+        None => None,
+        Some("intraday_margin") => Some(DeclaredRegime::IntradayMargin),
+        Some("legacy_pdt") => Some(DeclaredRegime::LegacyPdt),
+        Some(_) => return Err((payload.refused)("day_trading_regime")),
+    };
+    Ok(Some(SnapshotFigures {
+        account_type,
+        day_trading_regime,
+        last_equity: payload.usd("last_equity")?,
+        maintenance_margin: payload.usd("maintenance_margin")?,
+    }))
 }
 
 struct Payload<'a> {

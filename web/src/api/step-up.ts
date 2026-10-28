@@ -11,14 +11,22 @@
  */
 import { closedEnum, contentRef, isRecord, timestamp } from "./decode";
 import type { ContentRef, Decoded, DecodeProblem, Decoder, Timestamp } from "./types";
+import { sha256Hex } from "@/lib/sha256";
 
-/** `envelope.schema.json`'s `StepUpAction` kinds this client asks for: the two `cli_confirm` confirms. */
+/** `envelope.schema.json`'s `StepUpAction` kinds the host confirms by `cli_confirm`. */
 export const CLI_CONFIRM_KINDS = ["approve", "connection"] as const;
 export type CliConfirmKind = (typeof CLI_CONFIRM_KINDS)[number];
 
+/** The kinds a passkey confirms from the browser: a version's confirmation and a deployment (DEC-2128), and a later passkey's enrolment (DEC-2108 item 5). */
+export const PASSKEY_KINDS = ["confirm_version", "deploy", "credential_enrol", "resume", "stop"] as const;
+export type PasskeyKind = (typeof PASSKEY_KINDS)[number];
+
+/** Every `StepUpAction` kind this client asks for. */
+export type StepUpKind = CliConfirmKind | PasskeyKind;
+
 /** The one action a challenge is bound to (§3.6): its kind and the SHA-256 of its canonical object. */
 export interface StepUpAction {
-  kind: CliConfirmKind;
+  kind: StepUpKind;
   digest: ContentRef;
 }
 
@@ -57,7 +65,7 @@ const CODE_BITS = 40;
 
 const fail = (path: string, problem: DecodeProblem, value: string | null = null, allowed: readonly string[] | null = null): Decoded<never> => ({ ok: false, issue: { path, problem, value, allowed } });
 
-const kind = closedEnum(CLI_CONFIRM_KINDS);
+const kind = closedEnum<StepUpKind>([...CLI_CONFIRM_KINDS, ...PASSKEY_KINDS]);
 
 /**
  * `commands/step-up-challenge`, decoded against the action it was asked for: an answer bound to any
@@ -153,6 +161,39 @@ export function approvalConfirmCommand(input: ApprovalConfirm): string {
     `--principal ${input.principalId}`,
     `--agent ${input.agentId}`,
     `--approval ${input.approvalId}`,
+    `--challenge ${input.shown.challenge.challenge_id}`,
+    `--code ${input.shown.code}`,
+    "--journal <journal DSN> --store <artifact store>",
+  ].join(" ");
+}
+
+/** The token-breadth disclosure the owner confirms with a connect's step-up (DEC-2621 item 5, DEC-2622 version 1). */
+export const CONNECT_DISCLOSURE = { document: "alpaca_oauth_token_breadth", version: "1" } as const;
+
+/**
+ * The digest a connect's step-up binds (DEC-2621 item 4): SHA-256 of the canonical `{action:
+ * "connect", broker, disclosure: {document, version}, environment: "paper", workspace_id}`. Its
+ * members are written in journal spec §4's key order; every value is a plain string, so this is the
+ * canonical form `oauth_connect_object` writes.
+ */
+export function connectStepUpDigest(workspaceId: string): ContentRef {
+  const canonical = JSON.stringify({ action: "connect", broker: "alpaca", disclosure: { document: CONNECT_DISCLOSURE.document, version: CONNECT_DISCLOSURE.version }, environment: "paper", workspace_id: workspaceId });
+  return `sha256:${sha256Hex(canonical)}`;
+}
+
+/** What a connect's host command names (DEC-2125 item 3): the command computes the digest itself. */
+export interface ConnectConfirm {
+  workspaceId: string;
+  principalId: string;
+  shown: ShownChallenge;
+}
+
+/** The command the owner runs on the host for a paper connect (`mandate step-up confirm-connect`, DEC-2125 item 3). */
+export function connectConfirmCommand(input: ConnectConfirm): string {
+  return [
+    "mandate step-up confirm-connect",
+    `--workspace ${input.workspaceId}`,
+    `--principal ${input.principalId}`,
     `--challenge ${input.shown.challenge.challenge_id}`,
     `--code ${input.shown.code}`,
     "--journal <journal DSN> --store <artifact store>",

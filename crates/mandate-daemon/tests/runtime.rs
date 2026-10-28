@@ -4,17 +4,23 @@
 //! workspace services, the scheduler, and the account's executor) would have committed them.
 
 use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
-use mandate_daemon::{Config, Refs, RuntimeProcess, Wiring, fixture};
+use mandate_daemon::deployment::ApproverSource;
+use mandate_daemon::models::{Evaluated, Models, Streams};
+use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_process::{Exit, State};
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, DryRunVerdict,
-    EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun, IdGen,
-    MandateView, Mode, OrderPlan, Proposal, Seq, SignalInputs, WorkspaceId, WriterEpoch,
+    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deferral, Deployment,
+    DryRunVerdict, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun,
+    IdGen, MandateView, Mode, ModelDirection, ModelOutput, OrderExecution, OrderPlan, Proposal,
+    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, WorkspaceId, WriterEpoch,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -108,6 +114,9 @@ fn wiring() -> Wiring {
             },
         },
         research: None,
+        models: None,
+        facts: None,
+        approvers: None,
     }
 }
 
@@ -136,6 +145,10 @@ struct Rig {
     clock_down: Rc<Cell<bool>>,
     accounts: Rc<RefCell<Vec<StoredEvent>>>,
     account_down: Rc<Cell<bool>>,
+    /// The agent stream read as unreadable, from the moment a test sets it.
+    agent_down: Rc<Cell<bool>>,
+    /// Rows a test lays over the agent stream's own when it is read, as a record a writer left.
+    agent_extra: Rc<RefCell<Vec<StoredEvent>>>,
     reads: Rc<RefCell<Vec<String>>>,
     lose_answers: Rc<Cell<u32>>,
 }
@@ -160,6 +173,11 @@ impl Store for Rig {
                     .cloned()
                     .collect(),
             ),
+            AGENT_STREAM if self.agent_down.get() => None,
+            AGENT_STREAM => self.journal.rows(stream).map(|mut rows| {
+                rows.extend(self.agent_extra.borrow().iter().cloned());
+                rows
+            }),
             _ => self.journal.rows(stream),
         }
     }
@@ -481,7 +499,7 @@ fn day_started(rig: &Rig) {
     ));
 }
 
-fn risk_clock(process: &RuntimeProcess<Rig>) -> Option<i64> {
+fn risk_clock<S: Store>(process: &RuntimeProcess<S>) -> Option<i64> {
     process.state().risk_clock().map(|clock| clock.secs())
 }
 
@@ -518,7 +536,7 @@ fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
     let rig = Rig::default();
     let mut process = RuntimeProcess::start(
         rig.clone(),
-        fixture::wiring("user-owner"),
+        fixture::wiring("user-owner", AGENT_STREAM),
         &config(),
         at(NOW),
     );
@@ -538,6 +556,42 @@ fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
         .and_then(Value::as_str)
         .map(str::to_owned);
     assert!(refs.is_some_and(|v| v.starts_with("sha256:")));
+}
+
+/// Lane DR's X9: two agents' runtimes on one journal, each on the binary's fixture wiring, both
+/// open their streams and are ready. The journal refuses an `event_id` another stream already
+/// holds (journal spec §3), so ids derived from the epoch, head and ordinal alone stopped the
+/// second agent's runtime at its first batch.
+#[test]
+fn two_agents_runtimes_on_one_journal_both_open_their_streams() {
+    let rig = Rig::default();
+    let other = "agent-b";
+    let other_stream = format!("agent:{WORKSPACE}:{other}");
+    let mut config_b = config();
+    config_b.deployment.agent = AgentId(other.into());
+    let first = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &config(),
+        at(NOW),
+    );
+    let second = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner", &other_stream),
+        &config_b,
+        at(NOW),
+    );
+    assert_eq!(first.lifecycle().state(), State::Ready);
+    assert_eq!(second.lifecycle().state(), State::Ready);
+    let opened = |stream: &str| {
+        rig.journal
+            .rows(&StreamId::parse(stream).unwrap())
+            .unwrap_or_default()
+            .iter()
+            .filter(|row| row.event_type == "StreamOpened")
+            .count()
+    };
+    assert_eq!((opened(AGENT_STREAM), opened(&other_stream)), (1, 1));
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -700,6 +754,36 @@ fn an_account_reconciled_before_the_start_is_folded_before_the_hold_is_taken() {
     let process = start(&rig, NOW);
     assert_eq!(process.lifecycle().state(), State::Ready);
     assert_eq!(mode(&process), Mode::Normal);
+}
+
+/// The account stream as the cell's connect and record leave it (journal spec §9.8): the copy of
+/// `ConnectionEstablished` the CLI's `connection record` appends after the executor's check and
+/// reconciliation. The runtime folds it and starts ready; before, its fold refused the copy as not
+/// interpreted, and every runtime in the cell exited `cycle_failed` at its start.
+#[test]
+fn the_account_streams_copy_of_the_establishment_folds_and_the_runtime_starts() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "ConnectionEstablished",
+        &format!(
+            r#"{{"connection_id":"{CONNECTION}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{ACCOUNT_REF}","risk_clock":"2026-09-21T15:00:00.000000000Z"}}"#
+        ),
+    );
+    let mut process = start(&rig, NOW);
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(mode(&process), Mode::Normal);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
 }
 
 /// The latest establishment names the account: a reconnect to a new account is followed from the
@@ -1112,4 +1196,2482 @@ proptest! {
             prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
         }
     }
+}
+
+/// The event ids of the control rows, when they read, and of the agent rows one ask was handed.
+type Handed = (Option<Vec<String>>, Vec<String>);
+
+/// The model host as a test lays it down: the evaluations it answers at any tick, how many times
+/// it was asked, and what each ask was handed.
+#[derive(Clone, Default)]
+struct Host {
+    answer: Rc<RefCell<Vec<Evaluated>>>,
+    asked: Rc<Cell<u32>>,
+    handed: Rc<RefCell<Vec<Handed>>>,
+}
+impl Models for Host {
+    fn evaluate(&self, _: RiskClock, streams: Streams<'_>) -> Vec<Evaluated> {
+        self.asked.set(self.asked.get() + 1);
+        let ids = |rows: &[StoredEvent]| rows.iter().map(|row| row.event_id.clone()).collect();
+        self.handed
+            .borrow_mut()
+            .push((streams.control.map(ids), ids(streams.agent)));
+        self.answer.borrow().clone()
+    }
+}
+
+/// An artifact store that keeps what it is given, or refuses everything.
+#[derive(Clone, Default)]
+struct Closes {
+    kept: Rc<RefCell<Vec<Vec<u8>>>>,
+    refuse: bool,
+}
+impl ArtifactSink for Closes {
+    fn put(&mut self, bytes: &[u8]) -> bool {
+        if !self.refuse {
+            self.kept.borrow_mut().push(bytes.to_vec());
+        }
+        !self.refuse
+    }
+}
+
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
+
+/// The host's daily output for SPY cut off at `as_of`.
+fn daily(as_of: i64) -> Evaluated {
+    Evaluated {
+        output: ModelOutput {
+            model_id: "quant.ma_crossover".into(),
+            model_version: "1.0.0".into(),
+            content_hash: Digest::of(b"quant.ma_crossover"),
+            instrument_id: InstrumentId::new(SPY).unwrap(),
+            as_of: RiskClock::from_secs(as_of),
+            expires_at: RiskClock::from_secs(as_of + 86_400),
+            direction: ModelDirection::Long,
+            conviction: Conviction::parse("1").unwrap(),
+            confidence: Unit::parse("1").unwrap(),
+            horizon_s: 86_400,
+            thesis_ref: None,
+            evidence: Vec::new(),
+            invalidation: None,
+            thesis_id: None,
+            lineage_id: None,
+            ignored: None,
+        },
+        closes: format!("closes through {as_of}").into_bytes(),
+        source: "data.daily_bars".into(),
+    }
+}
+
+fn modelled(rig: &Rig, host: &Host, closes: &Closes) -> RuntimeProcess<Rig> {
+    RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    )
+}
+
+fn positions(rig: &Rig, kind: &str) -> Vec<usize> {
+    kinds(rig)
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| *k == kind)
+        .map(|(n, _)| n)
+        .collect()
+}
+
+/// DEC-2383: on a tick the process asks the host once and records each new output as its
+/// observation, the closes stored first under the digest it names, then the output; a tick
+/// handed again asks nothing more, and a later tick with the same daily cut-off records nothing.
+#[test]
+fn a_tick_records_each_new_model_output_once_after_its_observation() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(host.asked.get(), 1);
+    let ids = |rows: Vec<StoredEvent>| -> Vec<String> {
+        rows.into_iter().map(|row| row.event_id).collect()
+    };
+    let control = rig.rows(&StreamId::parse(CONTROL).unwrap()).unwrap();
+    let [(handed_control, handed_agent)] = host.handed.borrow().clone().try_into().unwrap();
+    assert_eq!(
+        handed_control,
+        Some(ids(control)),
+        "the host is handed the control rows (DEC-2827)"
+    );
+    assert!(
+        handed_agent.is_empty() && !agent_rows(&rig).is_empty(),
+        "the host is handed the agent stream's thesis records alone, here none (DEC-2852 item 4)"
+    );
+    let (observed, output) = (
+        positions(&rig, "ObservationRecorded"),
+        positions(&rig, "ModelOutputRecorded"),
+    );
+    assert_eq!((observed.len(), output.len()), (1, 1), "{:?}", kinds(&rig));
+    assert!(
+        observed[0] < output[0],
+        "the observation first: {:?}",
+        kinds(&rig)
+    );
+    assert_eq!(*closes.kept.borrow(), vec![daily(NOW - 3_600).closes]);
+    let observation = String::from_utf8(agent_rows(&rig)[observed[0]].body.clone()).unwrap();
+    assert!(
+        observation.contains(&Digest::of(&daily(NOW - 3_600).closes).to_hex()),
+        "its data_ref is the stored closes: {observation}"
+    );
+    process.step(at(NOW + 7));
+    assert_eq!(host.asked.get(), 1, "the same tick asks nothing more");
+    tick(&rig, NOW + 8);
+    process.step(at(NOW + 9));
+    assert_eq!(host.asked.get(), 2, "a new tick asks again");
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        1,
+        "the same daily output is recorded once"
+    );
+    host.answer.borrow_mut()[0] = daily(NOW + 7);
+    tick(&rig, NOW + 10);
+    process.step(at(NOW + 11));
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        2,
+        "the next cut-off is new"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A restart on the same tick records no output a second time.
+#[test]
+fn a_restart_records_no_output_twice() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    tick(&rig, NOW + 5);
+    let mut first = modelled(&rig, &host, &closes);
+    first.step(at(NOW + 6));
+    drop(first);
+    let mut second = modelled(&rig, &host, &closes);
+    second.step(at(NOW + 7));
+    assert_eq!(host.asked.get(), 2, "the restart asks once");
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 1);
+    assert_eq!(second.lifecycle().state(), State::Ready);
+}
+
+/// Without a tick the host is never asked (the runtime decides only on one); a host that answers
+/// nothing, a refusal, records nothing; and closes that cannot be stored are no output (MI-10).
+#[test]
+fn no_tick_no_answer_or_unstored_closes_record_nothing() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled(&rig, &host, &closes);
+    kill_switch(&rig);
+    process.step(at(NOW + 1));
+    assert_eq!(
+        host.asked.get(),
+        0,
+        "no tick, no evaluation, and the kill switch asks nothing"
+    );
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(host.asked.get(), 1);
+    assert_eq!(
+        count(&rig, "ObservationRecorded") + count(&rig, "ModelOutputRecorded"),
+        0
+    );
+
+    let rig = Rig::default();
+    let refusing = Closes {
+        refuse: true,
+        ..Closes::default()
+    };
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &refusing);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        count(&rig, "ObservationRecorded") + count(&rig, "ModelOutputRecorded"),
+        0
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// An order plan that proposes nothing and remembers, for each decision, the model outputs it was
+/// handed.
+#[derive(Clone, Default)]
+struct Seen(Rc<RefCell<Vec<usize>>>);
+impl OrderPlan for Seen {
+    fn plan(&self, _: &MandateView, inputs: &SignalInputs) -> Option<Proposal> {
+        self.0
+            .borrow_mut()
+            .push(inputs.outputs.values().map(BTreeMap::len).sum());
+        None
+    }
+    fn classify(&self, _: &MandateView, _: &Proposal) -> Classified {
+        Classified {
+            autonomy: Autonomy::Deny,
+            decided_by: None,
+        }
+    }
+}
+
+/// #2448's review (rule 13), seam 1: the tick that follows a new output decides with it folded,
+/// so the observation, then the output, then the tick's decision is the journal's order.
+#[test]
+fn the_tick_decides_with_the_output_it_follows() {
+    let rig = Rig::default();
+    let (host, closes, seen) = (Host::default(), Closes::default(), Seen::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            plan: Box::new(seen.clone()),
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 1);
+    assert_eq!(risk_clock(&process), Some(NOW + 5), "the tick was handed");
+    assert_eq!(
+        seen.0.borrow().last().copied(),
+        Some(1),
+        "the decision saw the output recorded before its tick: {:?}",
+        seen.0.borrow()
+    );
+}
+
+/// Seams 2 to 4: whatever the models' inputs read, the tick is handed, so its expiries and exits
+/// never wait on a model (rule 13). With models wired the tick runs; an agent stream that cannot
+/// be read, or an output record that does not read, records no new output, and the tick still
+/// moves the risk clock with the process ready.
+#[test]
+fn the_tick_runs_whatever_the_models_inputs_read() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 5),
+        "models wired, the tick still runs"
+    );
+
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    rig.agent_down.set(true);
+    tick(&rig, NOW + 7);
+    process.step(at(NOW + 8));
+    rig.agent_down.set(false);
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        0,
+        "an unreadable stream records nothing"
+    );
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 7),
+        "and the tick still runs"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+
+    let broken = r#"{"model_id":"quant.ma_crossover"}"#;
+    rig.agent_extra.borrow_mut().push(row(
+        AGENT_STREAM,
+        90,
+        "ModelOutputRecorded",
+        "runtime",
+        broken,
+    ));
+    tick(&rig, NOW + 9);
+    process.step(at(NOW + 10));
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        0,
+        "an unreadable output records nothing"
+    );
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 9),
+        "and the tick still runs"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+
+    rig.agent_extra.borrow_mut().clear();
+    drop(process);
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 11);
+    process.step(at(NOW + 12));
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        1,
+        "once readable, the output is recorded: a journal that took the record away is read \
+         again whole at the next start or the next check, since a running process reads only \
+         what follows its head between them (DEC-2847 item 4, DEC-2852 item 6)"
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 11));
+}
+
+/// The production ports' fold (DEC-2378 S2) is fed every row the process reads: the account the
+/// control stream names, from its start, and the scheduler's ticks, each row once however many
+/// passes read it.
+#[test]
+fn the_production_fold_is_fed_the_named_account_and_the_clock_once_each() {
+    let rig = Rig::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let stamp = at(NOW).to_string();
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{stamp}"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        r#"{"client_order_id":"o1","instrument_id":"spy","side":"buy"}"#,
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"spy","side":"buy","qty_gross":"3","price":"100","risk_clock":"{stamp}"}}"#
+        ),
+    );
+    on_account(&rig, OTHER_ACCOUNT, "FillApplied", r#"{"fill_id":"f9"}"#);
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            facts: Some(facts.clone()),
+            approvers: None,
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 5));
+    process.step(at(NOW + 6));
+    let held = facts.read(|journaled| journaled.held());
+    let three = mandate_num::Qty::parse("3").unwrap();
+    assert_eq!(held, Some([("spy".to_owned(), three)].into()));
+    assert_eq!(
+        facts.read(|journaled| journaled.now()),
+        Some(Some(at(NOW + 5)))
+    );
+}
+
+/// The production flatten's unplanned holding reaches the process's alerts as the fixed key
+/// `flatten_unplanned`, once (DEC-2378 item 8).
+#[test]
+fn a_kill_switch_with_an_unplanned_holding_raises_the_operator_alert_once() {
+    let rig = Rig::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let stamp = at(NOW).to_string();
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{stamp}"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        r#"{"client_order_id":"o1","instrument_id":"spy","side":"buy"}"#,
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"spy","side":"buy","qty_gross":"3","price":"100","risk_clock":"{stamp}"}}"#
+        ),
+    );
+    let flatten =
+        mandate_daemon::production::Flatten::new(facts.clone(), std::collections::BTreeMap::new());
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            facts: Some(facts),
+            approvers: None,
+            flatten: Box::new(flatten),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    process.step(at(NOW + 1));
+    kill_switch(&rig);
+    let alerts = process.step(at(NOW + 2));
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
+    let keys: Vec<&str> = alerts.iter().map(|alert| alert.key).collect();
+    assert!(
+        keys.contains(&mandate_daemon::FLATTEN_UNPLANNED),
+        "{keys:?}"
+    );
+    let again = process.step(at(NOW + 3));
+    assert!(
+        again
+            .iter()
+            .all(|alert| alert.key != mandate_daemon::FLATTEN_UNPLANNED)
+    );
+}
+
+/// The owner's exit of `spy`, as the workspace services journal it: unconfirmed, or with a
+/// confirmed bid and CLI step-up `assertion` authenticated ten seconds before it was committed.
+fn owner_exit(rig: &Rig, assertion: Option<&str>) {
+    owner_exit_at(rig, assertion.map(|assertion| (assertion, NOW - 10)));
+}
+
+/// The owner's exit of `spy` committed at `NOW`, with a confirmed bid of 99 for 100 and floor 95
+/// and CLI step-up `(assertion, authenticated_at)` when given, and no bid otherwise.
+fn owner_exit_at(rig: &Rig, step_up: Option<(&str, i64)>) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let (bid, step_up) = match step_up {
+        Some((assertion, authenticated_at)) => (
+            r#""bid":"99","bid_size":"100","floor":"95""#.to_owned(),
+            format!(
+                r#"{{"assertion_id":"{assertion}","authenticated_at":{authenticated_at},"method":"cli_confirm"}}"#
+            ),
+        ),
+        None => (
+            r#""bid":null,"bid_size":null,"floor":null"#.to_owned(),
+            "null".to_owned(),
+        ),
+    };
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","command":"owner_exit","scope":"instrument","subject":"spy",{bid},"submitted_at":{NOW},"step_up":{step_up},"user":"user-owner"}}"#
+    );
+    rig.control
+        .borrow_mut()
+        .push(row(CONTROL, seq, "OwnerCommandIssued", "user", &payload));
+}
+
+/// The runtime over the production flatten, with the agent's fill of 3 `spy` on its account and
+/// `spy` a US equity in its universe.
+fn holding_spy(rig: &Rig, now: i64) -> RuntimeProcess<Rig> {
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    if rig.accounts.borrow().is_empty() {
+        established(rig, CONNECTION, ACCOUNT_REF, 2);
+        let stamp = at(NOW).to_string();
+        on_account(
+            rig,
+            ACCOUNT,
+            "OrderRequestRecorded",
+            &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{stamp}"}}"#),
+        );
+        on_account(
+            rig,
+            ACCOUNT,
+            "OrderSubmitted",
+            r#"{"client_order_id":"o1","instrument_id":"spy","side":"buy"}"#,
+        );
+        on_account(
+            rig,
+            ACCOUNT,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"spy","side":"buy","qty_gross":"3","price":"100","risk_clock":"{stamp}"}}"#
+            ),
+        );
+    }
+    let classes = [("spy".to_owned(), mandate_domain::AssetClass::UsEquity)].into();
+    let flatten = mandate_daemon::production::Flatten::new(facts.clone(), classes);
+    RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            facts: Some(facts),
+            approvers: None,
+            flatten: Box::new(flatten),
+            ..wiring()
+        },
+        &config(),
+        at(now),
+    )
+}
+
+fn payload_of(row: &StoredEvent) -> Value {
+    parse(&row.body)
+        .ok()
+        .and_then(|body| body.get("payload").cloned())
+        .unwrap_or(Value::Null)
+}
+
+fn causation_of(row: &StoredEvent) -> Option<String> {
+    parse(&row.body)
+        .ok()?
+        .get("causation_id")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// X7, DEC-2387: in the cell, where the journal is the only channel to the executor, the owner's
+/// exit of one instrument is journaled on the real journal as its copy and one market sell of the
+/// agent's whole sub-ledger caused by it, the record the executor reads (journal spec §9.1). With
+/// valid step-up the copy's evidence carries `authenticated_at` as the timestamp the journal types
+/// and the executor reads to bound the confirmation (DEC-2040 item 7).
+#[test]
+fn the_owner_s_exit_of_one_instrument_is_journaled_as_its_market_sell() {
+    for assertion in [None, Some("assertion-exit")] {
+        let rig = Rig::default();
+        let mut process = holding_spy(&rig, NOW);
+        process.step(at(NOW + 1));
+        owner_exit(&rig, assertion);
+        process.step(at(NOW + 2));
+        assert_eq!(
+            process.lifecycle().state(),
+            State::Ready,
+            "{:?}",
+            kinds(&rig)
+        );
+        let rows = agent_rows(&rig);
+        let copy = rows
+            .iter()
+            .find(|r| r.event_type == "OwnerExitRequested")
+            .expect("the copy is journaled");
+        let legs: Vec<&StoredEvent> = rows
+            .iter()
+            .filter(|r| r.event_type == "IntentProposed")
+            .collect();
+        assert_eq!(legs.len(), 1, "{:?}", kinds(&rig));
+        assert_eq!(causation_of(legs[0]), Some(copy.event_id.clone()));
+        let leg = payload_of(legs[0]);
+        for (member, want) in [
+            ("instrument_id", "spy"),
+            ("side", "sell"),
+            ("type", "market"),
+            ("tif", "day"),
+            ("qty", "3"),
+            ("purpose", "owner_exit"),
+        ] {
+            assert_eq!(
+                leg.get(member).and_then(Value::as_str),
+                Some(want),
+                "{member}"
+            );
+        }
+        assert_eq!(leg.get("limit_price"), Some(&Value::Null));
+        let stamped = payload_of(copy)
+            .get("step_up")
+            .and_then(|step_up| step_up.get("authenticated_at"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        assert_eq!(
+            stamped,
+            assertion.map(|_| at(NOW - 10).to_string()),
+            "{assertion:?}"
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExitOp {
+    OwnerExit,
+    Tick,
+    LoseAnswer,
+    Step,
+    Restart,
+}
+
+fn exit_op() -> impl Strategy<Value = ExitOp> {
+    prop_oneof![
+        Just(ExitOp::OwnerExit),
+        Just(ExitOp::Tick),
+        Just(ExitOp::LoseAnswer),
+        Just(ExitOp::Step),
+        Just(ExitOp::Restart),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// Whatever the interleaving of the owner's exits, ticks, lost append answers and restarts,
+    /// once a pass runs with nothing lost: every owner exit the control stream holds is copied
+    /// exactly once, and each copy has exactly one market sell of the agent's 3 `spy` caused by it,
+    /// so none is sold twice and none is never proposed (`AGENTS.md` rule 13). The oracle reads
+    /// the control rows the test laid down and the agent stream's rows, not the process's state.
+    #[test]
+    fn every_owner_exit_is_proposed_once_whatever_the_interleaving(
+        ops in proptest::collection::vec(exit_op(), 1..20),
+    ) {
+        let rig = Rig::default();
+        let mut second = NOW;
+        let mut process = holding_spy(&rig, second);
+        for op in ops {
+            second += 1;
+            match op {
+                ExitOp::OwnerExit => owner_exit(&rig, None),
+                ExitOp::Tick => tick(&rig, second),
+                ExitOp::LoseAnswer => rig.lose_answers.set(1),
+                ExitOp::Step => {
+                    process.step(at(second));
+                }
+                ExitOp::Restart => process = holding_spy(&rig, second),
+            }
+        }
+        rig.lose_answers.set(0);
+        for _ in 0..2 {
+            second += 1;
+            process.step(at(second));
+        }
+        prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
+        let commands: Vec<String> = rig
+            .control
+            .borrow()
+            .iter()
+            .filter(|r| r.event_type == "OwnerCommandIssued")
+            .map(|r| r.event_id.clone())
+            .collect();
+        let rows = agent_rows(&rig);
+        let copies: Vec<&StoredEvent> =
+            rows.iter().filter(|r| r.event_type == "OwnerExitRequested").collect();
+        let copied: Vec<String> = copies.iter().filter_map(|r| causation_of(r)).collect();
+        prop_assert_eq!(&copied, &commands);
+        for copy in copies {
+            let legs: Vec<&StoredEvent> = rows
+                .iter()
+                .filter(|r| r.event_type == "IntentProposed")
+                .filter(|r| causation_of(r).as_ref() == Some(&copy.event_id))
+                .collect();
+            prop_assert_eq!(legs.len(), 1, "{:?}", kinds(&rig));
+            let leg = payload_of(legs[0]);
+            prop_assert_eq!(leg.get("qty").and_then(Value::as_str), Some("3"));
+        }
+    }
+}
+
+/// Where the agent-stream rows the runtime writes for an owner's exit are kept, so the executor
+/// process's own test reads exactly them (DEC-2387): the two processes may not link each other
+/// (`xtask/layers.toml`), so this file is their contract.
+const OWNER_EXIT_CONTRACT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/contracts/owner-exit-agent-stream.json"
+);
+
+/// The runtime's agent-stream rows for three owner exits of `spy` (unconfirmed, confirmed with
+/// valid step-up, and confirmed with step-up already stale at commit) are byte for byte the
+/// contract file `mandate-executord`'s test reads. `MANDATE_WRITE_CONTRACTS=1` rewrites it.
+#[test]
+fn the_owner_exit_rows_are_the_executors_contract() {
+    let cases: [(&str, Option<(&str, i64)>); 3] = [
+        ("unconfirmed", None),
+        ("stepped_up", Some(("assertion-valid", NOW - 10))),
+        ("stale", Some(("assertion-stale", NOW - 1_000))),
+    ];
+    let mut listed = Vec::new();
+    for (name, step_up) in cases {
+        let rig = Rig::default();
+        let mut process = holding_spy(&rig, NOW);
+        process.step(at(NOW + 1));
+        owner_exit_at(&rig, step_up);
+        process.step(at(NOW + 2));
+        assert_eq!(process.lifecycle().state(), State::Ready, "{name}");
+        let rows: Vec<Value> = agent_rows(&rig)
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.event_type.as_str(),
+                    "OwnerExitRequested" | "IntentProposed"
+                )
+            })
+            .map(|r| {
+                let mut members = Object::new();
+                let put = |members: &mut Object, key: &str, value: Value| {
+                    members.insert(Key::new(key).unwrap(), value);
+                };
+                put(&mut members, "event_id", Value::Str(r.event_id.clone()));
+                put(&mut members, "event_type", Value::Str(r.event_type.clone()));
+                put(
+                    &mut members,
+                    "causation_id",
+                    causation_of(r).map_or(Value::Null, Value::Str),
+                );
+                put(&mut members, "payload", payload_of(r));
+                Value::Object(members)
+            })
+            .collect();
+        assert_eq!(rows.len(), 2, "{name}: the copy and its one leg");
+        let mut case = Object::new();
+        case.insert(Key::new("name").unwrap(), Value::Str(name.to_owned()));
+        case.insert(Key::new("rows").unwrap(), Value::Array(rows));
+        listed.push(Value::Object(case));
+    }
+    let mut document = Object::new();
+    document.insert(Key::new("cases").unwrap(), Value::Array(listed));
+    let mut bytes = mandate_canon::to_canonical(&Value::Object(document));
+    bytes.push(b'\n');
+    if std::env::var_os("MANDATE_WRITE_CONTRACTS").is_some() {
+        std::fs::write(OWNER_EXIT_CONTRACT, &bytes).unwrap();
+    }
+    let kept = std::fs::read(OWNER_EXIT_CONTRACT).unwrap_or_default();
+    assert!(
+        kept == bytes,
+        "{OWNER_EXIT_CONTRACT} differs from what the runtime writes; rerun with \
+         MANDATE_WRITE_CONTRACTS=1 and re-check mandate-executord's owner_exit_contract test"
+    );
+}
+
+/// #2448's re-review (rule 13): an evaluation the core would refuse (an empty source, a negative
+/// horizon, an `as_of` past what a stamp can write) stores no closes and hands nothing, so it
+/// never stops the process; an evaluation beside it is still recorded and the tick still runs.
+#[test]
+fn an_evaluation_the_core_refuses_hands_nothing_and_the_tick_runs() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut unsourced = daily(NOW - 7_200);
+    unsourced.source = String::new();
+    let mut backwards = daily(NOW - 10_800);
+    backwards.output.horizon_s = u64::MAX;
+    let mut unstamped = daily(NOW - 14_400);
+    unstamped.output.as_of = RiskClock::from_secs(i64::MAX);
+    let good = daily(NOW - 3_600);
+    host.answer
+        .borrow_mut()
+        .extend([unsourced, backwards, unstamped, good.clone()]);
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 5), "the tick was handed");
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "only the evaluation the core takes: {:?}",
+        kinds(&rig)
+    );
+    assert_eq!(*closes.kept.borrow(), vec![good.closes]);
+}
+
+/// DEC-131 item 6 through the models pass: an observation whose append is in doubt is handed
+/// again first, then its output, then the tick, each recorded once, and the host is not asked
+/// again for the same tick.
+#[test]
+fn an_observation_in_doubt_is_followed_by_its_output_before_the_tick() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    rig.lose_answers.set(1);
+    process.step(at(NOW + 6));
+    assert_eq!(risk_clock(&process), None, "the observation is in doubt");
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 0);
+    process.step(at(NOW + 7));
+    assert_eq!(host.asked.get(), 1, "the same tick asks nothing more");
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "{:?}",
+        kinds(&rig)
+    );
+    assert!(
+        positions(&rig, "ObservationRecorded")[0] < positions(&rig, "ModelOutputRecorded")[0],
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 5), "then the tick");
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// The same output twice in one answer is recorded once.
+#[test]
+fn an_output_answered_twice_at_once_is_recorded_once() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer
+        .borrow_mut()
+        .extend([daily(NOW - 3_600), daily(NOW - 3_600)]);
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 5));
+}
+
+/// #2448's re-review: when the clock has moved on by the time an observation in doubt is retried,
+/// the output queued behind it is handed before the new tick is evaluated, so the same daily
+/// output, answered again at the new tick, is recorded once.
+#[test]
+fn a_tick_that_moves_on_while_an_observation_is_in_doubt_records_its_output_once() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    rig.lose_answers.set(1);
+    process.step(at(NOW + 6));
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 0, "in doubt");
+    tick(&rig, NOW + 7);
+    process.step(at(NOW + 8));
+    assert_eq!(host.asked.get(), 2, "the new tick asks again");
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 7));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A dry run that allows every opening with the halt deferred to the binding gate and no bars read.
+struct Deferring;
+impl GateDryRun for Deferring {
+    fn check(&self, _: &Proposal) -> DryRunVerdict {
+        DryRunVerdict::AllowDeferring {
+            deferred: BTreeSet::from([Deferral::Halt]),
+            liquidity: None,
+        }
+    }
+}
+
+/// A plan that opens one share of AAPL at 155 whatever its inputs, and classifies it `auto`.
+struct Opening;
+impl OrderPlan for Opening {
+    fn plan(&self, _: &MandateView, _: &SignalInputs) -> Option<Proposal> {
+        Some(Proposal {
+            instrument: InstrumentId::new("AAPL").ok()?,
+            asset_class: AssetClass::UsEquity,
+            side: Side::Buy,
+            qty: Qty::parse("1").ok()?,
+            limit: Price::parse("155").ok()?,
+            purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".into())),
+            buy_conviction: Some(Value::Str("1".into())),
+            combined_score: Value::Str("0.5".into()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
+            execution: Some(OrderExecution {
+                asset_class: AssetClass::UsEquity,
+                tif: TimeInForce::Day,
+                protection_required: false,
+                protection: None,
+            }),
+        })
+    }
+    fn classify(&self, _: &MandateView, _: &Proposal) -> Classified {
+        Classified {
+            autonomy: Autonomy::Auto,
+            decided_by: Some("default".into()),
+        }
+    }
+}
+
+/// DEC-2388 item 13, end to end over the journal's own append: an opening the dry run allows with
+/// a check deferred is committed as `DecisionMade` version 3 naming it, and the owner is asked;
+/// nothing is proposed to the executor.
+#[test]
+fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let decision = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening was decided: {:?}", kinds(&rig)));
+    assert_eq!(decision.schema_version, 3);
+    let body = parse(&decision.body).unwrap();
+    let named: Vec<&str> = body
+        .get("payload")
+        .and_then(|payload| payload.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(named, vec!["halt", "liquidity_floor", "participation"]);
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap();
+    assert_eq!(
+        request.schema_version, 3,
+        "the request names the decision's deferrals (DEC-2515)"
+    );
+    let content = parse(&request.body).unwrap();
+    let asked: Vec<&str> = content
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(asked, named, "rule 292: exactly the decision's");
+}
+
+const RESEARCH_SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
+
+/// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at
+/// `expires_at`, appended to the agent stream through the journal's own append as the research
+/// writer would leave it. It takes the stream's writer epoch, fencing any process before it.
+fn thesis_at(rig: &Rig, as_of: &str, expires_at: &str) {
+    thesis_on(
+        rig,
+        ("01J8Z3MTHE5000000000000001", "01J8Z3MTHE5000000000000002"),
+        RESEARCH_SPY,
+        (as_of, expires_at),
+    );
+}
+
+/// As [`thesis_at`], for the thesis `thesis` recorded as the event `event` on `instrument`.
+fn thesis_on(
+    rig: &Rig,
+    (thesis, event): (&str, &str),
+    instrument: &str,
+    (as_of, expires_at): (&str, &str),
+) {
+    let stream = StreamId::parse(AGENT_STREAM).unwrap();
+    let mut journal = rig.journal.clone();
+    let head = journal.rows(&stream).unwrap().len();
+    let epoch = journal.take_ownership(&stream).unwrap();
+    let hash = Digest::of(b"x").to_hex();
+    let payload = parse(format!(
+        r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{hash}","thesis_id":"{thesis}","lineage_id":"{thesis}","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{instrument}","asset_class":"us_equity","direction":"long","as_of":"{as_of}","expires_at":"{expires_at}","horizon_s":3600,"conviction":"0.6","confidence":"0.7","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":true,"reason":null}}"#
+    ).as_bytes())
+    .unwrap();
+    let mut refs = Object::new();
+    refs.insert(
+        Key::new("model_version").unwrap(),
+        Value::Str(format!("sha256:{hash}")),
+    );
+    refs.insert(
+        Key::new("mandate_version").unwrap(),
+        Value::Str(format!(
+            "sha256:{}",
+            Digest::of(b"research mandate").to_hex()
+        )),
+    );
+    let bytes = mandate_store::envelope::draft_bytes(
+        &mandate_store::envelope::Envelope {
+            stream: AGENT_STREAM,
+            environment: Environment::Paper,
+            actor_kind: "agent",
+            actor_id: AGENT,
+            build: "mandate-daemon/test",
+            version: "0.1.0",
+            event_time: at(NOW - 3_600),
+        },
+        &mandate_store::envelope::Fields {
+            event_id: event,
+            event_type: "ThesisProposed",
+            schema_version: 1,
+            causation_id: None,
+            correlation_id: Some("01J8Z3MRVN0000000000000001"),
+            config_refs: &refs,
+            payload: &payload,
+        },
+    )
+    .unwrap();
+    let outcome = journal.append(
+        &stream,
+        u64::try_from(head).unwrap(),
+        epoch,
+        at(NOW - 3_600),
+        &[bytes],
+    );
+    assert!(
+        matches!(outcome, AppendOutcome::Committed(_)),
+        "the journal takes the thesis: {outcome:?}"
+    );
+}
+
+/// The demo's research deployment over the journal's own append, holding 3 SPY from its own filled
+/// buy under a thesis that expires at `expires_at`, ticked three times from `NOW`; the process is
+/// still ready. The first start only opens the stream, so the thesis lands after `StreamOpened`.
+fn held_spy_under_a_thesis_expiring_at(expires_at: i64) -> Rig {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let document = mandate_canon::parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"research mandate").to_hex());
+    let wire = || {
+        mandate_daemon::production::wired(
+            fixture::wiring("user-owner", AGENT_STREAM),
+            &version,
+            &document,
+            (None, mandate_daemon::bars::BarsReader::default()),
+            CLOCK,
+            AGENT,
+        )
+    };
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    drop(RuntimeProcess::start(
+        rig.clone(),
+        wire(),
+        &config(),
+        at(NOW),
+    ));
+    thesis_at(
+        &rig,
+        &at(expires_at - 3_600).to_string(),
+        &at(expires_at).to_string(),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{RESEARCH_SPY}","price":"100.05","source":"quote","feed":"fixture","bid":"99.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"o1","instrument_id":"{RESEARCH_SPY}","side":"buy"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"{RESEARCH_SPY}","side":"buy","qty_gross":"3","price":"99.95","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderStateChanged",
+        r#"{"client_order_id":"o1","state":"filled","replaced_by":null,"ignored":false}"#,
+    );
+    reconciled(&rig, ACCOUNT);
+    let mut process = RuntimeProcess::start(rig.clone(), wire(), &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    rig
+}
+
+fn member<'a>(payload: &'a Value, name: &str) -> Option<&'a str> {
+    payload.get(name).and_then(Value::as_str)
+}
+
+/// D1's ask on #2551, end to end over the journal's own append (journal spec rule 8, DEC-2391): a
+/// held instrument whose thesis expired is sold whole at the bid by the deployed plan. The
+/// `DecisionMade`, `exit_origin` `removed_instrument` with no convictions, score, outputs, weights
+/// or clips, decided AUTO by the built-in risk-reducing rule, and the `IntentProposed` it causes
+/// commit, once, with no ask.
+#[test]
+fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW - 60);
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let row = |event_type: &str| {
+        rows.iter()
+            .find(|row| row.event_type == event_type)
+            .unwrap_or_else(|| panic!("{event_type}: {:?}", kinds(&rig)))
+    };
+    let (decision, intent) = (row("DecisionMade"), row("IntentProposed"));
+    let payload = |row: &StoredEvent| parse(&row.body).unwrap().get("payload").cloned().unwrap();
+    let decided = payload(decision);
+    for (name, want) in [
+        ("instrument_id", RESEARCH_SPY),
+        ("side", "sell"),
+        ("qty", "3"),
+        ("limit_price", "99.95"),
+        ("purpose", "discretionary_exit"),
+        ("exit_origin", "removed_instrument"),
+        ("dry_run", "allow"),
+        ("autonomy", "auto"),
+        ("decided_by", "builtin_risk_reducing"),
+    ] {
+        assert_eq!(member(&decided, name), Some(want), "{name}: {decided:?}");
+    }
+    for name in ["exit_conviction", "buy_conviction", "combined_score"] {
+        assert_eq!(decided.get(name), Some(&Value::Null), "{name}");
+    }
+    for name in ["outputs_used", "model_weights", "clips_applied"] {
+        assert_eq!(
+            decided
+                .get(name)
+                .and_then(Value::as_array)
+                .map(<[Value]>::len),
+            Some(0),
+            "{name}"
+        );
+    }
+    let proposed = payload(intent);
+    for (name, want) in [
+        ("instrument_id", RESEARCH_SPY),
+        ("side", "sell"),
+        ("qty", "3"),
+        ("limit_price", "99.95"),
+        ("purpose", "discretionary_exit"),
+    ] {
+        assert_eq!(member(&proposed, name), Some(want), "{name}: {proposed:?}");
+    }
+    assert_eq!(causation_of(intent), Some(decision.event_id.clone()));
+}
+
+/// The control: the same holding under a thesis still current decides and proposes nothing.
+#[test]
+fn a_held_instrument_whose_thesis_is_current_is_not_sold() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW + 3_600);
+    assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+}
+
+/// The control stream's `ConnectionEstablished` of `CONNECTION` that `user` made, as the workspace
+/// services journal it, and its `ConnectionRevoked`.
+fn owned(rig: &Rig, user: &str) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"connection_id":"{CONNECTION}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{ACCOUNT_REF}","user":"{user}"}}"#
+    );
+    rig.control.borrow_mut().push(versioned(
+        CONTROL,
+        seq,
+        "ConnectionEstablished",
+        2,
+        "user",
+        &payload,
+    ));
+}
+
+fn revoked(rig: &Rig) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(r#"{{"connection_id":"{CONNECTION}","reason":"owner_revoked"}}"#);
+    rig.control
+        .borrow_mut()
+        .push(row(CONTROL, seq, "ConnectionRevoked", "user", &payload));
+}
+
+fn approvers_of(process: &RuntimeProcess<Rig>) -> Vec<&str> {
+    process
+        .view()
+        .approval
+        .approvers
+        .iter()
+        .map(String::as_str)
+        .collect()
+}
+
+/// Backlog `E21-30-daemon-approvers-reread` (DEC-2818): every control pass narrows the view's
+/// approvers to those the stream still resolves to, before it hands the pass's records to the core,
+/// so a connection revoked while the process runs leaves no one to approve until the stream
+/// resolves its owner again, never beyond the set admitted at the start; the fixture wiring,
+/// which has no source, keeps its view's approvers.
+#[test]
+fn a_connection_revoked_while_running_leaves_no_approver() {
+    let rig = Rig::default();
+    owned(&rig, "user-owner");
+    let mut wiring = wiring();
+    wiring.approvers = Some(ApproverSource::new(
+        ["user-owner".to_owned()].into(),
+        CONNECTION,
+        &["user:user-owner"],
+    ));
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    assert_eq!(approvers_of(&process), ["user-owner"]);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(
+        approvers_of(&process),
+        ["user-owner"],
+        "unchanged rows keep them"
+    );
+    revoked(&rig);
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(
+        approvers_of(&process),
+        Vec::<&str>::new(),
+        "{:?}",
+        kinds(&rig)
+    );
+    owned(&rig, "user-owner");
+    tick(&rig, NOW + 3);
+    process.step(at(NOW + 3));
+    assert!(
+        approvers_of(&process)
+            .iter()
+            .all(|user| *user == "user-owner"),
+        "nobody outside the admitted set is added"
+    );
+
+    let fixture = Rig::default();
+    owned(&fixture, "user-owner");
+    let mut kept = start(&fixture, NOW);
+    revoked(&fixture);
+    tick(&fixture, NOW + 1);
+    kept.step(at(NOW + 1));
+    assert_eq!(
+        approvers_of(&kept),
+        ["user-owner"],
+        "no source keeps the view"
+    );
+}
+
+/// The owner's grant of the runtime's one pending request, as the CLI commits it to the control
+/// stream at `at`, with step-up evidence from the same second.
+fn owner_grants_pending(rig: &Rig, at: i64) {
+    let rows = agent_rows(rig);
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap_or_else(|| panic!("the opening was asked: {:?}", kinds(rig)));
+    let body = parse(&request.body).unwrap();
+    let hash = body
+        .get("payload")
+        .and_then(|payload| payload.get("content_hash"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","approval":"{}","verdict":"approved","content_hash":"{hash}","submitted_at":{at},"step_up":{{"assertion_id":"assertion-{seq}","authenticated_at":{at},"method":"cli_confirm"}},"responder":"user-owner","role":"approver"}}"#,
+        request.event_id
+    );
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ApprovalResponseSubmitted",
+        "user",
+        &payload,
+    ));
+}
+
+/// What the runtime judged the owner's grant of a deferring opening, when the connection was or
+/// was not revoked in the same control pass the grant arrives in.
+fn judged(revoke: bool) -> (String, String) {
+    let rig = Rig::default();
+    owned(&rig, "user-owner");
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    wiring.approvers = Some(ApproverSource::new(
+        ["user-owner".to_owned()].into(),
+        CONNECTION,
+        &["user:user-owner"],
+    ));
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    if revoke {
+        revoked(&rig);
+    }
+    owner_grants_pending(&rig, NOW + 4);
+    tick(&rig, NOW + 4);
+    process.step(at(NOW + 4));
+    let rows = agent_rows(&rig);
+    let responded = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalResponded")
+        .unwrap_or_else(|| panic!("the grant was judged: {:?}", kinds(&rig)));
+    let body = parse(&responded.body).unwrap();
+    let member = |name: &str| {
+        body.get("payload")
+            .and_then(|payload| payload.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    (member("result"), member("reason"))
+}
+
+/// DEC-2818 item 3, end to end: a grant in the same control pass as the revocation of its
+/// approver's connection is judged against the narrowed set and refused, while the same grant with
+/// no revocation is admitted, so narrowing after the pass's records are handed would fail here.
+#[test]
+fn a_grant_in_the_pass_that_revokes_its_approver_is_refused() {
+    assert_eq!(judged(false).0, "admitted");
+    assert_eq!(
+        judged(true),
+        ("refused".to_owned(), "not_an_approver".to_owned())
+    );
+}
+
+/// The rule set the gate reads, the tracer's reviewed configuration, as the fold resolves it from
+/// the control stream's registration.
+fn gate_rules() -> mandate_risk::GateConfig {
+    let rules = include_str!("../../mandate-shell/tests/fixtures/tracer/config/rule-set.json");
+    mandate_gate_context::gate_rule_set(&parse(rules.trim().as_bytes()).unwrap()).unwrap()
+}
+
+/// The content hash the demo envelope pins `quant.ma_crossover` 1.0.0 at.
+const DEMO_MODEL_HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
+
+/// 2026-10-27T15:00:00Z, a Tuesday inside the regular session, with Monday's close behind it: the
+/// window the demo's crossover can decide in (the output of a daily close is fresh for a day, and
+/// an opening trades only in the regular session).
+const IN_SESSION: i64 = 1_793_113_200;
+
+/// The demo's own envelope, wired as the deployed runtime wires it, over the journaled facts an
+/// in-session tick finds.
+fn demo_in_session() -> (Rig, RuntimeProcess<Rig>) {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{SPY}","price":"580.05","source":"quote","feed":"fixture","bid":"579.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    let document = parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"demo mandate").to_hex());
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ConfigSnapshotRegistered",
+        "user",
+        &format!(
+            r#"{{"kind":"model_version","content_hash":"sha256:{DEMO_MODEL_HASH}","model_id":"quant.ma_crossover","model_version":"1.0.0","params":[],"admits_instruments":false}}"#
+        ),
+    ));
+    let mut wiring = mandate_daemon::production::wired(
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &version,
+        &document,
+        (
+            Some(gate_rules()),
+            mandate_daemon::bars::BarsReader::default(),
+        ),
+        CLOCK,
+        AGENT,
+    );
+    wiring.models = Some(ModelsWiring {
+        models: Box::new(Host {
+            answer: Rc::new(RefCell::new(vec![Evaluated {
+                output: ModelOutput {
+                    content_hash: Digest::from_hex(DEMO_MODEL_HASH).unwrap(),
+                    ..daily(IN_SESSION - 60).output
+                },
+                ..daily(IN_SESSION - 60)
+            }])),
+            ..Host::default()
+        }),
+        artifacts: Box::new(Closes::default()),
+    });
+    let process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(IN_SESSION));
+    (rig, process)
+}
+
+/// The owner's grant of `approval`, as the workspace services journal it on the control stream: the
+/// members of `mandate-runtime`'s own grant fixture (`tests/common/escalation.rs`, `Answer::grant`),
+/// which the core's approval tests read, so the two stay in step.
+fn granted(rig: &Rig, approval: &str, content_hash: &str) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","approval":"{approval}","verdict":"approved","content_hash":"{content_hash}","submitted_at":{IN_SESSION},"step_up":{{"assertion_id":"assertion-1","authenticated_at":{IN_SESSION},"method":"cli_confirm"}},"responder":"user-owner","role":"approver"}}"#
+    );
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ApprovalResponseSubmitted",
+        "user",
+        &payload,
+    ));
+}
+
+/// The demo's whole in-session loop on its own envelope and caps, over the journal's own append:
+/// an in-session tick decides, the gate's dry run allows with its deferrals, the owner is asked,
+/// and the owner's grant proposes the opening to the executor. The window itself is why the loop
+/// cannot run on a Monday (the crossover's output from Friday's close has expired), so this test
+/// is the in-session proof the cell cannot give outside it.
+#[test]
+fn the_demo_envelope_decides_asks_and_proposes_once_granted_in_session() {
+    let (rig, mut process) = demo_in_session();
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let asked = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap();
+    let body = parse(&asked.body).unwrap();
+    let payload = body.get("payload").unwrap();
+    let hash = payload
+        .get("content_hash")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("the request names its content hash: {payload:?}"));
+    granted(&rig, asked.event_id.as_str(), hash);
+    tick(&rig, IN_SESSION + 4);
+    process.step(at(IN_SESSION + 4));
+    assert_eq!(count(&rig, "ApprovalResponded"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 1, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let intent = rows
+        .iter()
+        .find(|row| row.event_type == "IntentProposed")
+        .unwrap();
+    let body = parse(&intent.body).unwrap();
+    let payload = body.get("payload").unwrap();
+    assert_eq!(
+        payload.get("instrument_id").and_then(Value::as_str),
+        Some(SPY),
+        "the envelope's own instrument: {payload:?}"
+    );
+    assert_eq!(
+        payload.get("side").and_then(Value::as_str),
+        Some("buy"),
+        "{payload:?}"
+    );
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+}
+
+/// The research envelope's content hash for `llm.research_agent` 0.1.0.
+const RESEARCH_MODEL_HASH: &str =
+    "bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
+
+/// The demo's research deployment, an unpinned universe, wired as the deployed runtime wires it,
+/// over the journaled facts an in-session tick finds: both of its models registered, an admitted
+/// thesis on SPY current for the hour, and both models' `Long` on SPY, the research model's from
+/// that thesis (conviction 0.6), journaled first, as the cell's replay of 2026-10-27 journals
+/// them. The first start only opens
+/// the agent stream, so the thesis lands after `StreamOpened`.
+fn research_in_session() -> (Rig, RuntimeProcess<Rig>) {
+    research_in_session_with(|_| {})
+}
+
+/// As [`research_in_session`], with `more` laid down after SPY's thesis.
+fn research_in_session_with(more: impl Fn(&Rig)) -> (Rig, RuntimeProcess<Rig>) {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{SPY}","price":"580.05","source":"quote","feed":"fixture","bid":"579.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    let document = parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"research mandate").to_hex());
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    for (model, model_version, hash, admits) in [
+        ("quant.ma_crossover", "1.0.0", DEMO_MODEL_HASH, false),
+        ("llm.research_agent", "0.1.0", RESEARCH_MODEL_HASH, true),
+    ] {
+        let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+        rig.control.borrow_mut().push(row(
+            CONTROL,
+            seq,
+            "ConfigSnapshotRegistered",
+            "user",
+            &format!(
+                r#"{{"kind":"model_version","content_hash":"sha256:{hash}","model_id":"{model}","model_version":"{model_version}","params":[],"admits_instruments":{admits}}}"#
+            ),
+        ));
+    }
+    let wire = || {
+        let mut wiring = mandate_daemon::production::wired(
+            fixture::wiring("user-owner", AGENT_STREAM),
+            &version,
+            &document,
+            (
+                Some(gate_rules()),
+                mandate_daemon::bars::BarsReader::default(),
+            ),
+            CLOCK,
+            AGENT,
+        );
+        wiring.models = Some(ModelsWiring {
+            models: Box::new(Host {
+                answer: Rc::new(RefCell::new(vec![
+                    Evaluated {
+                        output: ModelOutput {
+                            model_id: "llm.research_agent".into(),
+                            model_version: "0.1.0".into(),
+                            content_hash: Digest::from_hex(RESEARCH_MODEL_HASH).unwrap(),
+                            conviction: Conviction::parse("0.6").unwrap(),
+                            confidence: Unit::parse("0.6").unwrap(),
+                            thesis_id: Some("01J8Z3MTHE5000000000000001".into()),
+                            lineage_id: Some("01J8Z3MTHE5000000000000001".into()),
+                            ..daily(IN_SESSION - 60).output
+                        },
+                        ..daily(IN_SESSION - 60)
+                    },
+                    Evaluated {
+                        output: ModelOutput {
+                            content_hash: Digest::from_hex(DEMO_MODEL_HASH).unwrap(),
+                            ..daily(IN_SESSION - 60).output
+                        },
+                        ..daily(IN_SESSION - 60)
+                    },
+                ])),
+                ..Host::default()
+            }),
+            artifacts: Box::new(Closes::default()),
+        });
+        wiring
+    };
+    drop(RuntimeProcess::start(
+        rig.clone(),
+        wire(),
+        &config(),
+        at(IN_SESSION),
+    ));
+    thesis_at(
+        &rig,
+        &at(IN_SESSION - 60).to_string(),
+        &at(IN_SESSION + 3_540).to_string(),
+    );
+    more(&rig);
+    reconciled(&rig, ACCOUNT);
+    let process = RuntimeProcess::start(rig.clone(), wire(), &config(), at(IN_SESSION));
+    (rig, process)
+}
+
+/// E21-2, DEC-2827, the cell's research loop end to end (lane GW's replay of 2026-10-27 found it
+/// stop here): an unpinned research deployment with an admitted SPY thesis and the crossover's
+/// `Long` on SPY decides once in session and asks its owner about the opening, both naming SPY;
+/// nothing is proposed to the executor before the grant.
+#[test]
+fn a_research_deployment_decides_and_asks_about_its_working_universe_in_session() {
+    let (rig, mut process) = research_in_session();
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let payload = |event_type: &str| {
+        let row = rows
+            .iter()
+            .find(|row| row.event_type == event_type)
+            .unwrap();
+        parse(&row.body).unwrap().get("payload").cloned().unwrap()
+    };
+    let decided = payload("DecisionMade");
+    for (name, want) in [
+        ("instrument_id", SPY),
+        ("side", "buy"),
+        ("purpose", "open"),
+        ("autonomy", "ask"),
+    ] {
+        assert_eq!(member(&decided, name), Some(want), "{name}: {decided:?}");
+    }
+    let asked = payload("ApprovalRequested");
+    assert!(
+        String::from_utf8(mandate_canon::to_canonical(&asked))
+            .unwrap()
+            .contains(SPY),
+        "the request names SPY: {asked:?}"
+    );
+}
+
+/// Another US equity, which the research envelope's theses may admit.
+const RESEARCH_QQQ: &str = "3a9e1f0c-2b7d-4c55-8e61-0f4d2a6b9c13";
+
+/// DEC-2819 item 2, as the executor opens: with two surviving admitted theses there is no one
+/// working instrument, so the research deployment decides nothing in session, though both models'
+/// `Long` on SPY are journaled.
+#[test]
+fn a_research_deployment_with_two_surviving_theses_opens_nothing() {
+    let (rig, mut process) = research_in_session_with(|rig| {
+        thesis_on(
+            rig,
+            ("01J8Z3MTHE5000000000000003", "01J8Z3MTHE5000000000000004"),
+            RESEARCH_QQQ,
+            (
+                &at(IN_SESSION - 60).to_string(),
+                &at(IN_SESSION + 3_540).to_string(),
+            ),
+        );
+    });
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ThesisProposed"), 2, "{:?}", kinds(&rig));
+    assert!(count(&rig, "ModelOutputRecorded") >= 2, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// `AGENTS.md` rule 13: a research deployment holding SPY from its own fill under a current thesis
+/// has the sale planned on the owner's kill switch, as a pinned deployment's is. The flatten maps
+/// every instrument a thesis record admitted, with the class its record names (DEC-2819, as the
+/// executor maps exits), so no operator alert `flatten_unplanned` is raised for it. Today it maps
+/// only the pinned universe, which a research mandate has none of.
+#[test]
+fn a_research_deployments_kill_switch_sells_its_held_instrument() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW + 3_600);
+    let mut process = RuntimeProcess::start(rig.clone(), research_wired(), &config(), at(NOW + 4));
+    process.step(at(NOW + 5));
+    kill_switch(&rig);
+    let alerts = process.step(at(NOW + 6));
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
+    let keys: Vec<&str> = alerts.iter().map(|alert| alert.key).collect();
+    assert!(
+        !keys.contains(&mandate_daemon::FLATTEN_UNPLANNED),
+        "the held SPY is planned: {keys:?}"
+    );
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+}
+
+/// The demo's research deployment as [`held_spy_under_a_thesis_expiring_at`] wires it.
+fn research_wired() -> Wiring {
+    let document = mandate_canon::parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    mandate_daemon::production::wired(
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &format!("sha256:{}", Digest::of(b"research mandate").to_hex()),
+        &document,
+        (None, mandate_daemon::bars::BarsReader::default()),
+        CLOCK,
+        AGENT,
+    )
+}
+
+/// DEC-2841: the owner's grant of a research deployment's opening is acted on. The runtime
+/// revalidates a grant against the view's working universe (`in_working_universe`), which for an
+/// unpinned mandate is read again from the agent stream at every pass, so the instrument its
+/// single surviving thesis holds is proposed to the executor once granted, never skipped as
+/// outside a pinned list it has none of.
+#[test]
+fn a_research_deployments_granted_opening_is_proposed_on_its_working_instrument() {
+    let (rig, mut process) = research_in_session();
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    let rows = agent_rows(&rig);
+    let asked = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap_or_else(|| panic!("the opening is asked: {:?}", kinds(&rig)));
+    let body = parse(&asked.body).unwrap();
+    let hash = body
+        .get("payload")
+        .and_then(|payload| payload.get("content_hash"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    granted(&rig, asked.event_id.as_str(), &hash);
+    tick(&rig, IN_SESSION + 4);
+    process.step(at(IN_SESSION + 4));
+    assert_eq!(count(&rig, "ApprovalResponded"), 1, "{:?}", kinds(&rig));
+    assert_eq!(
+        count(&rig, "IntentProposed"),
+        1,
+        "the grant is acted on: {:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let intent = rows
+        .iter()
+        .find(|row| row.event_type == "IntentProposed")
+        .unwrap();
+    let payload = parse(&intent.body)
+        .unwrap()
+        .get("payload")
+        .cloned()
+        .unwrap();
+    assert_eq!(member(&payload, "instrument_id"), Some(SPY), "{payload:?}");
+    assert_eq!(member(&payload, "side"), Some("buy"), "{payload:?}");
+}
+
+/// Mandate spec §5.3's re-entry cooldown over the process (lane DR's rehearsal, 2026-10-27): the
+/// agent's position was sold by its owner's exit in the second the tick reads, so the opening the
+/// crossover proposes is refused `reentry_cooldown` by the runtime's own dry run, reading the
+/// exit fill from the fold as the binding gate does. The owner is never asked to buy back what
+/// they just sold.
+#[test]
+fn an_owner_exit_just_filled_asks_nothing_inside_the_reentry_cooldown() {
+    let (rig, mut process) = demo_in_session();
+    let now = at(IN_SESSION);
+    for (order, side, purpose) in [("o1", "buy", "open"), ("o2", "sell", "owner_exit")] {
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderRequestRecorded",
+            &format!(r#"{{"agent_id":"{AGENT}","purpose":"{purpose}","risk_clock":"{now}"}}"#),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderSubmitted",
+            &format!(
+                r#"{{"client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","risk_clock":"{now}"}}"#
+            ),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f-{order}","client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","qty_gross":"1","price":"579.95","trade_date":"{}","risk_clock":"{now}","fees":[]}}"#,
+                now.date()
+            ),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderStateChanged",
+            &format!(
+                r#"{{"client_order_id":"{order}","state":"filled","replaced_by":null,"ignored":false,"risk_clock":"{now}"}}"#
+            ),
+        );
+    }
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let decided = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening is decided and refused: {:?}", kinds(&rig)));
+    let payload = parse(&decided.body)
+        .unwrap()
+        .get("payload")
+        .cloned()
+        .unwrap();
+    assert_eq!(member(&payload, "dry_run"), Some("deny"), "{payload:?}");
+    assert_eq!(
+        member(&payload, "reason_code"),
+        Some("reentry_cooldown"),
+        "{payload:?}"
+    );
+}
+
+/// [`Rig`] read as a journal that follows each stream from a held head (DEC-2852): its
+/// `rows_from` hands only the records at and past the asked seq, and counts every record it hands,
+/// so a test sees how much a pass reads.
+#[derive(Clone, Default)]
+struct Following {
+    rig: Rig,
+    handed: Rc<Cell<usize>>,
+    /// Every read's first sequence number, in order.
+    starts: Rc<RefCell<Vec<u64>>>,
+    /// A read from the first record refused, as a store refuses a chain broken before the head.
+    whole_down: Rc<Cell<bool>>,
+}
+
+impl Store for Following {
+    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        self.rig.take_ownership(stream)
+    }
+
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        let rows = self.rig.rows(stream)?;
+        self.handed.set(self.handed.get() + rows.len());
+        Some(rows)
+    }
+
+    fn rows_from(
+        &self,
+        stream: &StreamId,
+        start: mandate_journal::TrustedStart,
+    ) -> Option<Vec<StoredEvent>> {
+        self.starts.borrow_mut().push(start.from_seq);
+        if self.whole_down.get() && start == mandate_journal::TrustedStart::GENESIS {
+            return None;
+        }
+        let since: Vec<StoredEvent> = self
+            .rig
+            .rows(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        self.handed.set(self.handed.get() + since.len());
+        Some(since)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        head: u64,
+        epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        self.rig.append(stream, head, epoch, recorded_at, drafts)
+    }
+}
+
+/// DEC-2852: over a long run, a pass reads only what was appended since the last, never its
+/// streams' whole length: here the one tick each pass adds.
+#[test]
+fn a_long_run_reads_only_what_each_pass_appended() {
+    let following = Following::default();
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    for second in 1..=2_000 {
+        tick(&following.rig, NOW + second);
+        let before = following.handed.get();
+        process.step(at(NOW + second));
+        let read = following.handed.get() - before;
+        assert_read(read, rechecks(1, second), &following, second);
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// DEC-2852: a process that reads each stream only past its head journals exactly what one
+    /// reading every stream whole at every pass journals, whatever the interleaving of kill
+    /// switches, ticks, the executor pausing and resuming the agent, lost append answers, steps and
+    /// restarts, and folds to the same state. The whole reader is the plain
+    /// [`Rig`], whose records follow no chain, so every read of it is read again whole.
+    #[test]
+    fn reading_past_the_head_journals_what_reading_whole_streams_does(
+        ops in proptest::collection::vec((op(), any::<Option<bool>>()), 1..24),
+    ) {
+        let whole = Rig::default();
+        let following = Following::default();
+        for rig in [&whole, &following.rig] {
+            established(rig, CONNECTION, ACCOUNT_REF, 2);
+            reconciled(rig, ACCOUNT);
+        }
+        let mut second = NOW;
+        let mut by_whole = start(&whole, second);
+        let mut by_head =
+            RuntimeProcess::start(following.clone(), wiring(), &config(), at(second));
+        for (op, mode) in ops {
+            second += 1;
+            for rig in [&whole, &following.rig] {
+                if let Some(paused) = mode {
+                    let to = if paused { "paused" } else { "normal" };
+                    on_account(
+                        rig,
+                        ACCOUNT,
+                        "AgentModeApplied",
+                        &format!(r#"{{"agent":"{AGENT}","to":"{to}"}}"#),
+                    );
+                }
+                match op {
+                    Op::KillSwitch => kill_switch(rig),
+                    Op::Tick => tick(rig, second),
+                    Op::LoseAnswer => rig.lose_answers.set(1),
+                    Op::Step | Op::Restart => {}
+                }
+            }
+            match op {
+                Op::Step => {
+                    by_whole.step(at(second));
+                    by_head.step(at(second));
+                }
+                Op::Restart => {
+                    by_whole = start(&whole, second);
+                    by_head =
+                        RuntimeProcess::start(following.clone(), wiring(), &config(), at(second));
+                }
+                _ => {}
+            }
+        }
+        let bodies = |rig: &Rig| -> Vec<Vec<u8>> {
+            agent_rows(rig).into_iter().map(|row| row.body).collect()
+        };
+        prop_assert_eq!(bodies(&following.rig), bodies(&whole), "{:?}", kinds(&whole));
+        prop_assert_eq!(by_head.lifecycle().state(), by_whole.lifecycle().state());
+        prop_assert_eq!(by_head.state(), by_whole.state(), "the folded state, its risk clock and mode");
+    }
+}
+
+/// The production fold's answer for an opening in SPY: `Held::Unreadable` once a row it reads did
+/// not read, as journal spec §2's clock rule makes a tick earlier than the last.
+fn fold_unreadable(facts: &mandate_daemon::production::Facts) -> bool {
+    facts
+        .read(|journaled| {
+            matches!(
+                journaled.facts(SPY, mandate_daemon::production::FRESH),
+                Err(mandate_gate_context::Held::Unreadable)
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// DEC-2852, #2828's review: a clock record that goes back holds the production fold, as a fold of
+/// the whole clock stream at every pass holds it, over a store that reads only past the head, whether the fold followed the account from the
+/// start or only after the clock had ticked, so no earlier record is left unfolded.
+#[test]
+fn a_clock_record_that_goes_back_holds_the_fold_as_a_whole_read_does() {
+    for follows_late in [false, true] {
+        let following = Following::default();
+        let rig = following.rig.clone();
+        if !follows_late {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+        }
+        let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+        let mut process = RuntimeProcess::start(
+            following.clone(),
+            Wiring {
+                facts: Some(facts.clone()),
+                ..wiring()
+            },
+            &config(),
+            at(NOW),
+        );
+        tick(&rig, NOW + 5);
+        tick(&rig, NOW + 3);
+        process.step(at(NOW + 6));
+        tick(&rig, NOW + 9);
+        process.step(at(NOW + 10));
+        if follows_late {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+            tick(&rig, NOW + 11);
+            process.step(at(NOW + 12));
+        }
+        assert!(
+            fold_unreadable(&facts),
+            "follows late: {follows_late}; the tick at +3 after +5 holds the fold"
+        );
+    }
+}
+
+/// A clock stream that cannot be read is asked once a pass, never again from its first record when
+/// no head was ever held.
+#[test]
+fn an_unreadable_clock_stream_is_asked_once_a_pass() {
+    let rig = Rig::default();
+    let mut process = start(&rig, NOW);
+    rig.clock_down.set(true);
+    rig.reads.borrow_mut().clear();
+    process.step(at(NOW + 1));
+    let asked = rig.reads.borrow().iter().filter(|s| *s == CLOCK).count();
+    assert_eq!(asked, 1, "{:?}", rig.reads.borrow());
+}
+
+/// DEC-2852: with the production fold wired and following the account, a pass still reads only
+/// what was appended since the last: the clock is read whole once, when the fold first follows,
+/// and never again.
+#[test]
+fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(unpinned()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&following.rig, NOW + 1);
+    process.step(at(NOW + 1));
+    for second in 2..=1_000 {
+        tick(&following.rig, NOW + second);
+        let before = following.handed.get();
+        process.step(at(NOW + second));
+        let read = following.handed.get() - before;
+        assert_read(read, rechecks(1, second), &following, second);
+    }
+}
+
+/// The production fold of an unpinned mandate, which reads the agent stream at every pass.
+fn unpinned() -> mandate_daemon::production::Facts {
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    facts
+}
+
+/// Whether the pass at `NOW + second` reads every stream again from its first record, the
+/// first pass having been at `NOW + first` (DEC-2852 item 6).
+fn rechecks(first: i64, second: i64) -> bool {
+    second > first && (second - first) % 60 == 0
+}
+
+/// A pass reads its own tick and nothing else, unless it is a check, which reads each stream
+/// whole: more than its tick, and no more than every record there is.
+fn assert_read(read: usize, check: bool, following: &Following, second: i64) {
+    if check {
+        let all = following.rig.clock.borrow().len() + following.rig.control.borrow().len();
+        assert!(
+            read > 1 && read <= all + following.rig.accounts.borrow().len() + 64,
+            "check pass {second} read {read} records, not each stream whole"
+        );
+    } else {
+        assert!(
+            read <= 1,
+            "pass {second} read {read} records, not only its own tick"
+        );
+    }
+}
+
+/// DEC-2852 item 6: a record at the held head that no longer reads as it did, as a rewrite
+/// that hashes its chain again leaves it, is found by the next check, at most `60` s of passes
+/// later, and the process fails rather than fold on (`AGENTS.md` rule 3): the pass that finds it
+/// hands no tick. Before the check, the process reads on past the head, as a tail does.
+#[test]
+fn a_rewritten_head_fails_the_process_at_the_next_check() {
+    for stream in [CONTROL, CLOCK, ACCOUNT] {
+        let following = Following::default();
+        established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+        reconciled(&following.rig, ACCOUNT);
+        let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+        for second in 1..=10 {
+            tick(&following.rig, NOW + second);
+            process.step(at(NOW + second));
+        }
+        rewrite_head(&following.rig, stream);
+        for second in 11..=60 {
+            process.step(at(NOW + second));
+            assert_eq!(
+                process.lifecycle().state(),
+                State::Ready,
+                "{stream} at {second}"
+            );
+        }
+        tick(&following.rig, NOW + 61);
+        process.step(at(NOW + 61));
+        assert_eq!(
+            process.lifecycle().state(),
+            State::Exited(Exit::CycleFailed),
+            "{stream}"
+        );
+        assert_eq!(risk_clock(&process), Some(NOW + 10), "{stream}");
+    }
+}
+
+/// DEC-2852 items 3 and 6: a check reads each stream from its first record and hands on only
+/// what follows the head, so the passes across several checks fold and tick exactly as the passes
+/// between them do: the risk clock is each pass's own tick, and the kept control stream is the
+/// stream, each record once.
+#[test]
+fn a_check_hands_on_only_what_follows_the_head() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    for second in 1..=190 {
+        if second == 100 {
+            kill_switch(&following.rig);
+        }
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+        assert_eq!(risk_clock(&process), Some(NOW + second), "pass {second}");
+        let control: Vec<String> = following
+            .rig
+            .control
+            .borrow()
+            .iter()
+            .map(|row| row.event_id.clone())
+            .collect();
+        let handed = host
+            .handed
+            .borrow()
+            .last()
+            .cloned()
+            .map(|(control, _)| control);
+        assert_eq!(handed, Some(Some(control)), "pass {second}");
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// DEC-2852 item 6: a step back in time makes the check due at once, so a clock set back
+/// never defers it by the step.
+#[test]
+fn a_step_back_in_time_makes_the_check_due() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    for second in [1, 61] {
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    rewrite_head(&following.rig, CONTROL);
+    process.step(at(NOW + 62));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    process.step(at(NOW + 30));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+}
+
+/// DEC-2852 items 3 and 6: a store that refuses every read past the head, as the plain [`Rig`]
+/// does, is read from the first record when a record follows the head, and that read too must
+/// hold the head, so a rewritten head fails the process on the pass a record lands after it, with
+/// no check due. The record here is the owner's kill switch: the process hands nothing, and the
+/// executor's gate holds its own kill path (DEC-2852 item 6).
+#[test]
+fn a_refused_read_past_the_head_that_no_longer_holds_it_fails_the_process() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring(), &config(), at(NOW));
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    rewrite_head(&rig, CONTROL);
+    kill_switch(&rig);
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 1));
+}
+
+/// Gives the last record of `stream` in `rig` another hash, as a rewrite that hashes the chain
+/// again leaves the record at a held head.
+fn rewrite_head(rig: &Rig, stream: &str) {
+    let rows = match stream {
+        CONTROL => &rig.control,
+        CLOCK => &rig.clock,
+        _ => &rig.accounts,
+    };
+    if let Some(head) = rows.borrow_mut().last_mut() {
+        head.hash = Digest::of(b"rewritten");
+    }
+}
+
+/// DEC-2852 item 6: once a check is due, a stream that will not read from its first record,
+/// as a chain broken before the head will not, is read only from its first record, so nothing
+/// past the head is read on a chain not verified again, and it is asked again each pass until it
+/// reads; then the tail reads past its head again.
+#[test]
+fn a_check_that_will_not_read_reads_nothing_past_the_head_until_it_does() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    for second in 1..=60 {
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    following.whole_down.set(true);
+    for second in 61..=70 {
+        tick(&following.rig, NOW + second);
+        following.starts.borrow_mut().clear();
+        process.step(at(NOW + second));
+        let starts = following.starts.borrow().clone();
+        assert!(
+            !starts.is_empty() && starts.iter().all(|&from| from == 1),
+            "pass {second} read {starts:?}"
+        );
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    following.whole_down.set(false);
+    tick(&following.rig, NOW + 71);
+    process.step(at(NOW + 71));
+    tick(&following.rig, NOW + 72);
+    following.starts.borrow_mut().clear();
+    process.step(at(NOW + 72));
+    let starts = following.starts.borrow().clone();
+    assert!(
+        !starts.is_empty() && starts.iter().all(|&from| from > 1),
+        "pass 72 read {starts:?}"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+fn modelled_following(
+    following: &Following,
+    host: &Host,
+    closes: &Closes,
+) -> RuntimeProcess<Following> {
+    RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    )
+}
+
+/// DEC-2852 item 4: over a long run read past the head, with a check every minute and a restart,
+/// each distinct output the host answers is recorded once and no other, as a fold of the whole
+/// agent stream would record it: the journaled outputs are folded a record at a time. The oracle
+/// counts the agent stream's own records.
+#[test]
+fn a_long_run_records_each_output_once_across_checks_and_a_restart() {
+    let following = Following::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled_following(&following, &host, &closes);
+    let mut answered = BTreeSet::new();
+    for n in 1..=200 {
+        if n % 50 == 1 {
+            let as_of = NOW - 4 * 3_600 + (n / 50) * 3_600;
+            *host.answer.borrow_mut() = vec![daily(as_of)];
+            answered.insert(as_of);
+        }
+        if n == 120 {
+            process = modelled_following(&following, &host, &closes);
+        }
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert_eq!(answered.len(), 4);
+    assert_eq!(count(&following.rig, "ModelOutputRecorded"), answered.len());
+    assert_eq!(count(&following.rig, "ObservationRecorded"), answered.len());
+}
+
+/// DEC-2852 item 4: the host is handed the agent stream's thesis records alone, the only records of
+/// it a port reads, and the only ones the process keeps.
+#[test]
+fn the_host_is_handed_the_agent_streams_thesis_records_alone() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    let laid = row(AGENT_STREAM, 90, "ThesisProposed", "runtime", "{}");
+    rig.agent_extra.borrow_mut().push(laid.clone());
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    let handed = host.handed.borrow().last().cloned().map(|(_, agent)| agent);
+    assert_eq!(handed, Some(vec![laid.event_id]));
+    assert!(agent_rows(&rig).len() > 1);
+}
+
+/// DEC-2856 item 3: an unpinned mandate's thesis that the process read before the control stream
+/// named the account still reaches the production fold once it follows, so the working universe
+/// names its instrument; a fold fed only what followed its head would never take it.
+#[test]
+fn a_thesis_read_before_the_account_is_named_reaches_the_fold_once_it_follows() {
+    let following = Following::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(facts.clone()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    thesis_on(
+        &following.rig,
+        ("01J8Z3MTHE5000000000000001", "01J8Z3MTHE5000000000000002"),
+        RESEARCH_SPY,
+        (&at(NOW - 60).to_string(), &at(NOW + 3_540).to_string()),
+    );
+    for n in 1..=3 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(!facts.following());
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    for n in 4..=6 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(facts.following());
+    assert_eq!(facts.working_instrument().as_deref(), Some(RESEARCH_SPY));
 }

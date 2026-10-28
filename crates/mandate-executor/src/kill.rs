@@ -2,6 +2,7 @@
 //! DEC-485): the final mode first, then the agent's own orders cancelled by id, then its
 //! sub-ledger sold through the executor's own flatten intents, each step journaled.
 
+use mandate_notify::OwnerAlertKind;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -11,6 +12,7 @@ use mandate_num::{Price, Qty, SignedQty};
 use crate::batch::Batch;
 use crate::codec::{initiator_name, mode_name, purpose_name};
 use crate::error::ExecutorError;
+use crate::holders;
 use crate::ids::{ClientOrderId, FLATTEN, IntentId};
 use crate::intent::{order_tif, received};
 use crate::payload::{int, text};
@@ -104,8 +106,19 @@ pub(crate) fn kill_switch(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    alert(batch, switch, initiator);
     cancel_each(batch, cancels)
+}
+
+/// The switch's owner alert, for every switch but a user's: the API commits a user's
+/// `OwnerAlertSent` with the command's `OwnerCommandIssued`, so one user kill switch is one notice
+/// however many stream owners apply it (notifications spec §3.4, E8-9k). A risk limit's and the
+/// platform operator's switch keep the executor's alert until their own causes are written
+/// (DEC-2514 item 2).
+fn alert(batch: &mut Batch<'_, '_>, switch: EventId, initiator: Initiator) {
+    if initiator != Initiator::Owner {
+        batch.notify(switch, OwnerAlertKind::KillSwitch);
+    }
 }
 
 /// §5.5's account scope where every held instrument may close at the market now (regular session,
@@ -180,7 +193,7 @@ fn account(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    alert(batch, switch, initiator);
     batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
         AccountWide::Account(reference),
     )));
@@ -533,7 +546,13 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// `k-<switch>-<n>` (DEC-485 item 2), once nothing the switch reaches is live in the instrument
 /// any more, the session admits the sell, the agent holds lots there, and a limit can be named.
 /// One that waits only for a limit is journaled `exit_unpriced` and alerted, once per switch and
-/// instrument (DEC-2361).
+/// instrument (DEC-2361), and so is one whose intent cannot be journaled yet because its agent's
+/// mandate version or its deployment's references do not read (DEC-2846): the journal takes no
+/// other record of it. Either waits alone: the switch, its mode and its cancels are applied
+/// (`AGENTS.md` rule 13), and the close is raised at the first pass that can name it. A close no
+/// sane mark prices, raised at the resting stop, is never silent either: it goes at once, and is
+/// journaled `exit_unpriced` and alerted the same way (DEC-2853). One the owner's floor alone
+/// prices goes at the price the owner chose, and is not alerted.
 /// Raised earlier, the gate would count the sells still pending their cancel and deny the flatten
 /// `sell_exceeds_available`.
 pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
@@ -567,7 +586,8 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 .get(instrument)
                 .and_then(|protection| protection.prices)
                 .map(|prices| prices.stop);
-            let limit = match (lowest_sane(&batch.view, instrument).or(stop), switch.floor) {
+            let marked = lowest_sane(&batch.view, instrument);
+            let limit = match (marked.or(stop), switch.floor) {
                 (Some(own), floor) => Some(floor.map_or(own, |floor| own.max(floor))),
                 (None, floor) => floor,
             };
@@ -578,7 +598,13 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
             ) else {
                 continue;
             };
-            let Some(limit) = limit else {
+            let configured = crate::gate::configured(
+                batch.binding_gate(),
+                batch.ports,
+                &switch.agent,
+                instrument,
+            );
+            let (Some(limit), true) = (limit, configured) else {
                 if !switch.unpriced.contains(instrument) {
                     let alerted = changed_by(
                         batch,
@@ -587,10 +613,20 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                         Vec::new(),
                         Some(id.clone()),
                     )?;
-                    batch.notify(alerted, "exit_unpriced");
+                    batch.notify(alerted, OwnerAlertKind::ExitStalled);
                 }
                 continue;
             };
+            if marked.is_none() && stop.is_some() && !switch.unpriced.contains(instrument) {
+                let alerted = changed_by(
+                    batch,
+                    instrument,
+                    "exit_unpriced",
+                    Vec::new(),
+                    Some(id.clone()),
+                )?;
+                batch.notify(alerted, OwnerAlertKind::ExitStalled);
+            }
             let tif = Some(order_tif(batch, instrument));
             received(
                 batch,
@@ -614,37 +650,16 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
     Ok(())
 }
 
-/// §5.5: exactly the agent's sub-ledger quantity, its attributed lots (§8.1: its own orders'
-/// fills, buys net of sells), less what it released to the owner (DEC-2354), capped at the long
-/// position, so another agent's, the owner's unattributed and the owner's released shares are
-/// untouched.
+/// §5.5: exactly the agent's sub-ledger quantity, min(Lᵢ, N) on DEC-2849's holders ([`holders`]):
+/// its own orders' fills, less what it released to the owner (DEC-2354) and what an account
+/// switch's close took from it, capped at the long position, so another agent's, the owner's
+/// unattributed and the owner's released shares are untouched.
 pub(crate) fn sub_ledger(
     view: &ExecutorState,
     agent: &AgentId,
     instrument: &InstrumentId,
 ) -> Result<Qty, ExecutorError> {
-    let mut lots = SignedQty::ZERO;
-    for order in view.orders.values() {
-        if &order.instrument == instrument && order.agent.as_ref() == Some(agent) {
-            let filled = SignedQty::from(order.filled_qty);
-            lots = lots.checked_add(match order.side {
-                Side::Buy => filled,
-                Side::Sell => filled.negated(),
-            })?;
-        }
-    }
-    let released = view
-        .released
-        .get(&(agent.clone(), instrument.clone()))
-        .copied()
-        .unwrap_or(Qty::ZERO);
-    let lots = lots.checked_add(SignedQty::from(released).negated())?;
-    let open = view
-        .positions
-        .get(instrument)
-        .copied()
-        .unwrap_or(SignedQty::ZERO);
-    Ok(lots.min(open).max(SignedQty::ZERO).abs())
+    holders::sub_ledger(view, agent, instrument)
 }
 
 /// The switch and close a flatten intent's id names, `k-<switch>-<n>`, or `None` for any other.
@@ -1013,11 +1028,35 @@ mod tests {
             let alerts: Vec<(&EventId, &str)> = effects
                 .iter()
                 .filter_map(|effect| match effect {
-                    Effect::Notify(alert) => Some((&alert.subject_event, alert.message_key)),
+                    Effect::Notify(alert) => Some((&alert.subject_event, alert.kind.key())),
                     _ => None,
                 })
                 .collect();
-            assert_eq!(alerts, vec![(&record.event_id, "kill_switch")], "{name}");
+            let unpriced = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft)
+                        if draft.event_type == "ProtectionChanged"
+                            && field(draft, "action").and_then(Value::as_str)
+                                == Some("exit_unpriced") =>
+                    {
+                        Some(&draft.event_id)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| missing("the unpriced close"))?;
+            let mut alerted = if initiator == Initiator::Owner {
+                Vec::new()
+            } else {
+                vec![(&record.event_id, "kill_switch")]
+            };
+            alerted.push((unpriced, "exit_stalled"));
+            assert_eq!(
+                alerts, alerted,
+                "{name}: the API alerts a user's switch with its command, so the executor alerts \
+                 only the others (E8-9k, notifications spec §3.4); and the close no mark prices, \
+                 raised at the stop, is alerted for every switch (DEC-2853)"
+            );
             assert_eq!(
                 raised(&effects),
                 vec![format!("k-{}-0", record.event_id.0)],
@@ -1386,6 +1425,154 @@ mod tests {
             "an unfilled entry holds the flatten back no longer"
         );
         assert_eq!(sells(&gone), 1);
+        Ok(())
+    }
+
+    /// Ten AAPL protected by an OCO stopping at 140 ([`protected`]), in the regular session,
+    /// `quoted` with a sane 151 quote, or with no quote or sane bid held at all (both
+    /// process-local, as after a restart): the effects of the risk limit's switch, which raises
+    /// the flatten in its own step.
+    fn switched_after_a_fill(
+        ports: &Ports<'_>,
+        quoted: bool,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        let mut executor = protected(ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), ports)?;
+        if quoted {
+            executor.run(
+                Input::Market(MarketObservation {
+                    instrument: aapl()?,
+                    bid: Some(Price::parse("151")?),
+                    bid_size: Some(Qty::parse("100")?),
+                    ask: Some(Price::parse("151.1")?),
+                    last_trade: None,
+                    mark: Some(Price::parse("151")?),
+                    sane: true,
+                    observed_at: RiskClock::from_secs(MONDAY),
+                }),
+                ports,
+            )?;
+        } else {
+            executor.state.quotes.clear();
+            executor.state.sane_bids.clear();
+        }
+        executor.run(switch(Initiator::RiskLimit, false)?, ports)
+    }
+
+    /// DEC-2853: a flatten no sane mark prices is raised at once at the resting stop, never held,
+    /// and is not silent: it is journaled `exit_unpriced`, caused by its switch, and the owner
+    /// alerted. One a sane quote prices is raised the same, with neither.
+    #[test]
+    fn a_flatten_no_mark_prices_goes_at_once_and_is_alerted() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for quoted in [false, true] {
+            let gone = switched_after_a_fill(&ports, quoted)?;
+            let cause = &the_switch(&gone)?.event_id;
+            assert_eq!(
+                raised(&gone).len(),
+                1,
+                "quoted {quoted}: the flatten is raised in the switch's own step"
+            );
+            let unpriced = gone
+                .iter()
+                .filter(|effect| {
+                    matches!(effect, Effect::Journal(draft)
+                        if draft.event_type == "ProtectionChanged"
+                            && field(draft, "action").and_then(Value::as_str)
+                                == Some("exit_unpriced")
+                            && draft.causation_id.as_ref() == Some(cause))
+                })
+                .count();
+            let alerted = gone.iter().any(|effect| {
+                matches!(effect, Effect::Notify(note) if note.kind.key() == "exit_stalled")
+            });
+            assert_eq!(
+                (unpriced, alerted),
+                if quoted { (0, false) } else { (1, true) },
+                "quoted {quoted}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2853: a close the owner's floor alone prices, with no resting stop and no mark held,
+    /// goes at the price the owner confirmed, and is not alerted as unpriced.
+    #[test]
+    fn a_flatten_the_owners_floor_alone_prices_is_not_alerted() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = bracket_entry(&ports)?;
+        for (event_type, pairs) in [
+            (
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text("md-held")),
+                    ("agent", text("agent-a")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                    ("purpose", text("open")),
+                ],
+            ),
+            (
+                "FillApplied",
+                vec![
+                    ("fill_id", text("f-held")),
+                    ("client_order_id", text("md-held")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty_gross", text("10")),
+                    ("price", text("150")),
+                ],
+            ),
+            (
+                "OrderStateChanged",
+                vec![
+                    ("client_order_id", text("md-held")),
+                    ("state", text("filled")),
+                ],
+            ),
+        ] {
+            commit(&mut executor, event_type, pairs)?;
+        }
+        executor.state.quotes.clear();
+        executor.state.sane_bids.clear();
+        executor.run(switch(Initiator::Owner, true)?, &ports)?;
+        let gone = executor.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: format!("md-{ENTRY}"),
+            })),
+            &ports,
+        )?;
+        let close = draft(&gone, "IntentReceived").ok_or_else(|| missing("the close"))?;
+        assert_eq!(
+            field(close, "limit_price").and_then(Value::as_str),
+            Some("148"),
+            "the owner's floor prices it"
+        );
+        let unpriced = gone.iter().any(|effect| {
+            matches!(effect, Effect::Journal(draft)
+                if draft.event_type == "ProtectionChanged"
+                    && field(draft, "action").and_then(Value::as_str) == Some("exit_unpriced"))
+        });
+        assert!(
+            !unpriced,
+            "a floor the owner chose is a price, not unpriced"
+        );
         Ok(())
     }
 

@@ -184,6 +184,7 @@ fn every_fact_journaled_and_current_is_read_exactly() {
         cash: usd("400.25"),
         buying_power: usd("800.5"),
         non_marginable_buying_power: usd("400.25"),
+        figures: None,
         at: instant(START),
     };
     assert_eq!(facts.account, account);
@@ -392,7 +393,7 @@ fn the_clock_is_the_latest_account_stream_risk_clock_alone() {
     );
     assert_eq!(state.now(), Some(instant(START)));
     let changed = object(&[("risk_clock", clock(START + 7))]);
-    acct(&mut state, "OrderStateChanged", &changed);
+    acct(&mut state, "GateDecided", &changed);
     assert_eq!(state.now(), Some(instant(START + 7)));
     acct(&mut state, "GateDecided", &object(&[]));
     assert_eq!(state.now(), Some(instant(START + 7)));
@@ -408,7 +409,7 @@ fn an_unreadable_row_of_a_type_it_reads_holds_from_then_on() {
         (ACCOUNT, "ClockAdvanced", tick(START - 1)),
         (
             ACCOUNT,
-            "OrderStateChanged",
+            "GateDecided",
             object(&[("risk_clock", text("2026-10-26"))]),
         ),
         (
@@ -584,4 +585,133 @@ fn the_account_streams_clock_alone_admits_no_opening() {
     assert_eq!(state.facts(ASSET, FRESH), Err(Held::NoClock));
     on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
     assert!(state.facts(ASSET, FRESH).is_ok());
+}
+
+/// R1 on #2447: the mandate in force does not depend on which stream reaches the fold first. A
+/// version applied on the account stream, folded before the control stream's deployment, stays
+/// the one in force; a stop is final whichever came first.
+#[test]
+fn the_mandate_in_force_is_the_same_whichever_stream_is_folded_first() {
+    let applied_first = |stop: bool| {
+        let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+        on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+        acct(
+            &mut state,
+            "AccountSnapshotRecorded",
+            &snapshot("1000", START),
+        );
+        acct(&mut state, "MarkUpdated", &regular("189.5", START));
+        let version = applied(AGENT, "sha256:v2", "applied");
+        acct(&mut state, "MandateVersionApplied", &version);
+        if stop {
+            let stopped = object(&[("agent_id", text(AGENT))]);
+            on(&mut state, CONTROL, "AgentStopped", &stopped);
+        }
+        deploy(&mut state);
+        state
+    };
+    assert_eq!(version(&applied_first(false)), "sha256:v2");
+    assert_eq!(
+        applied_first(true).facts(ASSET, FRESH),
+        Err(Held::NoMandate)
+    );
+}
+
+fn registered(kind: &str, model: Option<(&str, &str)>, hash: &str) -> Value {
+    let nullable = |value: Option<&str>| value.map_or(Value::Null, text);
+    object(&[
+        ("kind", text(kind)),
+        ("content_hash", text(hash)),
+        ("model_id", nullable(model.map(|(id, _)| id))),
+        ("model_version", nullable(model.map(|(_, version)| version))),
+        ("params", Value::Array(Vec::new())),
+        ("admits_instruments", Value::Null),
+    ])
+}
+
+/// The models the workspace registered, by id and version, with their content hashes: the
+/// builder sizes only outputs of a model the registry hashes (DEC-2378 item 10). Another kind of
+/// snapshot registers no model, and a model registered again keeps its latest hash.
+#[test]
+fn the_registered_models_are_folded_from_their_snapshots() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    let ma = Some(("quant.ma_crossover", "1.0.0"));
+    on(
+        &mut state,
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &registered("model_version", ma, "sha256:aa"),
+    );
+    on(
+        &mut state,
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &registered("rule_set", None, "sha256:bb"),
+    );
+    let expected = [(
+        ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
+        "sha256:aa".to_owned(),
+    )];
+    assert_eq!(state.models(), expected.clone().into());
+    on(
+        &mut state,
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &registered("model_version", ma, "sha256:cc"),
+    );
+    let latest = [(
+        ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
+        "sha256:cc".to_owned(),
+    )];
+    assert_eq!(state.models(), latest.into());
+}
+
+#[test]
+fn a_model_snapshot_without_its_id_version_or_hash_is_refused() {
+    for payload in [
+        registered("model_version", None, "sha256:aa"),
+        registered("model_version", Some(("m", "1")), "sha256:aa").without("content_hash"),
+        registered("model_version", Some(("m", "1")), "sha256:aa")
+            .with("model_version", Value::Null),
+        object(&[("content_hash", text("sha256:aa"))]),
+    ] {
+        let mut state = ready();
+        let row = Row {
+            stream: CONTROL,
+            event_type: "ConfigSnapshotRegistered",
+            payload: &payload,
+        };
+        assert!(state.fold(row).is_err(), "{payload:?}");
+        assert_eq!(state.facts(ASSET, FRESH), Err(Held::Unreadable));
+    }
+}
+
+/// Journal spec v0.84, DEC-2131 item 4: an `AgentDeployed` version 3, its version 2's payload with
+/// a trailing `step_up`, is read as its version 2: the same mandate in force and the same facts.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let version_2 = deployed(AGENT, "sha256:v1")
+        .with("record_ref", text("sha256:r1"))
+        .with("connection_id", text("conn_alpaca_paper_01"));
+    let step_up = object(&[
+        ("assertion_id", text("01JAA3P0A000000000000000H1")),
+        ("authenticated_at", clock(START - 3)),
+        ("method", text("passkey")),
+    ]);
+    let version_3 = version_2.clone().with("step_up", step_up);
+    let read = |payload: &Value| {
+        let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+        on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+        on(&mut state, CONTROL, "AgentDeployed", payload);
+        acct(
+            &mut state,
+            "AccountSnapshotRecorded",
+            &snapshot("1000.75", START),
+        );
+        acct(&mut state, "MarkUpdated", &regular("189.5", START));
+        state.facts(ASSET, FRESH)
+    };
+    assert_eq!(read(&version_3), read(&version_2));
+    assert_eq!(read(&version_3), ready().facts(ASSET, FRESH));
+    assert_eq!(read(&version_3).unwrap().mandate_version, "sha256:v1");
 }

@@ -520,6 +520,80 @@ def fuzz_pinning(n):
             check(nu["max_instruments"] <= old["universe"]["max_instruments"],
                   "MI-16 a reducing pin never raises max_instruments", (old["universe"], nu))
 
+def fuzz_routes(n):
+    """V-048 (DEC-2282): an oracle that reads the registry table and the previous version's pins itself."""
+    reg = base.REGISTRY
+    ids = sorted(k for k in reg if k.startswith("llm.")) + ["llm.research_agent_none"]
+
+    def pick():
+        e = reg.get(rng.choice(ids))
+        pin = {"id": rng.choice(ids), "version": "0.1.0", "content_hash": base.H_RES}
+        if pin["id"] in reg:
+            pin["version"], pin["content_hash"] = reg[pin["id"]]["version"], reg[pin["id"]]["content_hash"]
+        roll = rng.random()
+        if roll < 0.1:
+            pin["version"] = "9.9.9"
+        elif roll < 0.2 and e is not None:
+            pin["content_hash"] = e["content_hash"]
+        return pin
+
+    def kinds(m):
+        for sm in m["behavior"]["signal_models"]:
+            if sm["admits_instruments"]:
+                table = {"ideate": {"id": sm["id"], "version": sm["version"], "content_hash": sm["content_hash"]}}
+                table.update(sm.get("routes", {}))
+                return sm["id"], table
+        return None, {}
+
+    def refused(m, prev, current):
+        if any("routes" in sm and not sm["admits_instruments"] for sm in m["behavior"]["signal_models"]):
+            return True
+        own_id, now = kinds(m)
+        bound = prev is not None and V.is_valid(prev) and current == version(prev)
+        _, before = kinds(prev) if bound else (None, {})
+        own_entry = reg.get(own_id)
+        for kind, pin in now.items():
+            e = reg.get(pin["id"])
+            exact = e is not None and e["version"] == pin["version"] and e["content_hash"] == pin["content_hash"]
+            usable = before.get(kind) == pin or (exact and e.get("status") == "offered")
+            if kind == "ideate":
+                if exact and e.get("admits_instruments") and not usable:
+                    return True
+                continue
+            if pin["id"] == own_id or not exact or not usable:
+                return True
+            if own_entry is None or own_entry.get("harness") != e.get("harness"):
+                return True
+        return False
+
+    for _ in range(n):
+        m = copy.deepcopy(base.research)
+        sm0 = m["behavior"]["signal_models"][0]
+        sm0.update(pick())
+        if rng.random() < 0.7:
+            sm0["routes"] = {"monitor": pick()}
+        if rng.random() < 0.1:
+            m["behavior"]["signal_models"][1]["routes"] = {"monitor": pick()}
+        prev = None
+        if rng.random() < 0.6:
+            prev = copy.deepcopy(m)
+            p0 = prev["behavior"]["signal_models"][0]
+            roll = rng.random()
+            if roll < 0.25 and "routes" in p0:
+                own = {k: p0[k] for k in ("id", "version", "content_hash")}
+                p0.update(p0["routes"]["monitor"])
+                p0["routes"] = {"monitor": own}
+            elif roll < 0.5:
+                p0.update(pick())
+            elif roll < 0.75:
+                p0["routes"] = {"monitor": pick()}
+        if not V.is_valid(m):
+            continue
+        current = None if prev is None else rng.choice([version(prev), version(prev), version(m)])
+        errs, _ = semantic(m, dict(base.CTX, previous_version=prev, current_mandate_version=current))
+        check(("V-048" in errs) == refused(m, prev, current), "V-048 refuses exactly a pin the registry does not offer, unless carried",
+              (m["behavior"]["signal_models"], prev and prev["behavior"]["signal_models"]))
+
 def fuzz_autonomy(n):
     m = copy.deepcopy(base.btc)
     for _ in range(n):
@@ -2529,6 +2603,7 @@ if __name__ == "__main__":
     fuzz_lineage(300)
     fuzz_split_boundaries(400)
     fuzz_pinning(400)
+    fuzz_routes(1500)
     fuzz_gate_universe(200)
     fuzz_autonomy(3000)
     fuzz_delegations(600)

@@ -389,5 +389,48 @@
         1
       ]
     }
+  },
+  {
+    "label": "a missing openings_held",
+    "remove": [
+      "/agent/openings_held"
+    ]
+  },
+  {
+    "label": "an openings hold with an unlisted reason",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "stalled"
+      }
+    }
+  },
+  {
+    "label": "an openings hold with no reason",
+    "set": {
+      "/agent/openings_held": {}
+    }
+  },
+  {
+    "label": "an openings hold with another member",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "unknown",
+        "since": "2026-10-08T14:30:00.000000000Z"
+      }
+    }
+  },
+  {
+    "label": "an openings hold that is a bare string",
+    "set": {
+      "/agent/openings_held": "account_traded"
+    }
+  },
+  {
+    "label": "an openings hold whose reason is a value the enum does not list",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "mutant_value"
+      }
+    }
   }
 ]

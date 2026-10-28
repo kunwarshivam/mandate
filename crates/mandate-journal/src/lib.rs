@@ -39,8 +39,11 @@ mod gateway;
 mod invalidation;
 mod membership;
 mod merkle;
+mod news;
 mod notices;
+mod real_money;
 mod records;
+mod retirements;
 mod risk_limits;
 mod runs;
 mod scheduler;
@@ -86,8 +89,8 @@ pub fn stream_event_types(stream: StreamType) -> impl Iterator<Item = &'static s
 }
 
 /// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
-/// the run records' rules 173 to 183, and §9.5's rule 260.
-pub const STREAM_RULE_TYPES: [&str; 12] = [
+/// the run records' rules 173 to 183, §9.5's rules 260 and 309, and §9.37's rules 284 and 285.
+pub const STREAM_RULE_TYPES: [&str; 14] = [
     "ModelInvocationRecorded",
     "MeterReserved",
     "MeterSettled",
@@ -100,10 +103,13 @@ pub const STREAM_RULE_TYPES: [&str; 12] = [
     "RunSummaryRecorded",
     "RunEnded",
     "AccountCloseRequested",
+    "AccountRestrictionChanged",
+    "NewsItemStored",
 ];
 
 /// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
-/// the invalidation's rule 187, the run records' rules 173 to 183, §9.5's rule 260), so `append`
+/// the invalidation's rule 187, the run records' rules 173 to 183, §9.5's rules 260 and 309, §9.37's
+/// rules 284 and 285), so `append`
 /// reads the stream's earlier records of [`STREAM_RULE_TYPES`] to judge it.
 pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
@@ -121,7 +127,10 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
             ) | (
                 "MeterReserved" | "MeterSettled",
                 StreamType::Meter | StreamType::DeploymentMeter
-            ) | ("AccountCloseRequested", StreamType::Account)
+            ) | (
+                "AccountCloseRequested" | "AccountRestrictionChanged",
+                StreamType::Account
+            ) | ("NewsItemStored", StreamType::News)
         )
     })
 }
@@ -145,6 +154,8 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
 ///   follows its run's end unless the run was cancelled and the record judges nothing.
 /// - 260: an account stream's `AccountCloseRequested` names a switch, instrument, and attempt no
 ///   earlier one names together.
+/// - 284 and 285: a news stream's `NewsItemStored` names an `item_id` no earlier one names, and is
+///   known no earlier than the one before it.
 pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, Invalid)> {
     for (i, draft) in batch.iter().enumerate() {
         let before: Vec<&Draft> = earlier
@@ -156,6 +167,7 @@ pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, In
         invalidation::stream_rule(&before, draft).map_err(|error| (i, error))?;
         runs::stream_rule(&before, draft).map_err(|error| (i, error))?;
         control::stream_rule(&before, draft).map_err(|error| (i, error))?;
+        news::stream_rule(&before, draft).map_err(|error| (i, error))?;
     }
     Ok(())
 }
@@ -196,6 +208,7 @@ pub use control_verify::{
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
+pub use retirements::{RetirementTerms, retirement_failure, retirement_held_silent};
 pub use start::{
     AnchorRecord, AnchorRecordError, ColdRead, ManifestStart, ResolvedStart, StartRequest,
     TrustedStartError, anchor_record, resolve_start_from_rows,
@@ -248,10 +261,13 @@ pub enum StreamType {
     /// a copy of every workspace's meter records for the deployment's cap (journal spec v0.53 §2,
     /// §9.19, DEC-2207).
     DeploymentMeter,
+    /// `news:{workspace_id}`, whose single writer is the workspace's news reader, one record per
+    /// news item it stored (journal spec v0.97 §2, §9.37, DEC-2278). Never a risk input.
+    News,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`, or
+/// `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`, `news:{workspace_id}`, or
 /// `dmeter:{deployment_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
@@ -270,6 +286,7 @@ impl StreamId {
             ["ntf", _] => StreamType::Notice,
             ["meter", _] => StreamType::Meter,
             ["dmeter", _] => StreamType::DeploymentMeter,
+            ["news", _] => StreamType::News,
             _ => return None,
         };
         parts

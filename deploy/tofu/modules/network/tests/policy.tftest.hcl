@@ -59,3 +59,50 @@ run "the_vpc_is_named_for_its_region" {
     error_message = "The VPC is named for its environment and region."
   }
 }
+
+# DEC-2064 item 7: the default egress is unchanged for staging and production, and a cell may
+# narrow it.
+run "the_default_egress_is_unchanged" {
+  command = plan
+
+  assert {
+    condition     = length(digitalocean_firewall.nodes.outbound_rule) == 8
+    error_message = "The default keeps seven outbound ports and the VPC's icmp."
+  }
+}
+
+run "a_cell_may_drop_plain_web" {
+  command = plan
+
+  variables {
+    egress = [
+      { protocol = "tcp", port_range = "443" },
+      { protocol = "udp", port_range = "123" },
+    ]
+  }
+
+  assert {
+    condition     = length(digitalocean_firewall.nodes.outbound_rule) == 3 && !anytrue([for rule in digitalocean_firewall.nodes.outbound_rule : rule.port_range == "80"])
+    error_message = "The narrowed egress opens only its own ports."
+  }
+}
+
+run "refuses_an_egress_range" {
+  command = plan
+
+  variables {
+    egress = [{ protocol = "tcp", port_range = "1-65535" }]
+  }
+
+  expect_failures = [var.egress]
+}
+
+run "refuses_a_port_past_65535" {
+  command = plan
+
+  variables {
+    egress = [{ protocol = "tcp", port_range = "99999" }]
+  }
+
+  expect_failures = [var.egress]
+}

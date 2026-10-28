@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type StepUpAction, approvalConfirmCommand, challengeLifetimeMs, cliConfirmEvidence, confirmCode, sessionPrincipal, stepUpChallenge } from "./step-up";
+import { type StepUpAction, CONNECT_DISCLOSURE, approvalConfirmCommand, connectConfirmCommand, connectStepUpDigest, challengeLifetimeMs, cliConfirmEvidence, confirmCode, sessionPrincipal, stepUpChallenge } from "./step-up";
 
 const DIGEST = `sha256:${"ab".repeat(32)}` as const;
 const ASKED: StepUpAction = { kind: "approve", digest: DIGEST };
@@ -129,5 +129,21 @@ describe("the session's principal (read-models/session)", () => {
     expect(sessionPrincipal({ principal_id: "01JBR2C4D6E8F0G2H4J6K8M0P3", kind: "full" }, "")).toEqual({ ok: true, value: { principal_id: "01JBR2C4D6E8F0G2H4J6K8M0P3" } });
     expect(sessionPrincipal({ principal_id: "usr_1" }, "").ok).toBe(false);
     expect(sessionPrincipal({}, "").ok).toBe(false);
+  });
+});
+
+describe("a connect's step-up (DEC-2621 item 4, DEC-2125)", () => {
+  it("binds the canonical connect object the server and the CLI hash, byte for byte", () => {
+    expect(CONNECT_DISCLOSURE).toEqual({ document: "alpaca_oauth_token_breadth", version: "1" });
+    expect(connectStepUpDigest("ws_01")).toBe("sha256:3df08a75075094b6caf39b686e7262825ead70b36711631621c47a14e32749c2");
+    expect(connectStepUpDigest("ws_02")).not.toBe(connectStepUpDigest("ws_01"));
+  });
+
+  it("names the confirm-connect command's flags, and no digest: the CLI computes it", () => {
+    const read = stepUpChallenge({ kind: "connection", digest: connectStepUpDigest("ws_1") })(served({ action: { kind: "connection", digest: connectStepUpDigest("ws_1") } }), "");
+    if (!read.ok) throw new Error("decodes");
+    const line = connectConfirmCommand({ workspaceId: "ws_1", principalId: "01JBR2C4D6E8F0G2H4J6K8M0P3", shown: { challenge: read.value, code: "0410-6105" } });
+    expect(line).toBe("mandate step-up confirm-connect --workspace ws_1 --principal 01JBR2C4D6E8F0G2H4J6K8M0P3 --challenge 01JBR2C4D6E8F0G2H4J6K8M0N2 --code 0410-6105 --journal <journal DSN> --store <artifact store>");
+    expect(line).not.toContain("sha256:");
   });
 });

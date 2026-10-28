@@ -37,6 +37,9 @@ pub trait QuoteFeed {
         instrument: &InstrumentId,
         now: UtcNanos,
     ) -> Result<MarketObservation, &'static str>;
+
+    /// The feed's name, as a mark records it (`MarkUpdated`'s `feed`, journal spec §9.30).
+    fn feed(&self) -> &'static str;
 }
 
 /// A feed with no quotes: the fixture broker's, and any wiring that reads none.
@@ -50,6 +53,10 @@ impl QuoteFeed for NoQuotes {
         _now: UtcNanos,
     ) -> Result<MarketObservation, &'static str> {
         Err("no_quotes")
+    }
+
+    fn feed(&self) -> &'static str {
+        "none"
     }
 }
 
@@ -75,6 +82,11 @@ impl QuotePoll {
             every,
             read_at: BTreeMap::new(),
         }
+    }
+
+    /// Reads each instrument once per `every` from now on (DEC-2844).
+    pub fn set_every(&mut self, every: Duration) {
+        self.every = every;
     }
 
     /// The wanted instruments due a read at `now`, which it records as read: one never read, or
@@ -104,5 +116,11 @@ impl QuotePoll {
             self.read_at.insert(instrument.clone(), now);
         }
         Ok(due)
+    }
+
+    /// Forgets that `instrument` was read, so it is due again at once: for one a pass recorded as
+    /// read and then stopped before reading.
+    pub fn forget(&mut self, instrument: &InstrumentId) {
+        self.read_at.remove(instrument);
     }
 }

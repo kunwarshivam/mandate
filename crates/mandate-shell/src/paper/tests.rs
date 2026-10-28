@@ -135,6 +135,7 @@ impl Deployed {
         })?;
         self.records.push(ControlRecord {
             seq: seq.saturating_add(1),
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: parsed,
             origin: Origin {
@@ -570,6 +571,28 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         None,
         "another instrument's fill names none"
     );
+    assert_eq!(
+        trusted.config_refs(&executor_agent, &reviewed).as_ref(),
+        Some(refs),
+        "the reviewed instrument's gate records name the registered references (DEC-2846)"
+    );
+    assert_eq!(trusted.config_refs(&executor_agent, &symbol("SPY")?), None);
+    assert_eq!(
+        trusted.config_refs(&ExecutorAgentId("agent_other".to_owned()), &reviewed),
+        None
+    );
+    assert_eq!(
+        trusted.account_fill_refs().map(|named| (
+            named.fee_config,
+            named.trading_calendar,
+            named.settlement_calendar
+        )),
+        refs.fee_config
+            .clone()
+            .zip(refs.trading_calendar.clone())
+            .map(|(fee, calendar)| (fee, calendar.clone(), calendar)),
+        "an unattributed fill in any instrument names the registered fee and calendar (DEC-2817)"
+    );
     Ok(())
 }
 
@@ -613,6 +636,13 @@ fn the_reconciling_context_names_the_fill_configuration_and_answers_no_gate_requ
     );
     assert_eq!(context.increment(&other), None);
     assert_eq!(context.exit_tier(&reviewed), None);
+    assert_eq!(
+        context.config_refs(&ours, &reviewed),
+        Some(refs.clone()),
+        "the reviewed instrument's gate records name the registered references (DEC-2846)"
+    );
+    assert_eq!(context.config_refs(&theirs, &reviewed), None);
+    assert_eq!(context.config_refs(&ours, &other), None);
     let (Some(fee), Some(calendar), Some(snapshot)) = (
         refs.fee_config.clone(),
         refs.trading_calendar.clone(),
@@ -630,6 +660,19 @@ fn the_reconciling_context_names_the_fill_configuration_and_answers_no_gate_requ
         })
     );
     assert_eq!(context.fill_refs(&other), None);
+    assert_eq!(
+        context.account_fill_refs().map(|named| (
+            named.fee_config,
+            named.trading_calendar,
+            named.settlement_calendar
+        )),
+        refs.fee_config
+            .clone()
+            .zip(refs.trading_calendar.clone())
+            .map(|(fee, calendar)| (fee, calendar.clone(), calendar)),
+        "an unattributed fill in any instrument names the registered fee and calendar (DEC-2817)"
+    );
+    assert!(context.account_fill_refs().is_some());
     let missing: [fn(&mut mandate_executor::BindingGateConfigRefs); 3] = [
         |refs| refs.fee_config = None,
         |refs| refs.trading_calendar = None,
@@ -1171,6 +1214,37 @@ fn a_quote_and_record_exactly_at_the_bound_and_a_locked_quote_pass() -> Result<(
     load_contexts(&loaded, &snapshot, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
     let fresh = facts_at(NOW, NOW)?;
     load_contexts(&loaded, &fresh, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
+    Ok(())
+}
+
+/// DEC-2390 item 1 (the founder's): a position row of quantity exactly zero is a sold-out
+/// position the broker still lists, and the account is empty; a short row is a holding and
+/// refuses, as a long one does.
+#[test]
+fn a_sold_out_row_of_zero_is_an_empty_account_and_a_short_row_is_not() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let row = |quantity: &str| -> Result<BrokerPosition, String> {
+        Ok(BrokerPosition {
+            instrument: symbol(INSTRUMENT_ID)?,
+            qty: SignedQty::parse(quantity).map_err(text)?,
+            avg_entry_price: price("255.2")?,
+        })
+    };
+    let mut sold_out = facts_at(NOW, NOW)?;
+    sold_out.broker.positions.push(row("0")?);
+    load_contexts(&loaded, &sold_out, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
+    let mut short = facts_at(NOW, NOW)?;
+    short.broker.positions.push(row("-1")?);
+    assert_eq!(
+        refusal(load_contexts(
+            &loaded,
+            &short,
+            at(NOW)?,
+            &agent(),
+            Environment::Paper
+        ))?,
+        "a paper account with no position and no open order"
+    );
     Ok(())
 }
 

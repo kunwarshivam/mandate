@@ -19,6 +19,7 @@
     "deploymentTier",
     "api",
     "artifacts",
+    "researchArtifacts",
     "founding",
     "executor",
     "alpacaOAuth",
@@ -57,6 +58,7 @@
         "executor",
         "token-exchange",
         "scheduler",
+        "dispatcher",
         "model-gateway",
         "exporter",
         "data",
@@ -94,6 +96,10 @@
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         },
         "scheduler": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "dispatcher": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         },
@@ -354,6 +360,125 @@
         }
       }
     },
+    "deployManager": {
+      "description": "The second deployment manager's workspace, for the research agent alone: dev or ci, or staging beside the model gateway (DEC-2070, DEC-2080)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "researchWorkspace"
+      ],
+      "properties": {
+        "researchWorkspace": {
+          "type": "string",
+          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}r$"
+        }
+      }
+    },
+    "modelGateway": {
+      "description": "The model-gateway service's workspace and deployment, ids only, its two monthly budgets, and the live registry file a hosted cell starts it from (E21-62, DEC-2326, DEC-2081)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "deployment",
+        "workspaceMonthlyUsd",
+        "deploymentMonthlyUsd",
+        "registry"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}r?$"
+        },
+        "deployment": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "workspaceMonthlyUsd": {
+          "type": "string",
+          "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        },
+        "deploymentMonthlyUsd": {
+          "type": "string",
+          "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        },
+        "registry": {
+          "type": "string",
+          "pattern": "^$|^\\{"
+        }
+      }
+    },
+    "dispatcher": {
+      "description": "The notification dispatcher's configuration file (DEC-2500 item 7, DEC-2516 item 2), rendered into the ConfigMap `dispatcher-config` once images.dispatcher is named: the one recipient its email channel mails, in DEC-710 item 4's form, the build digest of its binary, and the subject streams beside those the control stream names (a floor). No member is a secret or an address; the workspace, the environment and the app origin come from `api.workspace`, `environment` and `api.appOrigin`",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recipient",
+        "build",
+        "subjects"
+      ],
+      "properties": {
+        "recipient": {
+          "type": "string",
+          "pattern": "^$|^[a-z][a-z0-9_]{0,63}$"
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^$|^sha256:[0-9a-f]{64}$"
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "data": {
+      "description": "The data process (mandate-datad): where its bars come from, `recorded` or `alpaca-iex` (DEC-2082), and the recorded series' instruments, each with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instruments",
+        "source"
+      ],
+      "properties": {
+        "instruments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "symbol",
+              "assetId",
+              "anchor"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9.]{0,9}$"
+              },
+              "assetId": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "anchor": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}=[0-9]{1,9}(\\.[0-9]{1,9})?$"
+              }
+            }
+          }
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "recorded",
+            "alpaca-iex"
+          ]
+        }
+      }
+    },
     "executor": {
       "description": "The broker every executor runs over (DEC-2306 item 1); a vault address, never a secret",
       "type": "object",
@@ -516,6 +641,32 @@
         "size": {
           "type": "string",
           "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"
+        },
+        "storageClass": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([a-z0-9.-]*[a-z0-9])?)?$"
+        },
+        "accessMode": {
+          "enum": [
+            "ReadWriteOnce",
+            "ReadWriteMany"
+          ]
+        }
+      }
+    },
+    "researchArtifacts": {
+      "description": "The research store (DEC-2279 item 5), which only the model gateway writes. Its size is whole gibibytes or tebibytes, at least 1Gi, so it is always at least twice the gateway's fixed 512 MiB cap (item 4)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "storageClass",
+        "accessMode"
+      ],
+      "properties": {
+        "size": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Gi|Ti)$"
         },
         "storageClass": {
           "type": "string",

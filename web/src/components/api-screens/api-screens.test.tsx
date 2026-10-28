@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiAgent, ApiAgents, ApiApproval, ApiApprovals, ApiHome, BySource } from "./api-screens";
@@ -8,6 +10,8 @@ import { WorkspaceGate } from "@/components/screens/common";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { DEFERRED_CHECK_LABELS } from "@/lib/deferred-checks";
+import { quantity } from "@/lib/format";
 import { RoleProvider } from "@/lib/roles";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -54,6 +58,30 @@ const agentOf = (id: string) => fixture.agents.find((a) => a.agent_id === id)!;
 /** The API names an approval by its event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
 const pending = fixture.approvals.filter((a) => a.status === "delivered").map((a) => ({ ...a, approval_id: a.approval_id.replace(/^apr_/, "") }));
 
+/** The journal vectors' sentence and every name a version 3 request may defer (DEC-2515 item 5). */
+const deferrals = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals;
+/**
+ * Serves the approval as version 3 with `deferred_to_binding` set to `value`, or with none when `value` is `undefined`, and
+ * its decision's list as `decided`: by default the same list, as the runtime writes the two (DEC-2519).
+ */
+const deferring =
+  (value: unknown, decided: unknown = Array.isArray(value) ? value : []): Tamper =>
+  (route, body) => {
+    if (!route.startsWith("/approvals/")) return body;
+    const approval = body.approval as Record<string, unknown>;
+    const content = { ...(approval.content as Record<string, unknown>) };
+    if (value === undefined) delete content.deferred_to_binding;
+    else content.deferred_to_binding = value;
+    return { ...body, approval: { ...approval, schema_version: 3, content, decision_deferred_to_binding: decided } };
+  };
+/** Serves the approval as the mock's version 2, naming no deferral, across from a decision whose list is `decided`. */
+const decidedOnly =
+  (decided: unknown): Tamper =>
+  (route, body) => {
+    if (!route.startsWith("/approvals/")) return body;
+    return { ...body, approval: { ...(body.approval as Record<string, unknown>), decision_deferred_to_binding: decided } };
+  };
+
 afterEach(() => {
   cleanup();
 });
@@ -86,6 +114,66 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(await screen.findByText("Mandate not reported")).toBeTruthy();
     expect(screen.getByText("Account positions not reported")).toBeTruthy();
     expect(screen.queryByText(/\$10,000/)).toBeNull();
+  });
+
+  it("an agent shows its orders, newest first, and its own positions, from the served reads (DEC-2111)", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length > 0 && a.positions.length > 0)!;
+    mount(<ApiAgent agentId={agent.agent_id} />);
+    const orders = await screen.findByRole("list", { name: "Orders" });
+    const rows = within(orders).getAllByRole("listitem");
+    expect(rows).toHaveLength(agent.orders.length + agent.past_orders.length);
+    const newest = [...agent.past_orders, ...agent.orders].at(-1)!;
+    expect(rows[0].textContent).toContain(`${newest.side === "buy" ? "Buy" : "Sell"} ${quantity(newest.qty)} ${newest.instrument.symbol}`);
+    const held = await screen.findByRole("list", { name: "This agent's positions" });
+    expect(within(held).getAllByRole("listitem")).toHaveLength(agent.positions.length);
+  });
+
+  it("an agent lists the latest records on its stream, by type and time, from the journal read", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length > 0)!;
+    const { posts } = mount(<ApiAgent agentId={agent.agent_id} />);
+    const journal = await screen.findByRole("list", { name: "Journal" });
+    const rows = within(journal).getAllByRole("listitem");
+    expect(rows[0].textContent).toContain("#1 AgentDeployed");
+    expect(rows.some((r) => r.textContent?.includes("OrderSubmitted"))).toBe(true);
+    expect(posts).toEqual([]);
+  });
+
+  it("a journal the role may not read says so, and shows no records", async () => {
+    const agent = fixture.agents[0];
+    mountWith(<ApiAgent agentId={agent.agent_id} />, (input, init, server) =>
+      input.includes("/journal/") ? Promise.resolve(new Response(JSON.stringify({ code: "forbidden", effect: "none", retryable: false }), { status: 403 })) : server.fetch(input, init),
+    );
+    expect(await screen.findByText("Not available to your role.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Journal" })).toBeNull();
+  });
+
+  it("an order's unreported state and quantity say not reported, and unknown stays unknown, never working (trading spec §5.7)", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length >= 2)!;
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => {
+      if (!/\/orders$/.test(route)) return body;
+      const [first, second, ...rest] = body.orders as Array<Record<string, unknown>>;
+      return { ...body, orders: [{ ...first, state: null, filled_qty: null }, { ...second, state: "unknown" }, ...rest] };
+    });
+    const orders = await screen.findByRole("list", { name: "Orders" });
+    expect(within(orders).getByText(/^State not reported/)).toBeTruthy();
+    expect(within(orders).getByText(/filled quantity not reported/)).toBeTruthy();
+    const unknown = orders.querySelector("[data-state=unknown]");
+    expect(unknown?.textContent).toContain("Unknown: being checked with the broker");
+    expect(unknown?.textContent).not.toContain("Working");
+  });
+
+  it("an order list the API cannot answer says not reported, never none", async () => {
+    const agent = fixture.agents[0];
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/(orders|positions)$/.test(route) ? { ...body, agent_id: "agt_someone_else" } : body));
+    expect(await screen.findByText("Orders not reported.")).toBeTruthy();
+    expect(screen.queryByText("No order yet.")).toBeNull();
+    expect(screen.queryByText("This agent holds nothing.")).toBeNull();
+  });
+
+  it("an agent the deployment found no account for says its orders are not reported", async () => {
+    const agent = fixture.agents[0];
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/orders$/.test(route) ? { ...body, account_ref: null, orders: [] } : body));
+    expect(await screen.findByText(/^Orders not reported: the deployment found no account/)).toBeTruthy();
   });
 
   it("an agent shows its mandate's envelope, its account's positions, and limit usage as not reported yet", async () => {
@@ -134,6 +222,78 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     await screen.findByRole("button", { name: "Skip" });
     expect(screen.getByText("ENVIRONMENT NOT REPORTED")).toBeTruthy();
     expect(screen.queryByText("PAPER")).toBeNull();
+  });
+
+  it("a request whose dry run deferred checks names each one under the fixed sentence, and never as passed (DEC-2515 item 5)", async () => {
+    const approval = pending[0];
+    const names = ["halt", "liquidity_floor", "participation"];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(names));
+    const region = await screen.findByRole("region", { name: "Checks not run yet" });
+    expect(within(region).getByText(deferrals.approver_sentence)).toBeTruthy();
+    expect(within(region).getAllByRole("listitem").map((li) => li.textContent)).toEqual(names.map((n) => DEFERRED_CHECK_LABELS[n]));
+    expect(region.textContent).not.toMatch(/passed|cleared/i);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("the answer's record covers the deferred checks shown: a different list gives a different record", async () => {
+    const approval = pending[0];
+    const artifacts: unknown[] = [];
+    for (const names of [["halt"], ["eligibility", "halt"]]) {
+      const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(names));
+      await screen.findByRole("region", { name: "Checks not run yet" });
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      artifacts.push((posts[0].body.record as { artifact: unknown }).artifact);
+      cleanup();
+    }
+    expect(artifacts[0]).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/));
+    expect(artifacts[1]).not.toEqual(artifacts[0]);
+  });
+
+  it("a deferred check the web app has no label for is shown by its name, never dropped", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(["halt", "new_check"]));
+    const region = await screen.findByRole("region", { name: "Checks not run yet" });
+    expect(within(region).getAllByRole("listitem").map((li) => li.textContent)).toEqual([DEFERRED_CHECK_LABELS.halt, "new_check"]);
+  });
+
+  it("a request with no deferred checks shows no such list", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />);
+    await screen.findByRole("button", { name: "Approve" });
+    expect(screen.queryByRole("region", { name: "Checks not run yet" })).toBeNull();
+    expect(screen.queryByText(deferrals.approver_sentence)).toBeNull();
+  });
+
+  it("deferred checks it cannot read, or a version 3 request without them, are never read as none: it says so and offers Skip, not Approve (DEC-2518)", async () => {
+    const approval = pending[0];
+    for (const value of [undefined, null, [], "halt", [7]]) {
+      const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(value));
+      const region = await screen.findByRole("region", { name: "Checks not run yet" });
+      expect(region.textContent, JSON.stringify(value)).toMatch(/cannot be read/);
+      expect(screen.queryByRole("button", { name: "Approve" }), JSON.stringify(value)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      expect(posts[0].body).toMatchObject({ verdict: "skipped" });
+      cleanup();
+    }
+  });
+
+  it("a request that hides or invents a deferral its decision does not name, or whose decision is not found, offers Skip, not Approve (DEC-2519)", async () => {
+    const approval = pending[0];
+    const cases: Array<[string, Tamper]> = [
+      ["a version 2 request whose decision deferred checks", decidedOnly(["halt"])],
+      ["a request whose decision is not on the stream", decidedOnly(null)],
+      ["a version 3 request naming a check its decision did not", deferring(["agent_mode", "halt"], ["halt"])],
+    ];
+    for (const [name, tamper] of cases) {
+      mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", tamper);
+      const region = await screen.findByRole("region", { name: "Checks not run yet" });
+      expect(region.textContent, name).toMatch(/cannot be read/);
+      expect(screen.queryByRole("button", { name: "Approve" }), name).toBeNull();
+      expect(screen.getByRole("button", { name: "Skip" }), name).toBeTruthy();
+      cleanup();
+    }
   });
 
   it("Approve asks for a code first and sends no answer: the owner confirms it on the host (DEC-2104)", async () => {

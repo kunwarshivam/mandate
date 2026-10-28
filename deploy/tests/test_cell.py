@@ -19,6 +19,7 @@ from pathlib import Path
 
 import celpy
 import pytest
+import yaml
 from celpy import celtypes
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
@@ -56,6 +57,7 @@ SECTION_3_1 = {
     },
     "token-exchange": {("vault", "TCP", 8200), ("token-host", "TCP", 443)},
     "scheduler": {("postgres", "TCP", 5432), ("time", "UDP", 123)},
+    "dispatcher": {("postgres", "TCP", 5432)},
     "model-gateway": {
         ("postgres", "TCP", 5432),
         ("vault", "TCP", 8200),
@@ -74,6 +76,11 @@ KUBE_API = "192.0.2.200/32"
 MANAGER = "deploy-manager"
 TEMPLATES = "deploy-manager-templates"
 HOOK = "pre-install,pre-upgrade"
+# The model gateway's workspace and deployment, which its image requires (E21-62); no budget, so a
+# rendering names none unless a test sets one (DEC-2326 item 2).
+GATEWAY = {"workspace": "01KDEM0000000000000000000W", "deployment": "cell-test"}
+# What a researching runtime of the gateway's workspace is handed (DEC-2397 item 6).
+GATEWAY_ARGS = ["--gateway", "model-gateway:8080"]
 # Where the interim runtime image carries the recorded research bundle (DEC-2246).
 RESEARCH = "/usr/local/share/mandate/research"
 
@@ -103,12 +110,23 @@ def render(*args: str, chart: Path = CHART) -> list[dict]:
     return documents(done.stdout)
 
 
+# The one recipient the dispatcher's email channel mails, in DEC-710 item 4's form (DEC-2516).
+RECIPIENT = "demo_owner"
+
+
 def every_image() -> list[str]:
     sets = [
         f"images.{image}={PLACEHOLDER.format(image)}"
         for image in dict.fromkeys(p["image"] for p in PROCESSES)
         if image != "postgres"
     ]
+    sets += [
+        f"data.instruments[{i}].{key}={value}"
+        for i, instrument in enumerate(INSTRUMENTS)
+        for key, value in instrument.items()
+    ]
+    sets.append(f"dispatcher.recipient={RECIPIENT}")
+    sets += [f"modelGateway.{key}={value}" for key, value in GATEWAY.items()]
     return [arg for s in sets for arg in ("--set", s)]
 
 
@@ -133,7 +151,10 @@ def render_all(*extra: str) -> list[dict]:
 
 
 def process(name: str) -> dict:
-    return next(p for p in PROCESSES if p["name"] == name)
+    """The processes.json entry of `name`; the local cell's second deploy manager and scheduler
+    (DEC-2070, DEC-2071) are their first's entry under a name of their own."""
+    first = {"deploy-manager-research": "deploy-manager", "scheduler-research": "scheduler"}.get(name, name)
+    return next(p for p in PROCESSES if p["name"] == first)
 
 
 def managed_pod(name: str, pod: dict) -> dict:
@@ -146,8 +167,13 @@ def managed_pod(name: str, pod: dict) -> dict:
 
 
 def managed_pods(docs: list[dict]) -> list[dict]:
-    """The pods the deployment manager starts: its ConfigMap's `<process>.json` entries (DEC-1170)."""
-    maps = [d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == TEMPLATES]
+    """The pods the deployment managers start: each one's ConfigMap's `<process>.json` entries
+    (DEC-1170), the first manager's first, then the local cell's second's (DEC-2070)."""
+    names = (TEMPLATES, "deploy-manager-research-templates")
+    maps = sorted(
+        (d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] in names),
+        key=lambda m: names.index(m["metadata"]["name"]),
+    )
     return [
         managed_pod(key.removesuffix(".json"), json.loads(text))
         for m in maps
@@ -160,7 +186,9 @@ def workloads(docs: list[dict]) -> list[dict]:
 
 
 def is_manager(workload: dict) -> bool:
-    return workload["kind"] == "Deployment" and workload["metadata"]["name"] == MANAGER
+    """A deployment manager: the hosted workspace's, or the local cell's second, the research
+    workspace's (DEC-2070)."""
+    return workload["kind"] == "Deployment" and workload["metadata"]["name"] in (MANAGER, "deploy-manager-research")
 
 
 def pod_spec(workload: dict) -> dict:
@@ -351,15 +379,16 @@ def no_ingress(docs: list[dict]) -> list[str]:
 
 
 def hardened(docs: list[dict]) -> list[str]:
-    """Every pod non-root with the runtime's seccomp profile and no service-account token, but the
-    deployment manager's, which mounts its own service account's and nothing else (DEC-1172); every
+    """Every pod non-root with the runtime's seccomp profile and no service-account token, but each
+    deployment manager's, which mounts its own service account's and nothing else (DEC-1172,
+    DEC-2070); every
     container read-only, unprivileged, with every capability dropped."""
     problems = []
     for w in workloads(docs):
         spec = pod_spec(w)
         sc = spec.get("securityContext", {})
         token = (
-            {"automountServiceAccountToken": True, "serviceAccountName": MANAGER}
+            {"automountServiceAccountToken": True, "serviceAccountName": w["metadata"]["name"]}
             if is_manager(w)
             else {"automountServiceAccountToken": False, "serviceAccountName": None}
         )
@@ -516,15 +545,17 @@ def roles_match(journal_docs: list[dict]) -> list[str]:
     journal-db chart, and has a credential Secret with a pgpass key."""
     roles = sorted({p["db_role"] for p in PROCESSES if p["db_role"]} - {"mandate_migrator"})
     cluster = next(d for d in journal_docs if d["kind"] == "Cluster")
-    managed = sorted(r["name"] for r in cluster["spec"]["managed"]["roles"])
+    managed = sorted(r["name"] for r in cluster["spec"]["managed"]["roles"] if r.get("login") is not False)
     secrets = {d["metadata"]["name"]: d for d in journal_docs if d["kind"] == "Secret"}
     problems = [] if managed == roles else [f"managed roles {managed}, want {roles}"]
+    readers = {p["db_role"] for p in PROCESSES if p.get("db_access") == "read"}
+    groups = {r["name"]: r.get("inRoles") for r in cluster["spec"]["managed"]["roles"]}
     for role in [*roles, "mandate_migrator"]:
-        if (
-            role != "mandate_migrator"
-            and f"CREATE ROLE {role} LOGIN IN ROLE mandate_journal_app;" not in ROLES_SQL
-        ):
-            problems.append(f"roles.sql does not create {role}")
+        group = "mandate_journal_reader" if role in readers else "mandate_journal_app"
+        if role != "mandate_migrator" and f"CREATE ROLE {role} LOGIN IN ROLE {group};" not in ROLES_SQL:
+            problems.append(f"roles.sql does not create {role} in {group}")
+        if role != "mandate_migrator" and groups.get(role) != [group]:
+            problems.append(f"the managed role {role} is in {groups.get(role)}, want {group}")
         secret = secrets.get("journal-role-" + role.replace("_", "-"))
         if secret is None or not secret["stringData"]["pgpass"].startswith(f"*:*:mandate:{role}:"):
             problems.append(f"no pgpass credential for {role}")
@@ -648,6 +679,8 @@ the processes it starts render as Deployments of their own; its pod templates ar
         assert not [x for x in words if "{" in x], words
         assert c["args"][: len(p["args"])] == [
             x.replace("{workspace}", "ws1")
+            .replace("{hosted_workspace}", HOSTED)
+            .replace("{data_instruments}", INSTRUMENTS_ARG)
             .replace("{agent}", "demo-agent")
             .replace("{connection}", "demo-paper")
             .replace("{owner}", "demo-owner")
@@ -655,6 +688,448 @@ the processes it starts render as Deployments of their own; its pod templates ar
         ]
         assert c["readinessProbe"]["exec"]["command"] == [x.replace("{probe}", "readyz") for x in p["probe"]]
         assert c["livenessProbe"]["exec"]["command"] == [x.replace("{probe}", "livez") for x in p["probe"]]
+
+
+HOSTED = "01KDEM0000000000000000000W"
+SPY_ASSET = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb"
+QQQ_ASSET = "eb82ffb0-efd6-4f4e-9307-8fead28e04f6"
+# The cell's two recorded instruments: the demo agent's SPY and the second agent's QQQ, which the
+# trade loop runs on (`demo/instrument.json`, `demo/web-instrument.json`).
+INSTRUMENTS = [
+    {"symbol": "SPY", "assetId": SPY_ASSET, "anchor": "2026-10-23=150"},
+    {"symbol": "QQQ", "assetId": QQQ_ASSET, "anchor": "2026-10-23=140"},
+]
+INSTRUMENTS_ARG = ",".join(f"{i['symbol']}:{i['assetId']}:{i['anchor']}" for i in INSTRUMENTS)
+SCHEDULER = ("--set", f"images.scheduler={PLACEHOLDER.format('scheduler')}")
+
+
+def test_the_scheduler_writes_the_clock_stream_the_manager_s_processes_read():
+    """One scheduler per workspace writes `clock:{workspace_id}` (journal spec §2, E21-29), and the
+    runtime and executor the manager starts read the clock stream of the manager's own `--workspace`
+    (`MANDATE_WORKSPACE`), so the scheduler is named the same workspace: the hosted one,
+    `api.workspace`, never the namespace's short name. It asks no time server (`egress.time` is
+    empty in the cell), so every measurement is journaled out of tolerance (AGENTS.md rule 3)."""
+    docs = render_all(*SCHEDULER)
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    scheduler = by_name["scheduler"]
+    assert scheduler["kind"] == "Deployment" and scheduler["spec"]["replicas"] == 1
+    c = first_container(scheduler)
+    assert c["image"] == PLACEHOLDER.format("scheduler")
+    assert c["args"] == ["run", "--workspace", HOSTED, "--probe", "/tmp/process.sock"]
+    manager_args = first_container(by_name[MANAGER])["args"]
+    assert manager_args[manager_args.index("--workspace") + 1] == HOSTED
+    dsn = next(e["value"] for e in c["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_scheduler@")
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-scheduler", "probe", asked, "--probe", "/tmp/process.sock"]
+    volumes = {v["name"] for v in pod_spec(scheduler).get("volumes", [])}
+    assert not [v for v in volumes if "vault" in v or v == "artifacts"], volumes
+    for check in (hardened, gated, default_deny, secrets_as_files, migration_first):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
+
+
+def test_the_scheduler_never_renders_for_no_hosted_workspace():
+    """Naming the scheduler's image without the hosted workspace fails the render, rather than
+    ticking a clock stream no process reads (AGENTS.md rule 3)."""
+    done = helm(CHART, *SCHEDULER, "--set", "api.workspace=")
+    assert done.returncode != 0
+    assert "api.workspace" in done.stderr and "scheduler" in done.stderr
+
+
+def dispatcher_config(docs: list[dict]) -> dict:
+    """The dispatcher's configuration file, as the ConfigMap it mounts holds it."""
+    config = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "dispatcher-config")
+    return json.loads(config["data"]["config.json"])
+
+
+def test_the_dispatcher_follows_the_hosted_workspace_and_mails_only_its_one_recipient():
+    """One dispatcher per workspace writes `ntf:{workspace_id}` (DEC-2500, DEC-2516): the hosted
+    workspace, whose control stream names the streams it follows, as its own journal role, with
+    Postgres its one destination. Its configuration file is mounted read-only and holds no secret
+    and no address: one email recipient, web push off (DEC-2504), paper, and the build its image is
+    pinned by. The expected file is written out here, not read from the chart."""
+    docs = render_all()
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    dispatcher = by_name["dispatcher"]
+    assert dispatcher["kind"] == "Deployment" and dispatcher["spec"]["replicas"] == 1
+    c = first_container(dispatcher)
+    assert c["image"] == PLACEHOLDER.format("dispatcher")
+    assert c["args"] == ["run", "--config", "/etc/mandate/dispatcher/config.json", "--probe", "/tmp/process.sock"]
+    dsn = next(e["value"] for e in c["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_dispatcher@")
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-dispatcher", "probe", asked, "--probe", "/tmp/process.sock"]
+    mount = next(m for m in c["volumeMounts"] if m["name"] == "dispatcher-config")
+    assert mount == {"name": "dispatcher-config", "mountPath": "/etc/mandate/dispatcher", "readOnly": True}
+    volumes = {v["name"]: v for v in pod_spec(dispatcher).get("volumes", [])}
+    assert volumes["dispatcher-config"]["configMap"]["name"] == "dispatcher-config"
+    assert not [v for v in volumes if "vault" in v or v == "artifacts"], volumes
+    assert dispatcher_config(docs) == {
+        "workspace": HOSTED,
+        "subjects": [],
+        "audience": [{"recipient": RECIPIENT, "channel": "email"}],
+        "app_origin": "https://localhost:4317",
+        "environment": "paper",
+        "build": "sha256:" + "0" * 64,
+        "web_push": False,
+        "push_allowlist": [],
+        "vapid_subject": None,
+    }
+    for check in (hardened, gated, default_deny, secrets_as_files, migration_first):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
+
+
+def test_a_local_dispatcher_takes_its_binary_digest_as_its_build():
+    """A local build has no digest in its name, so `cargo xtask cell up` sets the binary's own as
+    `dispatcher.build`; the file carries that, and a local image without it fails the render."""
+    local = ("--set", "images.dispatcher=mandate.local/dispatcher:0123456789ab")
+    build = "sha256:" + "a" * 64
+    docs = render_all(*local, "--set", f"dispatcher.build={build}")
+    assert dispatcher_config(docs)["build"] == build
+    done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *local)
+    assert done.returncode != 0 and "dispatcher.build" in done.stderr
+
+
+def test_the_dispatcher_never_renders_for_what_it_cannot_honour():
+    """No hosted workspace, no recipient, a recipient not in DEC-710 item 4's form, no app origin,
+    or a backtest release fails the render rather than starting a dispatcher that sends nothing or
+    to no one (AGENTS.md rule 3)."""
+    base = ("-f", str(CELL / "values" / "k3d.yaml"), *every_image())
+    for why, extra in {
+        "no hosted workspace": ("--set", "api.workspace="),
+        "no recipient": ("--set", "dispatcher.recipient="),
+        "a recipient not in its form": ("--set", "dispatcher.recipient=Demo-Owner"),
+        "no app origin": ("--set", "api.appOrigin="),
+        "backtest": ("--set", "environment=backtest"),
+    }.items():
+        assert helm(CHART, *base, *extra).returncode != 0, why
+
+
+DATA = ("--set", f"images.data={PLACEHOLDER.format('data')}")
+
+
+def test_the_data_process_stores_the_recorded_series_where_the_runtime_reads_it():
+    """The data process writes the deployed instrument's daily bars from the cell's recorded series
+    into the artifact store, which it alone besides control and the API mounts writable and the
+    runtime mounts read-only; it holds no journal role and no vault token, and reaches no host in
+    the cell (`egress.market-data` is empty)."""
+    docs = render_all(*DATA)
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    data = by_name["data"]
+    c = first_container(data)
+    assert c["image"] == PLACEHOLDER.format("data")
+    assert c["args"] == [
+        "run",
+        "--store",
+        "/var/lib/mandate/artifacts/datasets",
+        "--artifacts",
+        "/var/lib/mandate/artifacts",
+        "--instruments",
+        INSTRUMENTS_ARG,
+        "--probe",
+        "/tmp/process.sock",
+    ]
+    assert not [e for e in c["env"] if e["name"] in ("MANDATE_JOURNAL_DSN", "PGPASSFILE")]
+    mounts = {m["mountPath"]: m.get("readOnly", False) for m in c["volumeMounts"]}
+    assert mounts.get("/var/lib/mandate/artifacts") is False, mounts
+    volumes = {v["name"] for v in pod_spec(data).get("volumes", [])}
+    assert not [v for v in volumes if "vault" in v or "journal" in v or v.startswith("pg")], volumes
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-datad", "probe", asked, "--probe", "/tmp/process.sock"]
+    for check in (hardened, gated, default_deny, colocated, egress_exact):
+        assert check(docs) == [], check.__name__
+
+
+def test_the_data_process_never_renders_without_its_series_or_outside_the_cell(tmp_path: Path):
+    """Naming the data image without the series fails the render, as does an instrument missing a
+    field or a symbol listed twice, and only the local cell's values name one: the series is a
+    recording, never market data."""
+    k3d = ("-f", str(CELL / "values" / "k3d.yaml"), *DATA)
+    none = tmp_path / "none.yaml"
+    none.write_text("data:\n  instruments: []\n")
+    done = helm(CHART, *k3d, "-f", str(none))
+    assert done.returncode != 0 and "data.instruments, the instruments" in done.stderr, done.stderr
+    for unset, said in (
+        ("data.instruments[0].symbol=", "/data/instruments/0/symbol"),
+        ("data.instruments[1].assetId=", "/data/instruments/1/assetId"),
+        ("data.instruments[1].anchor=", "/data/instruments/1/anchor"),
+        ("data.instruments[0].anchor=150", "/data/instruments/0/anchor"),
+        ("data.instruments[1].symbol=SPY", "data.instruments lists SPY twice"),
+    ):
+        done = helm(CHART, *k3d, "--set", unset)
+        assert done.returncode != 0 and said in done.stderr, f"{unset}: {done.stderr}"
+    for values in ("k3s.yaml", "managed.yaml"):
+        done = helm(CHART, "-f", str(CELL / "values" / values), *DATA)
+        assert done.returncode != 0 and "data.instruments" in done.stderr, f"{values}: only the local cell names a series"
+
+
+GATEWAY_BUDGETS = ("MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD", "MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD")
+
+
+def gateway_env(docs: list[dict]) -> dict[str, str]:
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    return {e["name"]: e.get("value", "") for e in first_container(gateway).get("env", [])}
+
+
+def test_the_model_gateway_serves_the_recording_and_names_no_budget_of_its_own():
+    """E21-62, DEC-2326 items 2 and 3: the model gateway runs `--recorded` over the bundle its image
+    carries and never a live start; its workspace and deployment are required; its budgets render
+    only where values name them, which only the local cell's do, and the chart refuses them where
+    images are not the cell's own."""
+    docs = render_all()
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    args = first_container(gateway)["args"]
+    assert args[args.index("--recorded") + 1] == f"{RESEARCH}/research.json"
+    assert not any(a.startswith("--registry") for a in args), args
+    env = gateway_env(docs)
+    assert env["MANDATE_GATEWAY_WORKSPACE"] == GATEWAY["workspace"]
+    assert env["MANDATE_GATEWAY_DEPLOYMENT"] == GATEWAY["deployment"]
+    assert (env[GATEWAY_BUDGETS[0]], env[GATEWAY_BUDGETS[1]]) == ("50", "20"), "the recorded bundle's caps"
+    mount = next(m for m in first_container(gateway)["volumeMounts"] if m["name"] == "artifacts")
+    assert mount["readOnly"] is True
+    unnamed = render_all("--set", "modelGateway.workspaceMonthlyUsd=", "--set", "modelGateway.deploymentMonthlyUsd=")
+    assert not set(GATEWAY_BUDGETS) & set(gateway_env(unnamed)), "no budget without the values naming one"
+    for unset in ("modelGateway.workspace=", "modelGateway.deployment="):
+        done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", unset)
+        assert done.returncode != 0 and "is required with images.model-gateway" in done.stderr, unset
+    hosted = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging",
+    )
+    assert hosted.returncode != 0 and "a hosted model gateway starts live" in hosted.stderr, hosted.stderr
+    local = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *LIVE_REGISTRY)
+    assert local.returncode != 0 and "the local cell serves the recorded bundle alone" in local.stderr, local.stderr
+
+
+LIVE_REGISTRY = ("--set-json", 'modelGateway.registry="{\\"entries\\":[]}"')
+LIVE_ARGS = [
+    "run", "--registry", "/run/mandate/model-gateway/registry.json", "--listen", "0.0.0.0:8080",
+    "--probe", "/tmp/process.sock", "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault",
+]
+
+
+def live_gateway(*extra: str):
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging", *LIVE_REGISTRY, *extra,
+    )
+
+
+def test_a_hosted_gateway_starts_live_from_the_registry_and_the_vault():
+    """DEC-2216 item 4, DEC-2081: in staging, with `modelGateway.registry` named, the gateway runs
+    the live start, never `--recorded`: the registry file mounted read-only from its ConfigMap,
+    the cell's vault, and the model gateway's AppRole and the vault's CA copied into its vault
+    directory, with the budgets the founder accepted rendered; any other hosted tier is refused."""
+    done = live_gateway()
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    container = first_container(gateway)
+    deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "model-gateway")
+    namespace = re.search(r"https://vault\.([^.]+)\.svc:8200", " ".join(container["args"]))
+    assert namespace, container["args"]
+    expected = [a.replace("{vault}", namespace.group(0)) for a in LIVE_ARGS]
+    assert container["args"] == expected and "--recorded" not in container["args"]
+    mounts = {m["mountPath"]: m for m in container["volumeMounts"]}
+    assert mounts["/run/mandate/model-gateway"]["readOnly"] is True
+    assert mounts["/run/mandate/vault"]["readOnly"] is True
+    spec = deployment["spec"]["template"]["spec"]
+    assert deployment["spec"]["template"]["metadata"]["labels"].get("mandate.dev/egress-vault") == "true"
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-model-gateway/model-gateway.role-id" in copy_step["command"]
+    volumes = {v["name"]: v for v in spec["volumes"]}
+    assert volumes["model-gateway-registry"]["configMap"]["name"] == "model-gateway-registry"
+    secrets = [s["secret"]["name"] for s in volumes["vault-sources"]["projected"]["sources"] if "secret" in s]
+    assert secrets == ["vault-approle-model-gateway"]
+    registry = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "model-gateway-registry")
+    assert registry["data"] == {"registry.json": '{"entries":[]}'}
+    assert set(GATEWAY_BUDGETS) <= set(gateway_env(docs))
+    for tier in ("production", "dev"):
+        refused = live_gateway("--set", f"deploymentTier={tier}")
+        assert "runs the model gateway in staging alone" in refused.stderr, (tier, refused.stderr)
+
+
+def test_a_researching_runtime_calls_the_gateway_of_its_own_workspace_alone():
+    """DEC-2397 item 6, DEC-2265 items 1 and 7: with the gateway's image named, a researching
+    runtime of the workspace it serves is handed `--gateway model-gateway:8080`, which the gateway's
+    ClusterIP Service answers on 8080; a runtime of another workspace, or one with no gateway, keeps
+    its in-process fake; and no Service but that one renders."""
+    def runtime_args(docs: list[dict]) -> list[str]:
+        runtime = next(p for p in managed_pods(docs) if p["metadata"]["name"] == "runtime")
+        return first_container(runtime)["args"]
+
+    docs = render_all()
+    assert runtime_args(docs)[-2:] == GATEWAY_ARGS
+    services = [d for d in docs if d["kind"] == "Service"]
+    assert [d["metadata"]["name"] for d in services] == ["model-gateway"]
+    assert is_gateway_service(services[0])
+    other = render_all("--set", "modelGateway.workspace=01KDEM0000000000000000000Z")
+    assert "--gateway" not in runtime_args(other), "another workspace's runtime keeps its fake"
+    without = render_all("--set", "images.model-gateway=")
+    assert "--gateway" not in runtime_args(without)
+    assert not [d for d in without if d["kind"] == "Service"]
+    seeded = copy.deepcopy(services[0])
+    seeded["spec"]["type"] = "NodePort"
+    assert not is_gateway_service(seeded), "a NodePort is an ingress"
+
+
+def test_the_gateway_follows_the_research_workspace_to_its_manager_s_runtime():
+    """DEC-2397 item 5, DEC-2070 item 5: with the gateway pointed at the research workspace, only the
+    runtime the second manager starts for it is handed `--gateway`; the first manager's, of the
+    hosted workspace, keeps its in-process fake, and every pod either manager starts keeps every pod
+    invariant."""
+    hosted = "01KDEM0000000000000000000W"
+    docs = render_all(
+        "--set", f"api.workspace={hosted}",
+        "--set", f"deployManager.researchWorkspace={hosted}r",
+        "--set", f"modelGateway.workspace={hosted}r",
+    )
+    templates = {
+        d["metadata"]["name"]: json.loads(d["data"]["runtime.json"])
+        for d in docs
+        if d["kind"] == "ConfigMap" and d["metadata"]["name"] in (TEMPLATES, "deploy-manager-research-templates")
+    }
+    args = {name: pod["spec"]["containers"][0]["args"] for name, pod in templates.items()}
+    assert args["deploy-manager-research-templates"][-2:] == GATEWAY_ARGS
+    assert "--gateway" not in args[TEMPLATES]
+    assert len(managed_pods(docs)) == 2 * len(managed_pods(render_all("--set", f"api.workspace={hosted}")))
+
+
+STAGING_WORKSPACE = CELL.parent / "gitops" / "clusters" / "staging" / "workspace.yaml"
+LIVE_REGISTRY_FILE = CELL / "model-gateway" / "registry.json"
+
+
+def staging_values() -> dict:
+    release = next(d for d in yaml.safe_load_all(STAGING_WORKSPACE.read_text()) if d and d.get("kind") == "HelmRelease")
+    return release["spec"]["values"]
+
+
+def test_only_the_local_cell_and_staging_name_the_model_gateway_s_budgets():
+    """DEC-2326 item 2, DEC-2282, DEC-2081: no values file names a model budget but the local
+    cell's, over its recorded bundle, and staging's, which are the founder's $50 and $50; the
+    local cell's gateway serves the workspace its API hosts, and so does staging's."""
+    for values in sorted((CELL / "values").glob("*.yaml")) + sorted(
+        (CELL.parent / "gitops").rglob("*.yaml")
+    ):
+        if values.name == "k3d.yaml" or values == STAGING_WORKSPACE:
+            continue
+        text = values.read_text()
+        assert "MonthlyUsd" not in text, f"{values} names a model budget"
+    staging = staging_values()
+    gateway = staging["modelGateway"]
+    assert (gateway["workspaceMonthlyUsd"], gateway["deploymentMonthlyUsd"]) == ("50", "50"), gateway
+    assert gateway["workspace"] == staging["api"]["workspace"]
+    assert gateway["deployment"] == "staging", "the meter stream's deployment never changes (DEC-2207)"
+    defaults = (CHART / "values.yaml").read_text()
+    for budget in ("workspaceMonthlyUsd", "deploymentMonthlyUsd"):
+        assert f'  {budget}: ""\n' in defaults, f"the chart defaults {budget}"
+    k3d = (CELL / "values" / "k3d.yaml").read_text()
+    workspaces = {
+        block: re.search(rf"^{block}:\n(?:  .*\n)*?  workspace: (\S+)$", k3d, re.MULTILINE).group(1)
+        for block in ("api", "modelGateway")
+    }
+    assert workspaces["api"] == workspaces["modelGateway"], workspaces
+
+
+IEX = ("--set", "data.source=alpaca-iex")
+
+
+def without_instruments(args: list[str]) -> list[str]:
+    pairs = zip(args[0::2], args[1::2])
+    return [a for pair in pairs if not pair[1].startswith("data.instruments") for a in pair]
+
+
+def iex_staging(*extra: str):
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()),
+        "--set", "localImages=false", "--set", "deploymentTier=staging", *LIVE_REGISTRY, *IEX,
+        "--set-json", "data.instruments=[]", *extra,
+    )
+IEX_ARGS = [
+    "run", "--source", "alpaca-iex", "--workspace", "{workspace}", "--store",
+    "/var/lib/mandate/artifacts/datasets/alpaca-iex", "--artifacts", "/var/lib/mandate/artifacts",
+    "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault", "--probe", "/tmp/process.sock",
+]
+
+
+def env_of(workload: dict) -> dict[str, str]:
+    return {e["name"]: e.get("value", "") for e in first_container(workload).get("env", [])}
+
+
+def test_staging_stores_iex_bars_as_bars_reader_and_its_own_journal_role():
+    """DEC-2283, DEC-2082: with `data.source` alpaca-iex in staging, the data process runs the IEX
+    source for the hosted workspace, logs in to the vault as `bars-reader` with the AppRole and CA
+    copied into its vault directory, reads the control stream as `mandate_data`, reaches Postgres,
+    the vault and its data host alone, and the runtime and executor read the alpaca-iex store."""
+    done = iex_staging("--set", "api.workspace=01KDEM0000000000000000000W")
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    args = first_container(data)["args"]
+    vault = re.search(r"https://vault\.[^.]+\.svc:8200", " ".join(args))
+    assert vault, args
+    expected = [a.replace("{workspace}", "01KDEM0000000000000000000W").replace("{vault}", vault.group(0)) for a in IEX_ARGS]
+    assert args == expected and "--instruments" not in args
+    assert "MANDATE_JOURNAL_DSN" in env_of(data)
+    spec = data["spec"]["template"]["spec"]
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-bars-reader/bars-reader.role-id" in copy_step["command"]
+    secrets = [
+        source["secret"]["name"]
+        for volume in spec["volumes"] if volume["name"] == "vault-sources"
+        for source in volume["projected"]["sources"] if "secret" in source
+    ]
+    assert secrets == ["vault-approle-bars-reader"]
+    roles = next(v for v in spec["volumes"] if v["name"] == "journal-role")
+    assert roles["secret"]["secretName"] == "journal-role-mandate-data"
+    labels = data["spec"]["template"]["metadata"]["labels"]
+    assert {k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true"} == {
+        "mandate.dev/egress-postgres", "mandate.dev/egress-vault", "mandate.dev/egress-market-data",
+    }
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/alpaca-iex") for w in readers)
+
+
+def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():
+    """DEC-2082: the local cell's recorded series reads no stream, so its data process holds no
+    journal role and its readers read the cell-recorded store; alpaca-iex outside staging, or
+    beside a recorded instrument list, is refused."""
+    docs = render_all()
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    assert "MANDATE_JOURNAL_DSN" not in env_of(data)
+    assert "--source" not in first_container(data)["args"]
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/cell-recorded") for w in readers)
+    local = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()), *IEX,
+        "--set-json", "data.instruments=[]",
+    )
+    assert "stores IEX bars in staging alone" in local.stderr, local.stderr
+    listed = live_gateway("--set", "data.source=alpaca-iex")
+    assert "data.instruments is the recorded series' list" in listed.stderr, listed.stderr
+
+
+def test_staging_names_the_committed_live_registry_byte_for_byte():
+    """DEC-2081, #2844: staging's gateway starts from deploy/cell/model-gateway/registry.json as
+    committed, every entry `evaluating` and none naming a gate report, so it offers nothing."""
+    registry = staging_values()["modelGateway"]["registry"]
+    assert registry == LIVE_REGISTRY_FILE.read_text()
+    entries = json.loads(registry)["entries"]
+    assert entries and all(e["status"] == "evaluating" and "gate_report" not in e for e in entries)
+
+
+def test_the_local_cell_records_both_demo_agents_instruments():
+    """The local cell's values list SPY and QQQ, each with the asset id its demo agent's envelope
+    pins, so the second agent's trade loop has bars, closes and marks as the first's has."""
+    docs = render("-f", str(CELL / "values" / "k3d.yaml"), *DATA)
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    args = first_container(data)["args"]
+    assert args[args.index("--instruments") + 1] == INSTRUMENTS_ARG
+    for name, instrument in (("instrument.json", INSTRUMENTS[0]), ("web-instrument.json", INSTRUMENTS[1])):
+        pinned = json.loads((CELL / "demo" / name).read_text())
+        assert (pinned["symbol"], pinned["instrument_id"]) == (instrument["symbol"], instrument["assetId"]), name
 
 
 def test_the_runtime_never_renders_for_no_deployment():
@@ -1803,6 +2278,198 @@ def deploy_manager_contained(docs: list[dict]) -> list[str]:
     return problems
 
 
+RESEARCH_MANAGER = "deploy-manager-research"
+RESEARCH_WORKSPACE = "01KDEM0000000000000000000Wr"
+
+
+def two_managers(*extra: str) -> list[dict]:
+    """Every process rendered, with the local cell's second manager for the research workspace."""
+    return render_all("--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}", *extra)
+
+
+def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
+    """DEC-2070 items 1 and 3: the second manager runs the first's image and launch for the research
+    workspace alone, under its own ServiceAccount, Role and binding with exactly the first's rules,
+    and its own admission and accounts policies, each matching only its own account, with exactly
+    the first's validations; so neither manager can make a pod or an account no policy checks. With
+    no model gateway both start the same pods; with one, only the runtime of the workspace it serves
+    differs, by its `--gateway` (DEC-2397 item 6, checked below)."""
+    docs = two_managers("--set", "images.model-gateway=")
+    managers = {w["metadata"]["name"]: w for w in docs if w["kind"] == "Deployment" and w["metadata"]["name"] in (MANAGER, RESEARCH_MANAGER)}
+    assert set(managers) == {MANAGER, RESEARCH_MANAGER}
+    first, second = (first_container(managers[n]) for n in (MANAGER, RESEARCH_MANAGER))
+    assert first["image"] == second["image"]
+    assert second["args"][second["args"].index("--workspace") + 1] == RESEARCH_WORKSPACE
+    assert first["args"][first["args"].index("--workspace") + 1] != RESEARCH_WORKSPACE
+    assert pod_spec(managers[RESEARCH_MANAGER])["serviceAccountName"] == RESEARCH_MANAGER
+
+    def by(kind: str) -> dict[str, dict]:
+        return {d["metadata"]["name"]: d for d in docs if d["kind"] == kind}
+
+    roles, bindings = by("Role"), by("RoleBinding")
+    assert set(roles) == {MANAGER, RESEARCH_MANAGER}
+    assert roles[MANAGER]["rules"] == roles[RESEARCH_MANAGER]["rules"]
+    for name in (MANAGER, RESEARCH_MANAGER):
+        assert bindings[name]["subjects"] == [{"kind": "ServiceAccount", "name": name, "namespace": "ws-ws1"}]
+        assert bindings[name]["roleRef"] == {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name}
+    for kind in ("Deployment", "ServiceAccount", "Role", "RoleBinding"):
+        named = [d["metadata"]["name"] for d in docs if d["kind"] == kind and d["metadata"]["name"] == RESEARCH_MANAGER]
+        assert named == [RESEARCH_MANAGER], (kind, named)
+    egress = {
+        n: [d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == f"egress-{n}"]
+        for n in (MANAGER, RESEARCH_MANAGER)
+    }
+    assert [len(e) for e in egress.values()] == [1, 1], egress
+    assert egress[RESEARCH_MANAGER][0]["spec"]["podSelector"]["matchLabels"]["mandate.dev/process"] == RESEARCH_MANAGER
+    unselected = lambda e: {k: v for k, v in e[0]["spec"].items() if k != "podSelector"}
+    assert unselected(egress[MANAGER]) == unselected(egress[RESEARCH_MANAGER])
+    assert not [d for d in docs if d["kind"] == "Service" and RESEARCH_MANAGER in d["metadata"]["name"]]
+    accounts = by("ServiceAccount")
+    assert accounts[RESEARCH_MANAGER].get("automountServiceAccountToken") == accounts[MANAGER].get(
+        "automountServiceAccountToken"
+    )
+    pods = {n: pod_spec(managers[n]) for n in (MANAGER, RESEARCH_MANAGER)}
+    assert [v for v in pods[MANAGER]["volumes"] if v.get("persistentVolumeClaim")] == [
+        v for v in pods[RESEARCH_MANAGER]["volumes"] if v.get("persistentVolumeClaim")
+    ]
+    assert [m for m in first["volumeMounts"] if m["name"] == "artifacts"] == [
+        m for m in second["volumeMounts"] if m["name"] == "artifacts"
+    ]
+    policies_ = by("ValidatingAdmissionPolicy")
+    policy_bindings = by("ValidatingAdmissionPolicyBinding")
+    for suffix in ("pods", "accounts"):
+        mine = {n: p for n, p in policies_.items() if n.endswith(f"-{suffix}")}
+        names = sorted(mine)
+        assert len(names) == 2, names
+        account = {
+            n: [c["expression"] for c in p["spec"]["matchConditions"]]
+            for n, p in mine.items()
+        }
+        first_name = next(n for n in names if n.endswith(f"-{MANAGER}-{suffix}"))
+        second_name = next(n for n in names if n.endswith(f"-{RESEARCH_MANAGER}-{suffix}"))
+        assert account[first_name] == [f"request.userInfo.username == 'system:serviceaccount:ws-ws1:{MANAGER}'"]
+        assert account[second_name] == [f"request.userInfo.username == 'system:serviceaccount:ws-ws1:{RESEARCH_MANAGER}'"]
+        strip = lambda p: {k: v for k, v in p["spec"].items() if k != "matchConditions"}
+        assert strip(mine[first_name]) == strip(mine[second_name]), suffix
+        for name in names:
+            assert policy_bindings[name]["spec"]["policyName"] == name
+            assert policy_bindings[name]["spec"]["validationActions"] == ["Deny"]
+    first_templates, second_templates = (
+        next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == f"{n}-templates")
+        for n in (MANAGER, RESEARCH_MANAGER)
+    )
+    assert set(first_templates["data"]) == set(second_templates["data"]) == {"executor.json", "runtime.json", f"{EXCHANGE}.json"}
+
+
+@pytest.mark.parametrize("tier", ["dev", "ci", "staging", "production"])
+def test_the_second_manager_runs_only_in_a_dev_or_ci_cell_or_staging(tier: str):
+    """DEC-2070 item 4, DEC-2080: with the model gateway named, as every image names it, the chart
+    renders the second manager in a dev, ci or staging cell and refuses it in production."""
+    done = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
+    )
+    if tier in ("dev", "ci", "staging"):
+        assert done.returncode == 0, done.stderr
+    else:
+        assert done.returncode != 0 and "runs only in a dev or ci cell" in done.stderr, done.stderr
+
+
+def test_staging_runs_the_second_manager_only_beside_the_model_gateway():
+    """DEC-2080: staging's research agent spends only through the model gateway's meter, so without
+    the gateway the chart refuses the second manager there, while a dev cell still renders it."""
+    for tier, renders in (("staging", False), ("dev", True)):
+        done = helm(
+            CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+            "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
+            "--set", "images.model-gateway=",
+        )
+        if renders:
+            assert done.returncode == 0, done.stderr
+        else:
+            assert done.returncode != 0 and "beside the model gateway" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize(
+    "named, hosted",
+    [
+        ("01KDEM0000000000000000000W", None),
+        ("01KDEM0000000000000000000Ws", None),
+        ("01KDEM0000000000000000000W", ""),
+        ("01KDEM0000000000000000000Ws", ""),
+        ("01KDEM0000000000000000000Xr", "01KDEM0000000000000000000W"),
+    ],
+)
+def test_the_second_manager_serves_only_the_hosted_workspace_with_r(named: str, hosted: str | None):
+    """DEC-2070 item 1: the second manager's workspace is the hosted workspace's ULID with `r`, so it
+    never reads another manager's control stream; the schema refuses a bare ULID, and the chart a
+    research workspace that is not the hosted one's; with no hosted workspace named, the schema alone
+    refuses it."""
+    done = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", f"deployManager.researchWorkspace={named}", *([] if hosted is None else ["--set", f"api.workspace={hosted}"]),
+    )
+    assert done.returncode != 0 and "researchWorkspace" in done.stderr, done.stderr
+    paired = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "deployManager.researchWorkspace=01KDEM0000000000000000000Wr",
+        "--set", "api.workspace=01KDEM0000000000000000000W",
+        "--set", "modelGateway.workspace=01KDEM0000000000000000000Wr",
+    )
+    assert paired.returncode == 0, paired.stderr
+
+
+def test_no_hosted_values_name_the_second_manager():
+    """DEC-2070 item 4: no values file names a research workspace, and without one nothing of the
+    second manager renders."""
+    for values in sorted((CELL / "values").glob("*.yaml")) + sorted((CELL.parent / "gitops").rglob("*.yaml")):
+        assert "researchWorkspace" not in values.read_text(), values
+    assert not [d for d in render_all() if RESEARCH_MANAGER in json.dumps(d)]
+
+
+def test_the_research_workspace_has_a_clock_of_its_own():
+    """DEC-2071: beside the second manager, a second scheduler writes the research workspace's clock
+    stream, run as the first is but for `<workspace>r`, with the first's egress and resources, so the
+    runtime and executor the second manager starts tick; every invariant the first's pod keeps, the
+    second's keeps; and without a research workspace nothing of it renders."""
+    hosted = "01KDEM0000000000000000000W"
+    docs = render_all("--set", f"api.workspace={hosted}", "--set", f"deployManager.researchWorkspace={hosted}r")
+    deployments = {
+        d["metadata"]["name"]: d
+        for d in docs
+        if d["kind"] == "Deployment" and d["metadata"]["name"] in ("scheduler", "scheduler-research")
+    }
+    assert set(deployments) == {"scheduler", "scheduler-research"}
+    first, second = (first_container(deployments[n]) for n in ("scheduler", "scheduler-research"))
+    assert first["args"] == ["run", "--workspace", hosted, "--probe", "/tmp/process.sock"]
+    assert second["args"] == ["run", "--workspace", f"{hosted}r", "--probe", "/tmp/process.sock"]
+
+    def masked(name: str) -> str:
+        """The Deployment whole, with its own name and workspace written as the first's."""
+        text = json.dumps(deployments[name], sort_keys=True)
+        return text.replace("scheduler-research", "scheduler").replace(f"{hosted}r", hosted)
+
+    assert masked("scheduler") == masked("scheduler-research")
+    assert deployments["scheduler-research"]["spec"]["template"]["metadata"]["labels"]["mandate.dev/process"] == (
+        "scheduler-research"
+    )
+    egress = {
+        n: next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == f"egress-{n}")
+        for n in ("scheduler", "scheduler-research")
+    }
+    unselected = lambda e: {k: v for k, v in e["spec"].items() if k != "podSelector"}
+    assert unselected(egress["scheduler"]) == unselected(egress["scheduler-research"])
+    for name in ("scheduler", "scheduler-research"):
+        assert egress[name]["spec"]["podSelector"] == {
+            "matchLabels": {"mandate.dev/workspace": "ws1", "mandate.dev/process": name}
+        }, name
+    without_manager = render_all("--set", f"api.workspace={hosted}", "--set", f"deployManager.researchWorkspace={hosted}r", "--set", "images.deploy-manager=")
+    assert not [d for d in without_manager if "scheduler-research" in json.dumps(d)], "only beside the second manager"
+    for check in (colocated, guaranteed, default_deny, egress_exact, no_ingress, hardened, gated, secrets_as_files):
+        assert check(docs) == [], check.__name__
+    assert not [d for d in render_all() if "scheduler-research" in json.dumps(d)]
+
+
 def test_deploy_manager_contained():
     docs = render_all()
     assert deploy_manager_contained(docs) == []
@@ -1818,7 +2485,7 @@ def test_deploy_manager_contained():
             assert "serviceAccountName" not in spec
             continue
         assert "command" not in container, container.get("command")
-        research = ["--research", RESEARCH] if pod["metadata"]["name"] == "runtime" else []
+        research = ["--research", RESEARCH, *GATEWAY_ARGS] if pod["metadata"]["name"] == "runtime" else []
         assert container["args"] == ["run", "--probe", "/tmp/process.sock", *research], container["args"]
         assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
         assert "serviceAccountName" not in spec
@@ -1869,7 +2536,7 @@ def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
     args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs) if p["metadata"]["name"] != EXCHANGE}
     assert args == {
         "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
-        "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
+        "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH, *GATEWAY_ARGS],
     }, args
     assert helm(CHART, *paper_without_manager()).returncode != 0, "a paper executor needs the manager (DEC-2365)"
 
@@ -2066,7 +2733,7 @@ def test_without_the_manager_the_runtime_and_executor_are_deployments():
         d
         for d in docs
         if d["kind"] in ("ServiceAccount", "Role", "RoleBinding", "ConfigMap")
-        and d["metadata"]["name"] != "migrations"
+        and d["metadata"]["name"] not in ("migrations", "dispatcher-config")
     ]
     for check in (hardened, gated, deploy_manager_contained):
         assert check(docs) == [], check.__name__
@@ -2685,6 +3352,7 @@ def admission_problems(docs: list[dict]) -> Iterator[str]:
     started = managed_pods(docs)
     names = {w["metadata"]["name"] for w in started}
     claimed = any(d["kind"] == "PersistentVolumeClaim" and d["metadata"]["name"] == "artifacts" for d in docs)
+    research = any(d["kind"] == "PersistentVolumeClaim" and d["metadata"]["name"] == "research-artifacts" for d in docs)
     templates = {w["metadata"]["name"]: w["spec"]["template"] for w in started}
     role = lambda n: process(n)["db_role"]  # noqa: E731
     want = {
@@ -2694,7 +3362,11 @@ def admission_problems(docs: list[dict]) -> Iterator[str]:
             n: sorted({"journal-ca", "journal-role-" + role(n).replace("_", "-")}) if role(n) else []
             for n in names
         },
-        "claims": {n: ["artifacts"] if n == "runtime" and claimed else [] for n in names},
+        "claims": {
+            n: (["artifacts"] if n in ("runtime", "executor") and claimed else [])
+            + (["research-artifacts"] if n == "runtime" and research else [])
+            for n in names
+        },
         "projected": {
             n: ["mandate-vault|600|token|292|namespace=metadata.namespace"]
             if n == EXCHANGE or (n == "executor" and "alpaca-paper" in json.dumps(launches(templates[n])))
@@ -3228,11 +3900,29 @@ def test_portable_across_k3d_k3s_and_managed():
     assert without_ingress(renders[0]) == without_ingress(renders[1]), "k3d differs only by the tunnel"
 
 
+def is_gateway_service(doc: dict) -> bool:
+    """The model gateway's in-cluster name (DEC-2397 item 6): exactly a ClusterIP on 8080 selecting
+    the gateway's pods, which nothing outside the cluster reaches, so it is no ingress."""
+    spec = doc.get("spec", {})
+    return (
+        doc["kind"] == "Service"
+        and doc["metadata"]["name"] == "model-gateway"
+        and spec.get("type") == "ClusterIP"
+        and spec.get("selector", {}).get("mandate.dev/process") == "model-gateway"
+        and [(p["port"], p["targetPort"], p["protocol"]) for p in spec.get("ports", [])] == [(8080, 8080, "TCP")]
+        and not spec.get("externalIPs")
+    )
+
+
 def ingress_only_by_tunnel(docs: list[dict]) -> list[str]:
     """The cell's one ingress is cloudflared dialing out (DEC-967 item 6): no Service, NodePort,
     LoadBalancer or Ingress object; the tunnel token a mounted file, never a value or an
     environment variable; and its egress DNS and the tunnel edge on port 7844 only."""
-    problems = [f"{d['kind']} {d['metadata']['name']}" for d in docs if d["kind"] in ("Service", "Ingress")]
+    problems = [
+        f"{d['kind']} {d['metadata']['name']}"
+        for d in docs
+        if d["kind"] in ("Service", "Ingress") and not is_gateway_service(d)
+    ]
     tunnels = [d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "cloudflared"]
     for t in tunnels:
         c = pod_spec(t)["containers"][0]
@@ -3338,7 +4028,7 @@ def test_the_tunnel_runs_beside_the_api():
     api = owner_workload(docs)
     assert [c["name"] for c in pod_spec(api)["containers"]] == ["api", "cloudflared"]
     assert api_contained(docs) == [], "the API still listens on its pod's loopback only"
-    assert not [d for d in docs if d["kind"] in ("Service", "Ingress")]
+    assert not [d for d in docs if d["kind"] in ("Service", "Ingress") and not is_gateway_service(d)]
     alone = render("-f", str(CELL / "values" / "k3s.yaml"))
     assert tunnel_route(alone) == []
     assert [d["metadata"]["name"] for d in alone if d["kind"] == "Deployment"] == ["cloudflared"]
@@ -3460,13 +4150,23 @@ def tiers(docs: list[dict]) -> set[str]:
     return found
 
 
+# A hosted cell's model gateway starts live from a registry only staging names (DEC-2081), so a
+# render of another hosted tier with every image leaves the gateway's out.
+HOSTED_WITHOUT_GATEWAY = ["--set", "images.model-gateway="]
+
+
 def test_deployment_tier_is_set_from_values():
     hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
     api = ["--set", f"images.api={PLACEHOLDER.format('api')}"]
     images = every_image()
-    at = next(i for i in range(len(images)) if images[i : i + 2] == api)
     manager_workspace = ["--set", "api.workspace=01KDEM0000000000000000000W"]
-    without_api = images[:at] + images[at + 2 :] + manager_workspace
+    dispatcher = ["--set", f"images.dispatcher={PLACEHOLDER.format('dispatcher')}"]
+    without_api = [
+        arg
+        for pair in zip(images[0::2], images[1::2])
+        if list(pair) not in (api, dispatcher)
+        for arg in pair
+    ] + manager_workspace + HOSTED_WITHOUT_GATEWAY
     assert tiers(render(*without_api)) == {"production"}, "unset is production"
     assert tiers(render_all()) == {"ci"}, (
         "the local cell, its API server too, runs its own unsigned build as ci"
@@ -3482,7 +4182,7 @@ def test_deployment_tier_is_set_from_values():
         "api.appOrigin=https://app.example",
     ]
     with_api = [arg for s in api_block for arg in ("--set", s)]
-    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api)) == {"dev"}, (
+    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api, *HOSTED_WITHOUT_GATEWAY)) == {"dev"}, (
         "cell #1's API server takes the one tier too"
     )
     for refused in ("live", "prod", ""):
@@ -4134,3 +4834,27 @@ def test_the_journal_reaches_the_kubernetes_api_by_ipv4_hosts_only():
         assert skipped.returncode != 0 and "Kubernetes API" in skipped.stderr, cidrs
     unknown = helm(JOURNAL_CHART, *k3d)
     assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr
+
+
+def test_every_journal_dsn_names_the_journal_schema_in_its_options():
+    """DEC-2083: a role CloudNativePG adds after bootstrap has no per-role search path, so every
+    DSN the chart renders sets `search_path=journal` in the connection's options, the migrator's
+    and the API's included."""
+    docs = render_all()
+    started = [{"spec": {"template": pod}} for pod in managed_pods(docs)]
+    dsns = [
+        env["value"]
+        for doc in docs + started
+        for container in _containers(doc)
+        for env in container.get("env", [])
+        if env.get("value", "").startswith("postgres://")
+    ]
+    assert dsns, "the render names no journal DSN"
+    for dsn in dsns:
+        assert dsn.endswith("&options=-c%20search_path%3Djournal"), dsn
+
+
+def _containers(doc: dict) -> list[dict]:
+    spec = doc.get("spec", {})
+    pod = spec.get("template", {}).get("spec", spec.get("jobTemplate", {}).get("spec", {}).get("template", {}).get("spec", {}))
+    return list(pod.get("initContainers", [])) + list(pod.get("containers", []))

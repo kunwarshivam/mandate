@@ -128,7 +128,7 @@ for (const width of WIDTHS) {
         await sheet.getByRole("link", { name: /Kill switch: close and stop/ }).click();
         await expect(page).toHaveURL(/\/agents\/agt_[0-9A-Z]{26}\/kill-switch$/);
         await page.getByRole("button", { name: /Activate the kill switch/ }).click();
-        await page.getByRole("dialog", { name: "Confirm it is you" }).getByRole("button", { name: "Use passkey" }).click();
+        await page.getByRole("dialog", { name: "Confirm the kill switch" }).getByRole("button", { name: "Activate" }).click();
         await expect(page.locator("[data-slot=after-confirm]")).toContainText("Stopped");
 
         await appNav(page, width).getByRole("link", { name: "Agents" }).click();

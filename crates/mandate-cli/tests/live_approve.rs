@@ -20,7 +20,7 @@ use mandate_journal::Environment;
 use mandate_num::{Price, Qty, Signed};
 
 const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const CONNECTION: &str = "conn_rh_live_01";
 
 /// The fixture mandate made DEC-529's: `live`, on the Robinhood connection, capped at 100 USD,
@@ -91,6 +91,7 @@ fn request(instrument: &str, qty: &str, version: &str) -> RequestContent {
         risk_impact: Vec::new(),
         deadline: RiskClock(ASKED_AT + TIMEOUT_S),
         execution: None,
+        deferred_to_binding: Vec::new(),
     }
 }
 

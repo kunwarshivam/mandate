@@ -43,11 +43,12 @@ use mandate_research_run::{
     Scope, SourceId, Symbol, TextQuery, call, recorded_reply, research_gateway, retrieve,
 };
 use mandate_runtime::{
-    ActiveThesis, ActorKind, Autonomy, Classified, DecisionClip, Effect, EventDraft, FoldedEvent,
-    JournalCatalog, MandateView, ModelDirection, OrderExecution, OrderPlan, Ports, Preconditions,
-    Proposal, Purpose, RecordCatalog, ResearchConfig, ResearchContext, ResearchInput,
-    ResearchRecord, ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, RiskClock,
-    RuntimeError, Seq, SignalInputs, TimeInForce, fold, handle_research,
+    ActiveThesis, ActorKind, Autonomy, Classified, DecisionClip, Effect, EventDraft, EventTriggers,
+    FoldedEvent, JournalCatalog, MandateView, ModelDirection, OrderExecution, OrderPlan, Ports,
+    Preconditions, Proposal, Purpose, RecordCatalog, ResearchConfig, ResearchContext,
+    ResearchInput, ResearchRecord, ResearchRequest, ResearchState, ResearchStep,
+    RetrievedObservation, RiskClock, RuntimeError, Seq, SignalInputs, TimeInForce, fold,
+    handle_research,
 };
 use mandate_spec::condition::{Condition, ConditionField, ConditionValue, Operator};
 use mandate_spec::document::{
@@ -637,6 +638,7 @@ pub struct World {
     pub active: Vec<ActiveThesis>,
     pub last_reservation: Option<RiskClock>,
     pub data_symbols: BTreeSet<Symbol>,
+    pub event_triggers: Option<EventTriggers>,
 }
 
 impl World {
@@ -655,6 +657,7 @@ impl World {
             active: Vec::new(),
             last_reservation: None,
             data_symbols: BTreeSet::from([symbol("AAPL"), symbol("MSFT")]),
+            event_triggers: None,
         }
     }
 
@@ -670,6 +673,7 @@ impl World {
             active_theses: &self.active,
             last_reservation: self.last_reservation,
             data_symbols: &self.data_symbols,
+            event_triggers: self.event_triggers.as_ref(),
         }
     }
 
@@ -882,6 +886,65 @@ pub fn worker_run_on<T: Transport, S: MeterStore, C: Clock>(
     let called = lp.run(input, ports, world);
     seen.extend(called.requests.clone());
     seen
+}
+
+/// A run whose call is answered `error` instead of sent: started at `now`, retrieved from `plane`,
+/// and, once the core asks for its call, handed the refusal at `answered_at`, as a worker hands
+/// what its port returned. The step that took the refusal is the loop's last.
+pub fn refused_run(
+    lp: &mut Loop,
+    now: RiskClock,
+    ports: &Ports<'_>,
+    world: &World,
+    plane: &RecordedPlane,
+    error: mandate_gateway::RequestError,
+    answered_at: RiskClock,
+) {
+    let started = lp.run(ResearchInput::Poll(now), ports, world);
+    let Some(ResearchRequest::Start { run_id, cut_off }) = started
+        .requests
+        .iter()
+        .find(|request| matches!(request, ResearchRequest::Start { .. }))
+        .cloned()
+    else {
+        panic!("no run started: {started:?}");
+    };
+    let scope = world.scope(cut_off);
+    let retrieval = retrieve(&config().plan, &scope, plane.readers())
+        .unwrap_or_else(|e| panic!("the recorded plane retrieves: {e}"));
+    let items = retrieval
+        .items
+        .iter()
+        .map(|item| {
+            RetrievedObservation::capture(item, cut_off)
+                .unwrap_or_else(|e| panic!("every recorded item is captured: {e}"))
+                .0
+        })
+        .collect();
+    let retrieved = lp.run(
+        ResearchInput::Retrieved {
+            run_id: run_id.clone(),
+            items,
+        },
+        ports,
+        world,
+    );
+    assert!(
+        retrieved
+            .requests
+            .iter()
+            .any(|request| matches!(request, ResearchRequest::Call(_))),
+        "the core asks for its call: {retrieved:?}"
+    );
+    lp.run(
+        ResearchInput::Refused {
+            run_id,
+            at: answered_at,
+            error,
+        },
+        ports,
+        world,
+    );
 }
 
 /// A whole run: the worker's run, answered 30 seconds after the start, then a poll.

@@ -1,0 +1,80 @@
+[
+  {
+    "label": "no instruments member",
+    "remove": [
+      "/instruments"
+    ]
+  },
+  {
+    "label": "an instrument without its id",
+    "remove": [
+      "/instruments/0/instrument_id"
+    ]
+  },
+  {
+    "label": "an instrument id that is not an asset id",
+    "set": {
+      "/instruments/0/instrument_id": "QQQ"
+    }
+  },
+  {
+    "label": "an instrument without its symbol",
+    "remove": [
+      "/instruments/0/symbol"
+    ]
+  },
+  {
+    "label": "an empty symbol",
+    "set": {
+      "/instruments/0/symbol": ""
+    }
+  },
+  {
+    "label": "an asset class outside the mandate's",
+    "set": {
+      "/instruments/0/asset_class": "option"
+    }
+  },
+  {
+    "label": "an instrument without its snapshot",
+    "remove": [
+      "/instruments/0/snapshot"
+    ]
+  },
+  {
+    "label": "a snapshot that is not a content reference",
+    "set": {
+      "/instruments/0/snapshot": "12"
+    }
+  },
+  {
+    "label": "an instrument without registered_at",
+    "remove": [
+      "/instruments/0/registered_at"
+    ]
+  },
+  {
+    "label": "a price on an instrument",
+    "set": {
+      "/instruments/0/last_price": "512.10"
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/owner": "01JBH3BTZ8K2M4N6P8R0S2T4V0"
+    }
+  },
+  {
+    "label": "an instrument without its asset class",
+    "remove": [
+      "/instruments/0/asset_class"
+    ]
+  },
+  {
+    "label": "an instrument of an unlisted asset class",
+    "set": {
+      "/instruments/0/asset_class": "mutant_value"
+    }
+  }
+]

@@ -11,8 +11,8 @@ mod common;
 use common::{
     ACCOUNT_STREAM, AGENT_STREAM, CLOCK_STREAM, CONTROL_STREAM, FixedInstruments, FixedMandate,
     OTHER_AGENT, Shell, TestIds, agent, broker_account, broker_fill, broker_order, broker_position,
-    broker_reject, clock, config, copied, event, handoff, instrument, object, opening, ports, qty,
-    risk_exit, signed_qty, snapshot, stream_opened, text, usd, with_clock,
+    broker_reject, clock, config, copied, event, handoff, instrument, int, object, opening, ports,
+    qty, risk_exit, signed_qty, snapshot, stream_opened, text, usd, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -126,8 +126,7 @@ fn the_workspaces_agent_control_and_clock_streams_are_followed() {
 fn every_uninterpreted_event_names_the_story_that_owns_it() {
     for (kind, story) in [
         ("RelatedAccountsCoordination", "E7-5"),
-        ("UniverseChanged", "E17-3"),
-        ("RiskLimitTriggered", "E6-4"),
+        ("MandateVersionApplied", "E6-4"),
         ("SomethingNobodyWrote", "E7-2"),
     ] {
         let mut state = ExecutorState::new(common::scope());
@@ -348,7 +347,13 @@ fn a_first_pass_deny_is_recorded_with_its_reason_and_ends_the_intent() {
             ACCOUNT_STREAM,
             next_seq(&shell),
             "AccountRestrictionChanged",
-            with_clock(&[("restriction", text("blocked"))], 1),
+            with_clock(
+                &[
+                    ("restriction", text("blocked")),
+                    ("cause", text("broker_notice")),
+                ],
+                1,
+            ),
         ))
         .expect("folds");
     let ran = shell.run(
@@ -514,7 +519,13 @@ fn closing_only_denies_an_opening_and_lets_an_exit_through() {
             ACCOUNT_STREAM,
             next_seq(&shell),
             "AccountRestrictionChanged",
-            with_clock(&[("restriction", text("closing_only"))], 1),
+            with_clock(
+                &[
+                    ("restriction", text("closing_only")),
+                    ("cause", text("broker_reject")),
+                ],
+                1,
+            ),
         ))
         .expect("folds");
     let opening_ran = shell.run(
@@ -674,13 +685,13 @@ fn a_held_exit_past_its_age_is_never_abandoned() {
         ran.draft_types()
     );
     assert!(
-        ran.notifications.contains(&"exit_held_long"),
+        ran.notifications.contains(&"exit_stalled"),
         "a hold past max_intent_age is journaled and alerted: {:?}",
         ran.notifications
     );
     let again = shell.run(Input::Tick(clock(240)), &ports);
     assert!(
-        !again.notifications.contains(&"exit_held_long"),
+        !again.notifications.contains(&"exit_stalled"),
         "once: {:?}",
         again.notifications
     );
@@ -885,7 +896,7 @@ fn a_replacement_is_a_new_order_under_its_own_id() {
         ran.draft_types().contains(&"ExternalActivityIngested")
             && ran
                 .draft("FillApplied")
-                .is_some_and(|draft| draft.payload.get("client_order_id").is_none()),
+                .is_some_and(|draft| draft.payload.get("client_order_id") == Some(&Value::Null)),
         "ten more shares on the new id would take the pair to 14 of an approved 10, so the fill \
          cannot be the new order's and is ingested as external activity (§7.1): {:?}",
         ran.draft_types()
@@ -1044,7 +1055,7 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
     let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
     let unattributed = |ran: &common::Ran| {
         ran.draft("FillApplied")
-            .is_some_and(|draft| draft.payload.get("client_order_id").is_none())
+            .is_some_and(|draft| draft.payload.get("client_order_id") == Some(&Value::Null))
             && ran.draft_types().contains(&"ExternalActivityIngested")
     };
     let other_instrument = mandate_executor::BrokerFill {
@@ -1093,7 +1104,7 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
         .collect();
     assert_eq!(alerts.len(), 1, "the owner is alerted once");
     assert_eq!(
-        (Some(alerts[0].subject_event.clone()), alerts[0].message_key),
+        (Some(alerts[0].subject_event.clone()), alerts[0].kind.key()),
         (ingested, "external_activity"),
         "by the ingested event's opaque id and a message key, nothing more (AGENTS.md rule 6)"
     );
@@ -1357,8 +1368,12 @@ fn a_position_mismatch_pauses_only_the_agents_holding_the_instrument() {
     );
 }
 
+/// DEC-2830: an owner's acknowledgment of a mismatch's hold, naming the executor's own
+/// `AgentModeApplied` under `reconciliation:<instrument>`, lifts that hold alone and ends that
+/// instrument's recorded mismatch; the other instrument's mismatch and hold stand, so the agent is
+/// still paused.
 #[test]
-fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
+fn an_acknowledgment_of_one_mismatch_hold_lifts_it_and_no_other() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
     let instruments = FixedInstruments;
@@ -1368,36 +1383,69 @@ fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
     let mut bad = snapshot(shell.head().0, ReconcileReason::Startup);
     bad.positions = vec![broker_position(AAPL, "7"), broker_position(CPHC, "3")];
     shell.run(Input::BrokerSnapshot(bad), &ports);
-    let ack = |shell: &mut Shell, subject: &str, n: u64| {
-        let event = copied(
-            ACCOUNT_STREAM,
-            next_seq(shell),
-            "OwnerAcknowledged",
-            with_clock(
-                &[
-                    ("subject", text(subject)),
-                    ("user", text("user-1")),
-                    ("step_up", text("assertion-1")),
-                ],
-                100,
+    let restriction = format!("reconciliation:{AAPL}");
+    let hold = shell
+        .account_journal
+        .iter()
+        .find(|e| {
+            e.event_type == "AgentModeApplied"
+                && e.payload.get("restriction").and_then(Value::as_str)
+                    == Some(restriction.as_str())
+        })
+        .expect("the mismatch's hold")
+        .clone();
+    let at: u64 = 1_900_000_000;
+    shell.run(Input::Tick(clock(1_900_000_000)), &ports);
+    let original = event(
+        CONTROL_STREAM,
+        1,
+        "OwnerAcknowledged",
+        object(&[
+            ("agent", text(common::AGENT)),
+            ("event", text(&hold.event_id.0)),
+            ("subject", text("reconciliation")),
+            ("user", text("user-1")),
+            ("requested_by", text("user-1")),
+            ("independent_required", Value::Bool(false)),
+            ("request", Value::Null),
+            ("submitted_at", int(at)),
+            ("risk_clock", text("2026-10-18T16:00:00.000000000Z")),
+            (
+                "step_up",
+                object(&[
+                    ("assertion_id", text("assertion-1")),
+                    ("authenticated_at", int(at)),
+                    ("method", text("cli_confirm")),
+                ]),
             ),
-            &EventId(format!("{CONTROL_STREAM}-{n}")),
-        );
-        shell.fold_one(&event).expect("the acknowledgment folds");
-    };
-    ack(&mut shell, AAPL, 1);
-    assert!(!shell.state.mismatched().contains(&instrument(AAPL)));
-    assert!(shell.state.mismatched().contains(&instrument(CPHC)));
+        ]),
+    );
+    let ran = shell.run(
+        Input::Acknowledgment(mandate_executor::AcknowledgmentHandoff {
+            original,
+            schema_version: 2,
+            processed_at: clock(1_900_000_000),
+            spent: std::collections::BTreeSet::new(),
+            request_spent: None,
+            independent_overlay: false,
+            methods: std::collections::BTreeSet::from(["cli_confirm".to_owned()]),
+        }),
+        &ports,
+    );
+    let kinds: Vec<&str> = ran.drafts.iter().map(|d| d.event_type.as_str()).collect();
+    assert_eq!(kinds, vec!["OwnerAcknowledged", "AgentModeApplied"]);
+    assert!(
+        !shell.state.mismatched().contains(&instrument(AAPL)),
+        "AAPL's mismatch ends"
+    );
+    assert!(
+        shell.state.mismatched().contains(&instrument(CPHC)),
+        "CPHC's stands"
+    );
     assert_eq!(
         shell.state.effective_mode(&agent(common::AGENT)),
         Mode::Paused,
         "CPHC's mismatch still pauses"
-    );
-    ack(&mut shell, CPHC, 2);
-    assert_eq!(
-        shell.state.effective_mode(&agent(common::AGENT)),
-        Mode::Normal,
-        "with both acknowledged, nothing pauses"
     );
 }
 
@@ -1615,7 +1663,13 @@ fn a_blocked_account_holds_an_exit_for_the_broker_and_never_denies_it() {
             ACCOUNT_STREAM,
             next_seq(&shell),
             "AccountRestrictionChanged",
-            with_clock(&[("restriction", text("blocked"))], 1),
+            with_clock(
+                &[
+                    ("restriction", text("blocked")),
+                    ("cause", text("broker_notice")),
+                ],
+                1,
+            ),
         ))
         .expect("folds");
     let ran = shell.run(
@@ -2068,13 +2122,12 @@ fn a_fill_on_a_pending_cancel_or_replace_keeps_its_state() {
 
 /// Asserts §7.3's consequence on every agent: the `*` restriction to `mode`, a second agent that
 /// placed nothing held to it too, and one alert naming the event that recorded the restriction by
-/// its opaque id under `key` (DEC-133 item 39, AGENTS.md rule 6).
+/// its opaque id as `account_restriction` (DEC-133 item 39, DEC-2514, AGENTS.md rule 6).
 fn every_agent_restricted_and_the_owner_alerted(
     shell: &Shell,
     ran: &common::Ran,
     mode: Mode,
     to: &str,
-    key: &str,
 ) {
     let applied = ran
         .draft("AgentModeApplied")
@@ -2096,14 +2149,14 @@ fn every_agent_restricted_and_the_owner_alerted(
         .iter()
         .filter_map(|effect| match effect {
             mandate_executor::Effect::Notify(reference) => {
-                Some((Some(reference.subject_event.clone()), reference.message_key))
+                Some((Some(reference.subject_event.clone()), reference.kind.key()))
             }
             _ => None,
         })
         .collect();
     assert_eq!(
         alerts,
-        vec![(changed, key)],
+        vec![(changed, "account_restriction")],
         "the owner is alerted once, by the restriction's event id and a message key"
     );
 }
@@ -2124,13 +2177,7 @@ fn a_blocked_account_restricts_every_agent_and_alerts_the_owner() {
         })),
         &ports,
     );
-    every_agent_restricted_and_the_owner_alerted(
-        &shell,
-        &ran,
-        Mode::Paused,
-        "paused",
-        "account_trading_blocked",
-    );
+    every_agent_restricted_and_the_owner_alerted(&shell, &ran, Mode::Paused, "paused");
 }
 
 /// §7.3 row 2, DEC-143: a reject whose message says `closing`, without `restricted`, restricts
@@ -2152,13 +2199,7 @@ fn a_closing_message_alone_restricts_every_agent_and_alerts_the_owner() {
         &ports,
     );
     assert_eq!(shell.state.account_state(), AccountState::ClosingOnly);
-    every_agent_restricted_and_the_owner_alerted(
-        &shell,
-        &ran,
-        Mode::ExitsOnly,
-        "exits_only",
-        "account_restricted",
-    );
+    every_agent_restricted_and_the_owner_alerted(&shell, &ran, Mode::ExitsOnly, "exits_only");
 }
 
 /// Journal spec §6: a reject is journaled with its status, code and message.
@@ -2733,4 +2774,115 @@ fn a_late_fill_a_reconciliation_finds_asks_for_the_next_from_its_checkpoint() {
         })
         .expect("the late fill");
     assert!(at_the_journal(fill).is_ok(), "{:?}", at_the_journal(fill));
+}
+
+/// DEC-2514, journal spec §9.15 rules 119, 120 and 130: the `OwnerAlertSent` a blocked account's
+/// batch writes, its ids made ULIDs as the deployed id source makes them, is accepted by the
+/// journal beside its subject, and refused with its subject off the batch or with a second alert
+/// on one subject, so the check is not vacuous. The subject stands in as the batch's
+/// `AgentModeApplied` at the subject's id; the restriction's own record, now registered, is judged
+/// with its batch in `journal_catalogue`.
+#[test]
+fn a_restrictions_alert_is_accepted_by_the_journal_in_its_subjects_batch() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(mandate_executor::BrokerAccount {
+            trading_blocked: true,
+            ..broker_account()
+        })),
+        &ports,
+    );
+    let alert = ran
+        .draft("OwnerAlertSent")
+        .expect("the restriction is alerted");
+    let restriction = ran.draft("AccountRestrictionChanged").unwrap();
+    assert_eq!(
+        alert.payload.get("subject").and_then(Value::as_str),
+        Some(restriction.event_id.0.as_str())
+    );
+    assert_eq!(
+        alert.payload.get("kind").and_then(Value::as_str),
+        Some("account_restriction")
+    );
+    let stand_in = ran.draft("AgentModeApplied").unwrap();
+    let body = |draft: &mandate_executor::EventDraft, id: &str, payload: &Value, cause: &str| {
+        format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"acct:ws_1:ACCT1","event_type":"{}","schema_version":{},"event_time":"2026-09-22T14:00:00.000000000Z","clock_source":"local","causation_id":{cause},"correlation_id":null,"actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},"config_refs":{},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&Value::Object(
+                draft.config_refs.clone()
+            ))),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(payload)),
+        )
+    };
+    let parse = |text: String| {
+        mandate_journal::Draft::parse(text.as_bytes()).unwrap_or_else(|e| panic!("{e:?}: {text}"))
+    };
+    let subject_id = "01J8Z3M4000000000000000001";
+    let alerted = |about: &str, id: &str| {
+        let mut payload = alert.payload.clone();
+        if let Value::Object(members) = &mut payload {
+            members.insert(
+                mandate_canon::Key::new("subject").unwrap(),
+                Value::Str(about.to_owned()),
+            );
+        }
+        parse(body(alert, id, &payload, &format!("\"{about}\"")))
+    };
+    let subject = parse(body(stand_in, subject_id, &stand_in.payload, "null"));
+    let first = alerted(subject_id, "01J8Z3M4000000000000000002");
+    assert_eq!(
+        mandate_journal::check_batch(&[subject.clone(), first.clone()]),
+        Ok(())
+    );
+    let elsewhere = alerted("01J8Z3M4000000000000000077", "01J8Z3M4000000000000000002");
+    let refused_at = |result: Result<(), (usize, mandate_journal::Invalid)>| {
+        result.err().map(|(at, invalid)| (at, invalid.path))
+    };
+    assert_eq!(
+        refused_at(mandate_journal::check_batch(&[subject.clone(), elsewhere])),
+        Some((1, "payload.subject".to_owned())),
+        "a subject off the batch is refused by rule 130, at the alert"
+    );
+    let second = alerted(subject_id, "01J8Z3M4000000000000000003");
+    assert_eq!(
+        refused_at(mandate_journal::check_batch(&[subject, first, second])),
+        Some((2, "payload.subject".to_owned())),
+        "two alerts on one subject are refused by rule 130, at the second"
+    );
+}
+
+/// The account risk fold's records fold here as records (DEC-2804 item 1): each is read, moves no
+/// state but the stream's head and risk clock, and the mode one causes arrives as its own
+/// `AgentModeApplied`.
+#[test]
+fn the_risk_folds_records_fold_as_records() {
+    for kind in [
+        "RiskDayStarted",
+        "RiskLimitTriggered",
+        "RiskLimitLifted",
+        "HighWaterMarkReset",
+        "InstrumentRestrictionChanged",
+        "GoalCompleted",
+    ] {
+        let mut state = ExecutorState::new(common::scope());
+        fold(&mut state, &stream_opened()).expect("folds");
+        let before = state.clone();
+        fold(
+            &mut state,
+            &event(ACCOUNT_STREAM, 2, kind, with_clock(&[], 7)),
+        )
+        .unwrap_or_else(|e| panic!("{kind} folds as a record: {e}"));
+        assert_eq!(state.head(ACCOUNT_STREAM), Some(Seq(2)), "{kind}");
+        assert_eq!(state.orders(), before.orders(), "{kind}");
+        assert_eq!(state.modes(), before.modes(), "{kind}");
+        assert_eq!(state.positions(), before.positions(), "{kind}");
+    }
 }

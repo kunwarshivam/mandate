@@ -60,6 +60,9 @@ pub(crate) fn payload(
         "DecisionMade" => {
             action_rules(view)?;
             decision_rules(view)?;
+            if schema_version == 3 {
+                deferral_rules(view)?;
+            }
         }
         "IntentProposed" => {
             action_rules(view)?;
@@ -145,7 +148,9 @@ pub(crate) fn subject_and_copy(
 
 /// Rule 10's second clause over one `append` batch whose drafts each passed [`Draft::parse`]: an
 /// `IntentProposed` whose `DecisionMade` is in the batch repeats its action members, decimals
-/// compared by value. Reported at the first such intent, at its first differing member. Both event
+/// compared by value. Reported at the first such intent, at its first differing member. Rule 292
+/// (v0.92, DEC-2515): an `ApprovalRequested` whose `DecisionMade` is in the batch names exactly
+/// that decision's deferrals, at every version of either. Both event
 /// types exist only on an agent stream (§9), so a batch of any other stream passes.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     let decisions: BTreeMap<&str, &Draft> = drafts
@@ -154,25 +159,46 @@ pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
         .map(|d| (d.event_id(), d))
         .collect();
     for (i, draft) in drafts.iter().enumerate() {
-        if draft.event_type() != "IntentProposed" {
-            continue;
-        }
         let fields = draft.fields();
         let cause = fields
             .get("causation_id")
             .and_then(Value::as_str)
             .and_then(|id| decisions.get(id));
-        if let (Some(cause), Some(mine)) = (cause, fields.get("payload")) {
-            let theirs = cause.fields().get("payload").unwrap_or(&Value::Null);
-            if let Some(member) = first_differing_action(mine, theirs) {
-                return Err((
-                    i,
-                    Invalid::new(InvalidReason::Schema, format!("payload.{member}")),
-                ));
+        let (Some(cause), Some(mine)) = (cause, fields.get("payload")) else {
+            continue;
+        };
+        let theirs = cause.fields().get("payload").unwrap_or(&Value::Null);
+        match draft.event_type() {
+            "IntentProposed" => {
+                if let Some(member) = first_differing_action(mine, theirs) {
+                    return Err((
+                        i,
+                        Invalid::new(InvalidReason::Schema, format!("payload.{member}")),
+                    ));
+                }
             }
+            "ApprovalRequested" => {
+                let requested = mine.get("content").unwrap_or(&Value::Null);
+                if deferrals(requested) != deferrals(theirs) {
+                    return Err((
+                        i,
+                        Invalid::new(InvalidReason::Schema, "payload.content.deferred_to_binding"),
+                    ));
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
+}
+
+/// The `deferred_to_binding` a payload or a request's content names, absent read as none (rule
+/// 292: versions 1 and 2 of either record name no deferral).
+fn deferrals(value: &Value) -> &[Value] {
+    value
+        .get("deferred_to_binding")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
 }
 
 /// §11's per-range checks that span agent-stream events.
@@ -186,6 +212,10 @@ pub enum AgentStreamCheck {
     /// A version-2 `AgentModeChanged` that is not a hold or a lift changes the owner's `held`, or a
     /// version-1 one follows a version-2 one (journal spec v0.23 §9.11, §11; DEC-672, DEC-673).
     HeldMismatch,
+    /// An `ApprovalRequested` names no cause, or its cause is an earlier event that is not a
+    /// `DecisionMade`, or on a full chain no earlier event, or its deferrals are not its decision's:
+    /// rule 292 across batches (journal spec v0.105 §11, DEC-2522).
+    ApprovalDeferralMismatch,
 }
 
 impl AgentStreamCheck {
@@ -195,6 +225,7 @@ impl AgentStreamCheck {
             Self::IntentActionMismatch => "intent_action_mismatch",
             Self::ModeEventMismatch => "mode_event_mismatch",
             Self::HeldMismatch => "held_mismatch",
+            Self::ApprovalDeferralMismatch => "approval_deferral_mismatch",
         }
     }
 }
@@ -206,8 +237,10 @@ pub struct AgentStreamFailure {
     pub check: AgentStreamCheck,
 }
 
-/// Runs §11's `intent_action_mismatch` and `mode_event_mismatch` over `rows` of one agent stream,
-/// after [`crate::verify_events`] passed them, reporting the first failing event in `seq` order.
+/// Runs §11's `intent_action_mismatch`, `mode_event_mismatch` and `approval_deferral_mismatch` over
+/// `rows` of one agent stream, after [`crate::verify_events`] passed them, reporting the first
+/// failing event in `seq` order. A request's cause is looked up among the range's earlier events,
+/// so a cause before the range is checked only on a full chain (DEC-2522).
 /// Every event of the range is indexed first, so a reference to an event anywhere in the range is
 /// checked: an `IntentProposed` naming a `DecisionMade` later in the range is still compared, and a
 /// `mode_event` naming a later event, or its own switch, fails (DEC-168 item 13). Only a reference
@@ -345,6 +378,22 @@ pub fn verify_agent_stream_anchored(
             }
             "AgentModeChanged" if !held.carries(row.schema_version, &own) => {
                 return fail(AgentStreamCheck::HeldMismatch);
+            }
+            "ApprovalRequested" => {
+                let agrees = match body.get("causation_id").and_then(Value::as_str) {
+                    None => false,
+                    Some(id) if !earlier.contains(id) => start.from_seq != 1,
+                    Some(id) => match index.get(id) {
+                        Some(("DecisionMade", decision)) => {
+                            let content = own.get("content").cloned().unwrap_or(Value::Null);
+                            deferrals(&content) == deferrals(decision)
+                        }
+                        _ => false,
+                    },
+                };
+                if !agrees {
+                    return fail(AgentStreamCheck::ApprovalDeferralMismatch);
+                }
             }
             _ => {}
         }
@@ -634,6 +683,62 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
     ensure(ascending(&clips), non_canonical, "payload.clips_applied")
 }
 
+/// Rules 269 and 270 on a version-3 `DecisionMade` (v0.85, DEC-2388 item 10): the deferred parts
+/// in byte order, named exactly on an allowed opening or increase; figures only for one; and on an
+/// allowed opening the floor and participation deferred together, exactly when no figures were
+/// read.
+fn deferral_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let path = "payload.deferred_to_binding";
+    let deferred: Vec<&[u8]> = p
+        .list("deferred_to_binding")
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::as_bytes)
+        .collect();
+    ensure(ascending(&deferred), InvalidReason::NonCanonical, path)?;
+    let allowed_opening = p.text("dry_run") == "allow" && p.adds_risk();
+    ensure(
+        deferred.is_empty() != allowed_opening,
+        InvalidReason::Schema,
+        path,
+    )?;
+    ensure(
+        p.is_null("liquidity") || p.adds_risk(),
+        InvalidReason::Schema,
+        "payload.liquidity",
+    )?;
+    if allowed_opening {
+        let floor = deferred.contains(&b"liquidity_floor".as_slice());
+        let participation = deferred.contains(&b"participation".as_slice());
+        ensure(floor == participation, InvalidReason::Schema, path)?;
+        ensure(
+            p.is_null("liquidity") == floor,
+            InvalidReason::Schema,
+            "payload.liquidity",
+        )?;
+    }
+    Ok(())
+}
+
+/// Rule 291 on a version-3 `ApprovalRequested` (v0.92, DEC-2515): the deferred parts in byte
+/// order, never empty, and the liquidity floor and participation named together, as rule 270 has
+/// the decision name them.
+fn requested_deferral_rules(deferred: &Value) -> Result<(), Invalid> {
+    let path = "payload.content.deferred_to_binding";
+    let names: Vec<&[u8]> = deferred
+        .as_array()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::as_bytes)
+        .collect();
+    ensure(ascending(&names), InvalidReason::NonCanonical, path)?;
+    ensure(!names.is_empty(), InvalidReason::Schema, path)?;
+    let floor = names.contains(&b"liquidity_floor".as_slice());
+    let participation = names.contains(&b"participation".as_slice());
+    ensure(floor == participation, InvalidReason::Schema, path)
+}
+
 /// Rule 12: `confirmed` exactly when the bid members are all present, then the step-up evidence
 /// exactly when `step_up_status` is `valid`.
 fn owner_exit_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -687,6 +792,9 @@ fn approval_requested_rules(p: Payload<'_>) -> Result<(), Invalid> {
             InvalidReason::Schema,
             "payload.content.execution.asset_class",
         )?;
+    }
+    if let Some(deferred) = content.get("deferred_to_binding") {
+        requested_deferral_rules(deferred)?;
     }
     let content_deadline = content
         .get("deadline")
@@ -753,6 +861,13 @@ fn ascending<T: PartialOrd>(items: &[T]) -> bool {
 }
 
 fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
+    if schema_version == 3 {
+        return match event_type {
+            "DecisionMade" => Some(&DECISION_MADE_V3),
+            "ApprovalRequested" => Some(&APPROVAL_REQUESTED_V3),
+            _ => None,
+        };
+    }
     if schema_version == 2 {
         return match event_type {
             "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
@@ -874,6 +989,81 @@ static DECISION_MADE: Ty = Ty::Record(&[
     ("delegation_id", Ty::Nullable(&Ty::Ident)),
     ("requested_by", Ty::OneOf(&["agent", "owner", "client"])),
     ("client_id", Ty::Nullable(&Ty::Ident)),
+]);
+
+/// The cell's runtime's advisory dry run (v0.85, DEC-2388 item 10): version 1's members, then
+/// the parts it deferred to the binding gate and the stored bars' figures it read.
+static DECISION_MADE_V3: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("side", SIDE),
+    ("type", ORDER_TYPE),
+    ("tif", TIF),
+    ("qty", Ty::Decimal),
+    ("limit_price", Ty::Nullable(&Ty::Decimal)),
+    (
+        "purpose",
+        Ty::OneOf(&["open", "increase", "discretionary_exit", "risk_exit"]),
+    ),
+    (
+        "exit_origin",
+        Ty::Nullable(&Ty::OneOf(&[
+            "signal",
+            "goal_completion",
+            "removed_instrument",
+        ])),
+    ),
+    ("exit_conviction", Ty::Nullable(&Ty::Decimal)),
+    ("buy_conviction", Ty::Nullable(&Ty::Decimal)),
+    ("combined_score", Ty::Nullable(&Ty::Decimal)),
+    ("outputs_used", Ty::List(&Ty::Ulid)),
+    (
+        "model_weights",
+        Ty::List(&Ty::Record(&[("key", Ty::Str), ("value", Ty::Decimal)])),
+    ),
+    ("clips_applied", Ty::List(&Ty::OneOf(&CLIPS))),
+    ("dry_run", Ty::OneOf(&["allow", "deny", "defer"])),
+    ("reason_code", Ty::Nullable(&Ty::Ident)),
+    (
+        "autonomy",
+        Ty::Nullable(&Ty::OneOf(&["auto", "ask", "deny"])),
+    ),
+    (
+        "ask_suppressed",
+        Ty::Nullable(&Ty::OneOf(&["budget", "skipped_today", "recent_timeout"])),
+    ),
+    ("decided_by", Ty::Nullable(&Ty::Str)),
+    ("delegation_id", Ty::Nullable(&Ty::Ident)),
+    ("requested_by", Ty::OneOf(&["agent", "owner", "client"])),
+    ("client_id", Ty::Nullable(&Ty::Ident)),
+    ("deferred_to_binding", Ty::List(&Ty::OneOf(&DEFERRED_PARTS))),
+    ("liquidity", Ty::Nullable(&LIQUIDITY)),
+]);
+
+/// The checks and parts of checks a version-3 `DecisionMade` may name, in byte order: DEC-2378
+/// item 11's four and DEC-2388 item 8's ten.
+const DEFERRED_PARTS: [&str; 14] = [
+    "account_exposure",
+    "agent_equity",
+    "agent_mode",
+    "conduct_history",
+    "day_trade_budget",
+    "eligibility",
+    "fee_reservation",
+    "halt",
+    "liquidity_floor",
+    "other_orders",
+    "participation",
+    "quote_ask",
+    "reentry_cooldown",
+    "related_accounts",
+];
+
+static LIQUIDITY: Ty = Ty::Record(&[
+    ("prior_close", Ty::Decimal),
+    ("median_dollar_volume_20d", Ty::Decimal),
+    ("adv_20d", Ty::Decimal),
+    ("trailing_5m_volume", Ty::Decimal),
+    ("read_at", Ty::Timestamp),
 ]);
 
 static INTENT_PROPOSED: Ty = Ty::Record(&[
@@ -1023,6 +1213,43 @@ static APPROVAL_REQUESTED_V2: Ty = Ty::Record(&[
             ("choices", Ty::List(&Ty::OneOf(&["approve", "skip"]))),
             ("approvers", REQUESTED_APPROVERS),
             ("execution", REQUESTED_EXECUTION),
+        ]),
+    ),
+    ("content_hash", Ty::DigestRef),
+]);
+
+/// Version 2 with the checks the dry run deferred to the binding gate as one more content member,
+/// in `DecisionMade` version 3's names (v0.92, DEC-2515).
+static APPROVAL_REQUESTED_V3: Ty = Ty::Record(&[
+    ("instrument", Ty::Str),
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("side", Ty::OneOf(&["buy"])),
+    ("qty", Ty::Decimal),
+    ("limit", Ty::Decimal),
+    ("purpose", Ty::OneOf(&["open", "increase"])),
+    ("mandate_version", Ty::DigestRef),
+    ("decided_by", Ty::Str),
+    ("combined_score", Ty::Decimal),
+    ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
+    ("approvers_required", Ty::Int),
+    ("independent_required", Ty::Bool),
+    ("deadline", Ty::Int),
+    ("timeout_s", Ty::Int),
+    ("on_timeout", Ty::OneOf(&["skip"])),
+    (
+        "content",
+        Ty::Record(&[
+            ("action", REQUESTED_ACTION),
+            ("trigger", REQUESTED_TRIGGER),
+            ("evidence", REQUESTED_EVIDENCE),
+            ("risk_impact", REQUESTED_RISK_IMPACT),
+            ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
+            ("deadline", Ty::RiskClock),
+            ("default", Ty::Str),
+            ("choices", Ty::List(&Ty::OneOf(&["approve", "skip"]))),
+            ("approvers", REQUESTED_APPROVERS),
+            ("execution", REQUESTED_EXECUTION),
+            ("deferred_to_binding", Ty::List(&Ty::OneOf(&DEFERRED_PARTS))),
         ]),
     ),
     ("content_hash", Ty::DigestRef),
@@ -1281,7 +1508,11 @@ mod tests {
 
     use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 
-    use super::{AgentStreamCheck, AgentStreamFailure, check_batch, verify_agent_stream};
+    use super::{
+        AgentStreamCheck, AgentStreamFailure, DECISION_MADE, DECISION_MADE_V3, DEFERRED_PARTS,
+        check_batch, verify_agent_stream,
+    };
+    use crate::schema::Ty;
     use crate::{Draft, Invalid, StoredEvent, TrustedStart};
 
     fn section() -> Result<Value, String> {
@@ -1874,5 +2105,29 @@ mod tests {
             .map(|(i, e)| (i, e.reason.code(), e.path));
         assert_eq!(refused, Some((1, "schema", "payload.side".to_owned())));
         Ok(())
+    }
+
+    fn member_names(ty: &Ty) -> Vec<&'static str> {
+        match ty {
+            Ty::Record(fields) => fields.iter().map(|(name, _)| *name).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Version 3 is version 1's members, in version 1's order, then exactly the two it adds, and
+    /// its parts are listed in the byte order rule 269 sorts them by.
+    #[test]
+    fn decision_version_3_is_version_1_then_its_two_members() {
+        let v1 = member_names(&DECISION_MADE);
+        let v3 = member_names(&DECISION_MADE_V3);
+        assert!(!v1.is_empty());
+        assert_eq!(v3.get(..v1.len()), Some(v1.as_slice()));
+        assert_eq!(
+            v3.get(v1.len()..),
+            Some(["deferred_to_binding", "liquidity"].as_slice())
+        );
+        let mut sorted = DEFERRED_PARTS;
+        sorted.sort_by_key(|part| part.as_bytes());
+        assert_eq!(DEFERRED_PARTS, sorted);
     }
 }

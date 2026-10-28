@@ -376,7 +376,7 @@ pub(crate) fn open_control_stream(
         &stream,
         event_id,
         Repeat::FindsEarlier,
-        &bytes,
+        &[&bytes],
         now,
     )
 }
@@ -537,6 +537,19 @@ pub(crate) struct Decided {
     event_id: String,
     /// Whether a re-run finds this command or commits another, which the exhausted report says.
     repeat: Repeat,
+    /// The schema version [`commit`] writes the event at: 1 unless [`Decided::at_version`] says.
+    schema_version: u64,
+}
+
+impl Decided {
+    /// The same command, written at `schema_version` (journal spec §9.28's version 2, DEC-2824).
+    #[must_use]
+    pub(crate) fn at_version(self, schema_version: u64) -> Self {
+        Self {
+            schema_version,
+            ..self
+        }
+    }
 }
 
 /// What [`decide`] found: a command to commit, or the same command already committed as the
@@ -607,6 +620,7 @@ pub(crate) fn decide(
         stepped_up,
         event_id,
         repeat,
+        schema_version: 1,
     }))
 }
 
@@ -741,7 +755,7 @@ enum Attempted {
 fn attempt(
     journal: &mut dyn ControlJournal,
     stream: &StreamId,
-    (event_id, bytes): (&str, &[u8]),
+    (event_id, drafts): (&str, &[&[u8]]),
     pinned: Option<u64>,
     now: Now,
 ) -> Result<Attempted, ControlError> {
@@ -750,7 +764,7 @@ fn attempt(
         Some(head) => head,
         None => journal.head(stream)?.seq,
     };
-    match journal.append(stream, head, epoch, now.at, &[bytes])? {
+    match journal.append(stream, head, epoch, now.at, drafts)? {
         AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows
             .iter()
             .find(|row| row.event_id == event_id)
@@ -794,6 +808,67 @@ pub(crate) fn commit(
     timed: &[&'static str],
     now: Now,
 ) -> Result<Submitted, ControlError> {
+    let (stream, event_id, repeat, bytes) = drafted(journal, ids, owner, decided, timed, now)?;
+    settle(journal, &stream, event_id, repeat, &[&bytes], now)
+}
+
+/// [`commit`] for a user's kill switch, whose `OwnerCommandIssued` commits in one batch with the
+/// `OwnerAlertSent` that names it as its subject, cause and `owner_command`, as the API commits it
+/// (E8-9k; notifications spec §3.2 and §3.4, journal spec §9.15 rules 119, 120 and 130): the
+/// dispatcher gives the command exactly one notice, and the executor raises none for a user's
+/// switch. The alert's id is derived from the command's, so a retry appends the same pair.
+pub(crate) fn commit_kill_switch(
+    journal: &mut dyn ControlJournal,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    decided: Decided,
+    timed: &[&'static str],
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    let (stream, event_id, repeat, bytes) = drafted(journal, ids, owner, decided, timed, now)?;
+    let command = text(&event_id);
+    let alert_id = derive(
+        &stream,
+        OWNER_ALERT,
+        &object(vec![("owner_command", command.clone())])?,
+        false,
+        0,
+    )?;
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    let payload = object(vec![
+        ("kind", text("kill_switch")),
+        ("owner_command", command.clone()),
+        ("subject", command),
+    ])?;
+    let alert = draft_caused(
+        Writer::Owner,
+        owner,
+        &stream,
+        (&alert_id, Some(&event_id)),
+        OWNER_ALERT,
+        shape,
+        payload,
+        now,
+    )?;
+    settle(journal, &stream, event_id, repeat, &[&bytes, &alert], now)
+}
+
+/// The record a user's kill switch commits beside its command (E8-9k).
+const OWNER_ALERT: &str = "OwnerAlertSent";
+
+/// The command [`commit`] appends: its stream, event id, how a repeat behaves, and its bytes.
+fn drafted(
+    journal: &mut dyn ControlJournal,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    decided: Decided,
+    timed: &[&'static str],
+    now: Now,
+) -> Result<(StreamId, String, Repeat, Vec<u8>), ControlError> {
     let Decided {
         stream,
         event_type,
@@ -801,6 +876,7 @@ pub(crate) fn commit(
         stepped_up,
         event_id,
         repeat,
+        schema_version,
     } = decided;
     same_environment(journal, &stream, owner)?;
     for name in timed {
@@ -821,7 +897,7 @@ pub(crate) fn commit(
     let mut referenced = BTreeSet::new();
     digest_refs(&payload, &mut referenced);
     let shape = Shape {
-        schema_version: 1,
+        schema_version,
         artifact_refs: referenced.into_iter().collect(),
         config_refs: Vec::new(),
     };
@@ -835,7 +911,7 @@ pub(crate) fn commit(
         payload,
         now,
     )?;
-    settle(journal, &stream, event_id, repeat, &bytes, now)
+    Ok((stream, event_id, repeat, bytes))
 }
 
 /// A control-stream event the owner confirms that names another event as its cause: its type and
@@ -903,7 +979,7 @@ pub(crate) fn commit_caused(
     )?;
     let mut retries = 1..ATTEMPTS;
     loop {
-        match attempt(journal, &stream, (&event_id, &bytes), Some(head), now)? {
+        match attempt(journal, &stream, (&event_id, &[&bytes]), Some(head), now)? {
             Attempted::Stored(seq) => return Ok(Some(Submitted { event_id, seq })),
             Attempted::Moved => return Ok(None),
             Attempted::Retry => {}
@@ -978,7 +1054,7 @@ pub(crate) fn commit_choice_at(
     )?;
     let mut retries = 1..ATTEMPTS;
     loop {
-        match attempt(journal, &stream, (&event_id, &bytes), Some(head), now)? {
+        match attempt(journal, &stream, (&event_id, &[&bytes]), Some(head), now)? {
             Attempted::Stored(seq) => return Ok(Some(Submitted { event_id, seq })),
             Attempted::Moved => return Ok(None),
             Attempted::Retry => {}
@@ -1040,7 +1116,7 @@ fn commit_as(
     let bytes = draft(
         writer, owner, &stream, &event_id, event_type, shape, payload, now,
     )?;
-    settle(journal, &stream, event_id, repeat, &bytes, now)
+    settle(journal, &stream, event_id, repeat, &[&bytes], now)
 }
 
 /// Appends `bytes`, the draft of `event_id`, until the journal stores it or [`ATTEMPTS`] run out.
@@ -1052,12 +1128,12 @@ fn settle(
     stream: &StreamId,
     event_id: String,
     repeat: Repeat,
-    bytes: &[u8],
+    drafts: &[&[u8]],
     now: Now,
 ) -> Result<Submitted, ControlError> {
     let mut retries = 1..ATTEMPTS;
     loop {
-        if let Attempted::Stored(seq) = attempt(journal, stream, (&event_id, bytes), None, now)? {
+        if let Attempted::Stored(seq) = attempt(journal, stream, (&event_id, drafts), None, now)? {
             return Ok(Submitted { event_id, seq });
         }
         let Some(retry) = retries.next() else {

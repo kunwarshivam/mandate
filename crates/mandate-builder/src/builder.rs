@@ -697,6 +697,45 @@ fn discretionary_exit(
             reason: HoldReason::DiscretionaryExitsDisabled,
         });
     }
+    sell_whole_position(account, market)
+}
+
+/// §8.3 step 2's first branch (mandate spec v0.10, MI-34, DEC-2391): the instrument's thesis
+/// ended, so the whole position is sold at the bid whatever the signals say, with no model output
+/// read at all. The proposal is built here and not by [`propose`], so nothing but the sell's own
+/// notional can refuse it: the sizing arithmetic an opening needs never holds an exit (`AGENTS.md`
+/// rule 13). Its combined figures are those of no output, and no sizes or clips. The caller decides
+/// that the thesis ended and passes the position less its working exits as `position_qty`, so an
+/// exit already working is not proposed twice; the session rule that defers an equity exit is the
+/// gate's, as for the signal exit.
+///
+/// # Errors
+/// As the exit's notional refuses.
+pub fn propose_thesis_exit(
+    account: &AccountSnapshot,
+    market: &Market,
+) -> Result<Proposal, BuilderError> {
+    Ok(Proposal {
+        action: sell_whole_position(account, market)?,
+        combined: Combined {
+            outputs_used: BTreeSet::new(),
+            exit_conviction: Conviction::ZERO,
+            buy_conviction: Conviction::ZERO,
+            score: Unit::ZERO,
+        },
+        sizes: Sizes {
+            cap: UsdExact::zero(),
+            current_mv: UsdExact::zero(),
+            target_value: None,
+            delta: None,
+        },
+        clipped_by: BTreeSet::new(),
+    })
+}
+
+/// The whole position at the bid, or a hold when there is none. An equity exit inside the close
+/// window goes out marketable (DEC-70).
+fn sell_whole_position(account: &AccountSnapshot, market: &Market) -> Result<Action, BuilderError> {
     if account.position_qty.is_zero() {
         return Ok(Action::Hold {
             reason: HoldReason::NoPosition,

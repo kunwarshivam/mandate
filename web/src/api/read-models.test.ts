@@ -45,11 +45,34 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
       ok: true,
       value: { agents: [ROW, { ...ROW, agent_id: "agt_2", mode: null, label: null, mandate: null }] },
     });
-    expect(agentRead({ agent: { ...ROW, account_positions: [POSITION] } }, "")).toEqual({ ok: true, value: { agent: { ...ROW, account_positions: [POSITION] } } });
+    expect(agentRead({ agent: { ...ROW, account_positions: [POSITION], openings_held: null } }, "")).toEqual({ ok: true, value: { agent: { ...ROW, account_positions: [POSITION], openings_held: null } } });
     expect(ok(agentRead({ agent: { ...ROW, account_positions: null } }, ""))).toBe(true);
     expect(approvalsRead({ approvals: [APPROVAL] }, "")).toEqual({ ok: true, value: { approvals: [APPROVAL] } });
     const protectedOrder = { ...ORDER, tif: "day", protection: { stop: "54000", take_profit: null } };
-    expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } } } }, ""))).toBe(true);
+    expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } }, schema_version: 2, decision_deferred_to_binding: [] } }, ""))).toBe(true);
+  });
+
+  it("reads openings_held as served, an absent one as unknown, and refuses an unlisted reason (DEC-2143)", () => {
+    for (const reason of ["account_traded", "research_agent_traded", "unknown"]) expect(agentRead({ agent: { ...ROW, account_positions: null, openings_held: { reason } } }, ""), reason).toMatchObject({ ok: true, value: { agent: { openings_held: { reason } } } });
+    expect(agentRead({ agent: { ...ROW, account_positions: null } }, "")).toMatchObject({ ok: true, value: { agent: { openings_held: { reason: "unknown" } } } });
+    expect(problem(agentRead({ agent: { ...ROW, account_positions: null, openings_held: { reason: "stalled" } } }, ""))).toBe("unknown_enum_value /agent/openings_held/reason");
+    expect(ok(agentRead({ agent: { ...ROW, account_positions: null, openings_held: "account_traded" } }, ""))).toBe(false);
+  });
+
+  it("reads the ApprovalRequested version an approval's content comes from, and refuses a read without one (DEC-2518)", () => {
+    const detail = { ...APPROVAL, content: { action: { side: "buy" } }, decision_deferred_to_binding: [] };
+    for (const version of [1, 2, 3]) expect(approvalRead({ approval: { ...detail, schema_version: version } }, ""), String(version)).toMatchObject({ ok: true, value: { approval: { schema_version: version } } });
+    expect(problem(approvalRead({ approval: detail }, ""))).toBe("missing /approval/schema_version");
+    for (const version of [0, 4, "3", null, 2.5]) expect(problem(approvalRead({ approval: { ...detail, schema_version: version } }, "")), String(version)).toMatch(/^(unknown_enum_value|wrong_type) \/approval\/schema_version$/);
+  });
+
+  it("reads the deferred checks of the decision behind an approval, or null without one, and refuses a read without them (DEC-2519)", () => {
+    const detail = { ...APPROVAL, content: { action: { side: "buy" } }, schema_version: 2 };
+    for (const decided of [null, [], ["halt"], ["anything", 7]]) {
+      expect(approvalRead({ approval: { ...detail, decision_deferred_to_binding: decided } }, ""), JSON.stringify(decided)).toMatchObject({ ok: true, value: { approval: { decision_deferred_to_binding: decided } } });
+    }
+    expect(problem(approvalRead({ approval: detail }, ""))).toBe("missing /approval/decision_deferred_to_binding");
+    for (const decided of ["halt", 3, {}]) expect(problem(approvalRead({ approval: { ...detail, decision_deferred_to_binding: decided } }, "")), JSON.stringify(decided)).toBe("wrong_type /approval/decision_deferred_to_binding");
   });
 
   it("refuses a decimal sent as a JSON number, and a count that is not one", () => {
@@ -122,7 +145,7 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
         expect(read.mode, scenario).toBe(agent.mode);
         expect(read.mandate?.allocation_usd).toBe(agent.mandate.capital.allocation_usd);
         expect(read.mandate?.max_order_usd).toBe(agent.mandate.risk.max_order_usd);
-        expect(read.account_positions?.map((p) => p.instrument)).toEqual(agent.positions.map((p) => p.instrument.symbol));
+        expect(read.account_positions?.map((p) => p.instrument), "the account's holdings, every agent's").toEqual(fixture.agents.flatMap((a) => a.positions).map((p) => p.instrument.symbol));
         expect(read.pending_approvals).toBe(fixture.approvals.filter((a) => a.agent_id === agent.agent_id && a.status === "delivered").length);
       }
       expect(view.approvals.map((a) => a.approval_id).sort(), scenario).toEqual(fixture.approvals.map((a) => servedId(a.approval_id)).sort());

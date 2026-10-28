@@ -1,0 +1,268 @@
+# Runbook: self-hosted CI runners on DigitalOcean (DEC-2065)
+
+The founder's steps to bring up, switch to, and roll back the self-hosted GitHub Actions runners
+that `deploy/tofu/environments/ci-runners` makes. Agents never run any of this and never see a
+value below (AGENTS.md rules 7 and 8). Nothing here goes in the repository, a chat or an issue.
+
+**What it is.** Three DigitalOcean droplets (`s-4vcpu-8gb`, `sfo2`), each running one CI job at a
+time. Every job gets a fresh container built from a baked image (the repository's pinned toolchain,
+Docker, the GitHub runner) and the container is deleted when the job ends. They cost **144 USD a
+month** against your cap of **150 USD** ([DEC-2065](../project/decisions/DEC-2065.md)), separate
+from the hosting budget of DEC-2011. ci.yml's eleven cell jobs and the `fast` and `full` aggregates move to them (DEC-2072,
+DEC-2075, DEC-2076), and only for pushes and dispatches on `main` and pull requests from this
+repository's own branches. `select`, lint, tests, mutants and the other checks stay on GitHub's runners.
+
+**The one rule.** A fork's pull request brings its own workflow files, which can ask for these
+runners by label. What stops it is the setting in step 1, and the runners refuse any job that is
+not this repository's own before its first step. So **never approve a fork's workflow run while
+`CI_RUNNER` is set or the runners are up.** To run one, first unset `CI_RUNNER` and power the
+droplets off (step 7).
+
+**The switch.** Nothing changes until you set the repository variable `CI_RUNNER` (step 5).
+Rolling back is deleting it (step 7).
+
+## 1. GitHub: verify that forks are held for approval (first)
+
+The runners exist from the moment you apply, before you set `CI_RUNNER`, so confirm this before
+anything else. The runners also read it themselves before every registration and register none
+while it is anything else.
+
+1. In **Settings → Actions → General → Fork pull request workflows from outside collaborators**,
+   select **Require approval for all outside collaborators** and save.
+2. Check it took:
+   `gh api repos/kunwarshivam/mandate/actions/permissions/fork-pr-contributor-approval` must print
+   `"approval_policy":"all_external_contributors"`. Do not go on until it does.
+
+This setting is the fence against code from forks: until you approve a fork's run, none of it runs
+anywhere. ci.yml's own guard only keeps this repository's workflow from sending a fork to the
+runners, and the runners' job-started hook refuses an approved fork's job before its first step
+(DEC-2065 item 4). Keep the rule above.
+
+## 2. DigitalOcean: a team, a billing alert and a token
+
+1. **A team.** Preferably a separate one for CI (**Create a team**, for example `mandate-ci`).
+   Its bill and alert then cover the runners alone, its token cannot touch staging or production,
+   and only its members can read the droplets' user data, which holds the App's key. If you have
+   only one team, as now, use it (DEC-2074). Then:
+   - the alert covers the team's whole bill, so set it at your other spend plus 150 USD;
+   - the token can delete or change any droplet, firewall or tag in the team, staging's and
+     production's cluster nodes and their firewall included, so revoke it as soon as each apply
+     ends (§4);
+   - any member with Droplet read can read the App's key, so every current member must be one you
+     trust with it, and rotate it whenever a member joins (§6);
+   - the runners sit in `sfo2`'s default VPC, likely the clusters' own (DEC-2074 item 2).
+2. **Billing alert.** In that team, **Billing → Billing alerts**, set an alert at **150 USD** a
+   month, or at your other spend plus 150 USD in a shared team. No API sets this. The plan's own
+   check also refuses a fleet over 150 USD.
+3. **A personal access token**, in **API → Tokens → Generate New Token**, **Custom Scopes**, an
+   expiry of 30 days (you only need it while you apply), with only:
+
+   | Resource | Scopes | Why |
+   |---|---|---|
+   | Droplet | create, read, update, delete | the three runners |
+   | Firewall | create, read, update, delete | the runners' firewall: nothing inbound, only DNS, NTP and ports 80 and 443 out |
+   | Tag | create, read, delete | the tag the firewall applies to |
+   | Sizes | read | the plan's cost check reads the size's price |
+   | Regions | read | the plan checks the size is offered in `sfo2` |
+   | Image | read | the droplets' Ubuntu 24.04 image |
+
+   If an apply fails with a 403 that names another scope, add only that one. Revoke the
+   token once the apply ends (§4) and make a new one for the next apply.
+
+## 3. GitHub: the runner App (least privilege)
+
+The droplets need a credential that can register a new single-use runner before every job. A
+GitHub App is the least privilege available: each job's token is minted by the droplet, lives one
+hour, is narrowed to this one repository and the one permission, and is revoked as soon as the
+runner is registered. A fine-grained personal token would need the same permission, but would sit
+on every droplet as a long-lived bearer token tied to your account.
+
+1. **Settings → Developer settings → GitHub Apps → New GitHub App.**
+   - Name: `mandate-ci-runners` (any free name). Homepage URL: the repository's URL.
+   - **Webhook:** untick **Active**.
+   - **Repository permissions:** **Administration: Read and write**, and nothing else (Metadata:
+     read is added automatically). GitHub requires Administration to register a runner on a
+     repository owned by a personal account; there is no narrower permission for it. That is why
+     the key stays on the droplets as root only and never reaches a job (DEC-2065 item 5).
+   - **Organization and account permissions:** none.
+   - **Where can this GitHub App be installed?** Only on this account.
+2. **Create**, then on the App's page note the **Client ID**, and under **Private keys** click
+   **Generate a private key**. Your browser downloads a `.pem`; keep it in your password manager
+   and delete the download after step 5.
+3. **Install App → Only select repositories → `mandate`.** The installation's settings page
+   address ends in its **installation id** (`.../settings/installations/<number>`); note the
+   number.
+
+## 4. Apply, from your own machine
+
+You need OpenTofu `1.13.1` (`bash .cursor/install.sh` installs it, or its GitHub release) and a
+checkout of `main`. In a shell, so no value lands in your history or a file:
+
+Before a retry, use step 7 to destroy any failed fleet still in state. Confirm `CI_RUNNER` is
+absent and **Settings → Actions → Runners** has no stale `mandate-ci-do` registration. Delete a
+stale offline registration there; never delete an unrelated self-hosted runner.
+
+```bash
+cd deploy/tofu/environments/ci-runners
+read -rs DIGITALOCEAN_TOKEN && export DIGITALOCEAN_TOKEN       # step 2.3's token
+read -rs TF_VAR_state_passphrase && export TF_VAR_state_passphrase   # 32+ random characters; keep it
+read -r TF_VAR_github_app_client_id && export TF_VAR_github_app_client_id
+read -r TF_VAR_github_app_installation_id && export TF_VAR_github_app_installation_id
+TF_VAR_github_app_private_key="$(cat ~/Downloads/mandate-ci-runners.*.private-key.pem)"
+export TF_VAR_github_app_private_key
+tofu init
+tofu apply -var runner_count=1
+```
+
+From empty state, the canary plan should create exactly: one `digitalocean_tag`, one
+`digitalocean_firewall`, one `digitalocean_droplet`, and the budget's `terraform_data`, with
+`estimate_usd = 48`. The boot script shows as `(sensitive value)`. Type `yes`. Keep the App key
+until step 5 passes.
+
+The state is written to `ci-runners.tfstate` in that directory, encrypted with your passphrase.
+Keep the passphrase: without it, later applies cannot read the state. Git ignores the state and
+`.terraform/` there, so neither is committed by accident; keep a backup of the state with the
+passphrase.
+
+**Then revoke the DigitalOcean token** (**API → Tokens**), and make a new one for the next apply.
+
+**Wait about 20 to 30 minutes.** The canary installs Docker and Sysbox, builds the job image,
+runs that image through a Sysbox, nested-Docker, DNS and GitHub HTTPS preflight, and only then
+registers. **Settings → Actions → Runners** must list one idle runner named
+`mandate-ci-runner-1-<time>`, with the label `mandate-ci-do`. If none is idle within 40 minutes,
+check step 1, keep `CI_RUNNER` absent, run `tofu destroy -var runner_count=1`, and stop. Do not
+reapply the same commit.
+
+## 5. Smoke, scale, then switch the cell jobs over
+
+With the one runner idle, dispatch **Actions → runner-smoke → Run workflow** on `main`, or:
+
+```bash
+gh workflow run runner-smoke.yml --ref main
+```
+
+Its three jobs run in sequence on the canary. Each gets a fresh ephemeral registration and proves
+the admission hook, non-root job user with passwordless `sudo`, nested Docker, k3d, kubectl, helm,
+and the metadata fence. All three must pass. If one fails, keep `CI_RUNNER` absent, destroy the
+canary, and stop.
+
+Scale only after that green run:
+
+```bash
+tofu apply
+```
+
+The plan should add two droplets, destroy nothing and change the estimate from 48 to 144 USD.
+Type `yes`, wait until three `mandate-ci-do` runners are idle, then dispatch `runner-smoke` again.
+Its three matrix jobs should run in parallel and all pass. A replacement registration appears
+after each job; completed registrations remove themselves.
+
+Only after the three-job fleet smoke is green, create the repository variable:
+
+```bash
+gh variable set CI_RUNNER --repo kunwarshivam/mandate --body mandate-ci-do
+```
+
+From the next run on, the cell jobs, `fast` and `full` of a pull request from this repository,
+and of `main`, run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
+runs first and passes. Every other job stays on GitHub's runners, and still needs their capacity. If this repository's own cell
+jobs all fail with "This runner takes only kunwarshivam/mandate's own jobs", roll back (step 7)
+and tell lane RN: the hook refuses whatever it cannot read.
+
+The dedicated smoke is the hook's first live proof. On the first pull request after the switch,
+and on the first run on `main`, also check that a cell job's **Set up job** names a
+`mandate-ci-runner` and shows the hook passing. It fails closed, so a wrong input fails jobs and
+never admits one. After both runs pass, save the App key in the password manager and delete the
+downloaded copy.
+
+## 6. Day to day
+
+- **Nothing to do.** A droplet rebuilds the job image from `main`'s `.cursor/install.sh` once the
+  image is a day old, before its next job, so new tool pins arrive by themselves; a job installs
+  any pin it still lacks itself. Each new image passes the runtime preflight before it may
+  register. If a rebuild fails, the droplet keeps the old image. A failed listener's registration
+  is deleted before a bounded retry. Ubuntu's unattended upgrades may restart Docker on a droplet
+  now and then; the job it was running fails and can be re-run.
+- **A change to the fleet, the runner version or the base image** is a pull request to
+  `deploy/tofu/`, then `tofu apply` as in step 4. Changing the boot script replaces the droplets.
+- **Rotating the App key, every 90 days:** generate a new key on the App's page, apply with it
+  (the droplets are replaced), then delete the old key there. Replacing the droplets bills the
+  hours both sets run; the cap leaves 6 USD, about 84 droplet-hours, so a month with a replacement
+  can come close to the 150 USD alert.
+- **No SSH.** The droplets admit nothing inbound and their root password is locked at boot, so
+  ignore the password DigitalOcean emails. To look at one, destroy it and apply again.
+
+## 7. Rollback
+
+- **Back to GitHub's runners:** delete the `CI_RUNNER` variable (or set it empty). The next run
+  uses `ubuntu-24.04` everywhere. A job already queued for `mandate-ci-do` waits for a runner:
+  cancel that run and re-run it.
+- **Before approving a fork's workflow run:** delete `CI_RUNNER` and power every runner droplet off
+  in the console (**Droplets → each → Power → Turn off**); power them on again after the run.
+  A powered-off droplet still bills.
+- **Stop paying:** after the rollback, run `tofu destroy` in the same directory with the same
+  variables, or delete the runner droplets, the firewall and the tag in the console. Then delete the
+  App's private key (or uninstall the App) and revoke the DigitalOcean token.
+- **If a runner misbehaves:** destroy it in the console; the next `tofu apply` makes a fresh one.
+
+## 8. Debug window (only when a runner misbehaves)
+
+The droplets admit nothing and no one can log in, so their logs are out of reach. When the
+runners misbehave (for example, runners registering and never going Online), open a window for
+yourself alone, read the logs, and shut it again the same day (DEC-2077). Opening and shutting it
+each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
+
+The E21-64l diagnostic canary found cloud-init stopping at `sshd -t` because Ubuntu 24.04 had not
+created volatile `/run/sshd`; bootstrap therefore never installed Docker, Sysbox or the manager.
+The module now creates that root-owned mode-0755 directory before validation. A recurrence is a
+boot-order regression, not evidence against the GitHub App or Sysbox.
+
+1. **Make a fresh DigitalOcean token** (§2.3) and export the same variables as in §4, then add:
+
+   ```bash
+   cd deploy/tofu/environments/ci-runners
+   export TF_VAR_debug_ssh_key="$(cat ~/.ssh/id_ed25519.pub)"            # your public key, one line
+   export TF_VAR_debug_ssh_cidr="$(curl -s https://ipv4.icanhazip.com)/32" # your own address only
+   tofu apply -var runner_count=1                                        # while debugging the canary
+   ```
+
+   Check that the address is your own, for example against your router's page. Behind a shared or
+   carrier-grade NAT, one address is everyone behind it; use another network then.
+
+   The canary plan adds one inbound rule (TCP 22 from your address) and replaces its one droplet.
+   On an already scaled fleet, omit `-var runner_count=1`; that plan replaces all three. The
+   window takes both variables or neither, and refuses any range wider than one address.
+2. **Wait about 30 minutes**, for the new droplets to boot and start looping, then for each
+   droplet's address (the console's **Droplets** page):
+
+   ```bash
+   ssh debug@<droplet address>
+   sudo journalctl -u mandate-runner -n 300 --no-pager
+   sudo journalctl -b --no-pager | grep -iE 'sysbox|dockerd|mandate' | tail -n 100
+   sudo docker ps -a
+   exit
+   ```
+
+   Only the `debug` user can log in, only with your key; no password works, and root cannot log in.
+3. **Paste back to the agents** the output of those commands. It holds the runner's and the
+   manager's console output, which names no secret: the runner's one-job configuration is passed
+   as an argument and never printed. **Never paste** anything from `/etc/mandate-runner/`
+   (`app.pem` is the App's private key), the droplets' user data, your DigitalOcean token, your
+   state passphrase, or the output of `docker inspect`, `docker ps --no-trunc` or `ps` with
+   arguments, which show the runner's single-use registration. If a line ever shows a key or a token, stop and rotate it.
+4. **Shut the window the same day:** unset both variables
+   (`unset TF_VAR_debug_ssh_key TF_VAR_debug_ssh_cidr`), then run
+   `tofu apply -var runner_count=1` while the fleet is still the canary. The plan removes the rule
+   and replaces that one droplet without scaling it. On an already scaled fleet, use plain
+   `tofu apply` to replace all three. Then revoke the token.
+
+## What lands where
+
+| Where | What |
+|---|---|
+| OpenTofu state (encrypted with your passphrase) | the droplets' ids, names and addresses; the firewall and tag; the cost estimate; and a SHA-1 digest of the boot script, which the DigitalOcean provider stores instead of its text. No variable is stored in state |
+| Each droplet | the App's private key at `/etc/mandate-runner/app.pem`, root only (mode 0600), and the client id, installation id and repository in `/etc/mandate-runner/env`. Jobs run in a separate container that never sees either |
+| DigitalOcean | the boot script, key included, as the droplets' user data: readable through each droplet's metadata service, and by anyone with Droplet read on the team, in the console and the API. Hence a team of the runners' own where possible; in a shared team, rotation whenever a member joins (DEC-2074), and every 90 days. The host blocks jobs from the metadata service, the host itself and every private range |
+| GitHub | each job's one-hour installation token, revoked once its runner is registered, and the runner's single-use registration |
+
+What this does not guard, said plainly, is DEC-2065 item 6.

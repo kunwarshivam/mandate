@@ -15,12 +15,15 @@ mandate-approval.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-journal.workspace = true
+mandate-notify.workspace = true
 mandate-num.workspace = true
+mandate-research.workspace = true
 mandate-risk.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mandate-gate-context.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

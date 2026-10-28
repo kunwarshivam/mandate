@@ -4,7 +4,10 @@
 //! mandate and the entry. Without the opt-in the binary runs deny-all, and a refused opt-in stops
 //! its start (`tests/process.rs`). An agentic bundle gives the core its loop: `final_output`, the
 //! entry's bounds and declared tools, and the recorded run cap; one recording no run cap is refused
-//! at the opt-in (DEC-2268).
+//! at the opt-in (DEC-2268). Research through the model-gateway service calls it and writes no meter
+//! record of its own (DEC-2397 item 4).
+
+mod cell_research;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -15,19 +18,27 @@ use std::rc::Rc;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_daemon::cell::{
-    CellDeployment, CellError, OptIn, agentic_config, meter_opened_ids, opt_in, research,
-    research_daily_cap, research_metered,
+    CellDeployment, CellError, OptIn, ViaGateway, agentic_config, meter_opened_ids, opt_in,
+    research, research_daily_cap, research_metered, research_through,
 };
 use mandate_daemon::recorded::{Bundle, BundleError};
+use mandate_daemon::remote::GatewayAddress;
 use mandate_daemon::source::Rows;
+use mandate_gateway::kinds::{KeyOwner, Purpose};
+use mandate_gateway::meter::{MeterRecord, MeterStore, Reservation};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::provider::{IdSource, SequentialIds};
+use mandate_gateway::registry::ModelRef;
+use mandate_gateway::{CallRequest, RequestError, frame, wire};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent, StreamId};
+use mandate_research_run::CallPlan;
 use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool, ToolClass};
-use mandate_runtime::{AgenticConfig, EventDraft, EventId};
+use mandate_runtime::{
+    AgenticConfig, EventDraft, EventId, ResearchInput, ResearchRequest, RiskClock,
+};
 use mandate_spec::document::Mandate;
-use mandate_store::MemoryStore;
 use mandate_store::meter::JournalMeter;
+use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
@@ -200,6 +211,22 @@ fn the_opted_in_research_is_the_bundle_s_entry_for_the_deployed_mandate() {
     };
     let (refs_version, refs) = wired.refs.refs(&draft).unwrap();
     assert_eq!(refs_version, 1);
+    for (event_type, payload, want) in [
+        ("ApprovalRequested", r#"{"content":{"execution":null}}"#, 2),
+        ("DecisionMade", r#"{"deferred_to_binding":[]}"#, 3),
+        ("DecisionMade", r#"{"dry_run":"allow"}"#, 1),
+    ] {
+        let versioned = EventDraft {
+            event_type: event_type.to_owned(),
+            payload: mandate_canon::parse(payload.as_bytes()).unwrap(),
+            ..draft.clone()
+        };
+        assert_eq!(
+            wired.refs.refs(&versioned).map(|(version, _)| version),
+            Some(want),
+            "{event_type} {payload}: the draft's own version (DEC-2388 item 13)"
+        );
+    }
     assert_eq!(
         refs.get("mandate_version").and_then(Value::as_str),
         Some(version.as_str())
@@ -447,4 +474,223 @@ fn an_agentic_bundle_without_a_run_cap_is_refused_at_the_opt_in() {
             member: "run_usd"
         }))
     );
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the remote gateway bounds a real socket against the host clock"
+)]
+fn host_now() -> UtcNanos {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    UtcNanos::from_parts(
+        i64::try_from(since.as_secs()).unwrap(),
+        since.subsec_nanos(),
+    )
+    .unwrap()
+}
+
+/// A scripted service on a local port that stores each put it is sent in the store at `root`, as
+/// the model-gateway service does (DEC-2279), and reads the one call it is sent within ten seconds
+/// and closes without a reply, handing back the call, or `None` when nothing called it.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the scripted service waits for its one call against the host clock"
+)]
+fn dropping_service(
+    root: &Path,
+) -> (
+    std::net::SocketAddr,
+    std::thread::JoinHandle<Option<CallRequest>>,
+) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut store = FsArtifactStore::open_existing(root).unwrap();
+    let handle = std::thread::spawn(move || {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(_) if std::time::Instant::now() < until => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    continue;
+                }
+                Err(_) => return None,
+            };
+            stream.set_nonblocking(false).ok()?;
+            let body = frame::read_frame(&mut stream, frame::MAX_REQUEST_FRAME).ok()?;
+            match wire::any_request_from(&body).ok()? {
+                wire::Request::Call(call) => return Some(*call),
+                wire::Request::Put(put) => {
+                    let stored = store.put_artifact(&put.bytes).ok()?.digest();
+                    let reply = wire::put_reply_bytes(&Ok(stored));
+                    frame::write_frame(&mut stream, &reply, frame::MAX_REPLY_FRAME).ok()?;
+                }
+            }
+        }
+    });
+    (address, handle)
+}
+
+/// DEC-2397 items 4 and 6: research wired through the service sends its run's call there, and its
+/// worker builds no gateway and so writes nothing to the workspace's meter stream, the service's;
+/// a lost exchange is `gateway_unreachable`.
+#[test]
+fn research_through_the_service_calls_it_and_writes_no_meter_record() {
+    let (root, control, _, _) = deployed("remote");
+    let (address, service) = dropping_service(&root);
+    let journal = MemoryStore::default();
+    let mut wired = research_through(
+        opted(),
+        Box::new(control),
+        journal.clone(),
+        "ws1",
+        &root,
+        host_now,
+        Some(ViaGateway {
+            address: GatewayAddress::from(address),
+            research: root.clone(),
+        }),
+    )
+    .unwrap_or_else(|error| panic!("{error:?}"));
+    let worker = &mut wired.wiring.worker;
+    let parts = cell_research::parts();
+    worker.hand(
+        &ResearchRequest::Start {
+            run_id: cell_research::RUN.to_owned(),
+            cut_off: RiskClock::from_secs(cell_research::CUT_OFF),
+        },
+        &parts,
+    );
+    let retrieved = worker.answers(RiskClock::from_secs(cell_research::CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = retrieved.first() else {
+        panic!("the run retrieved: {retrieved:?}");
+    };
+    let bundle = cell_research::bundle();
+    let plan = CallPlan {
+        run_id: cell_research::RUN.to_owned(),
+        call_id: "01J8Z3MR000000000000000001".to_owned(),
+        workspace_id: "ws1".to_owned(),
+        agent_id: AGENT.to_owned(),
+        model: bundle.entry.content().model_ref(),
+        as_of: UtcNanos::from_parts(cell_research::CUT_OFF, 0).unwrap(),
+        deadline_ms: 120_000,
+        max_output_tokens: 4_096,
+        observations: (0..items.len()).map(|n| format!("obs-{n}")).collect(),
+    };
+    worker.hand(&ResearchRequest::Call(plan.clone()), &parts);
+    let sent = service.join().unwrap().expect("the service was called");
+    assert_eq!(sent.call_id, plan.call_id);
+    assert_eq!(
+        Store::rows(&journal, &StreamId::parse("meter:ws1").unwrap()),
+        Some(vec![]),
+        "no meter record of the runtime's own"
+    );
+    let at = RiskClock::from_secs(cell_research::CUT_OFF + 30);
+    assert_eq!(
+        worker.answers(at),
+        [ResearchInput::Refused {
+            run_id: cell_research::RUN.to_owned(),
+            at,
+            error: RequestError::GatewayUnreachable,
+        }]
+    );
+}
+
+/// DEC-2279 item 3: research wired through the service stores its artifacts through it, never in
+/// its own mount: with no service there, a put stores nothing and leaves nothing in the store, so
+/// research halts rather than journal what was not stored.
+#[test]
+fn research_through_the_service_stores_its_artifacts_only_through_it() {
+    let (root, control, _, _) = deployed("remote-put");
+    let address = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let mut wired = research_through(
+        opted(),
+        Box::new(control),
+        MemoryStore::default(),
+        "ws1",
+        &root,
+        host_now,
+        Some(ViaGateway {
+            address: GatewayAddress::from(address),
+            research: root.clone(),
+        }),
+    )
+    .unwrap_or_else(|error| panic!("{error:?}"));
+    assert!(!wired.wiring.artifacts.put(b"a draft thesis"));
+    let store = FsArtifactStore::open_existing(&root).unwrap();
+    assert!(
+        !store
+            .object_path(&mandate_journal::ArtifactRef::of(b"a draft thesis"))
+            .exists(),
+        "nothing was put in the runtime's own mount"
+    );
+}
+
+/// A reservation the model-gateway service writes for call `n`.
+fn reservation(n: u128) -> MeterRecord {
+    MeterRecord::Reserved(Reservation {
+        event_id: mandate_canon::encode_ulid(n),
+        call_id: mandate_canon::encode_ulid(n + 1),
+        agent_id: Some(AGENT.to_owned()),
+        purpose: Purpose::Research,
+        model: ModelRef {
+            model_id: "llm.research_agent".to_owned(),
+            model_version: "0.1.0".to_owned(),
+            content_hash: Digest::of(b"model"),
+        },
+        endpoint: "recorded:demo".to_owned(),
+        key_owner: KeyOwner::Platform,
+        price_table_ref: Digest::of(b"prices"),
+        max_cost: Usd6::from_micros(500),
+        risk_day: mandate_time::Date::parse("2026-10-16").unwrap(),
+    })
+}
+
+/// DEC-2397 item 4: research wired through the service reads the workspace's meter stream without
+/// its writer epoch, so the service, the stream's one writer, still appends after the runtime
+/// starts; research with no service is that stream's writer itself, and fences an earlier one.
+#[test]
+fn only_research_without_the_service_takes_the_meter_s_writer_epoch() {
+    for (gateway, fenced) in [
+        (
+            Some(ViaGateway {
+                address: GatewayAddress::parse("model-gateway:8080").unwrap(),
+                research: PathBuf::new(),
+            }),
+            false,
+        ),
+        (None, true),
+    ] {
+        let (root, control, _, _) = deployed("epoch");
+        let journal = MemoryStore::default();
+        let mut service = JournalMeter::open(
+            journal.clone(),
+            "ws1",
+            Environment::Paper,
+            Rc::new(host_now),
+            Box::new(SequentialIds::starting_at(1 << 70)),
+        );
+        service.append(reservation(10)).unwrap();
+        research_through(
+            opted(),
+            Box::new(control),
+            journal.clone(),
+            "ws1",
+            &root,
+            host_now,
+            gateway.clone(),
+        )
+        .unwrap_or_else(|error| panic!("{error:?}"));
+        assert_eq!(
+            service.append(reservation(20)).is_err(),
+            fenced,
+            "{gateway:?}"
+        );
+    }
 }

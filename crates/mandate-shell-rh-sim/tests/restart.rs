@@ -437,8 +437,9 @@ fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
 /// `order_id`. The broker holds one order and saw one place: nothing was sent again. The
 /// reconciliation that follows reads the broker's working order, whose record carries no key of
 /// ours (U-R2), and stops the restart before its cycle, fail closed: the order is marked
-/// `Unknown` again and the executor drafts `ExternalActivityIngested`, which has no registered
-/// schema, so the journal refuses it (DEC-956 item 5). Matching it by its journaled broker id is
+/// `Unknown` again and the executor drafts `ExternalActivityIngested` for the order it cannot match,
+/// and the reconciliation's difference stops the restart (DEC-956 item 5). Matching it by its
+/// journaled broker id is
 /// DEC-956 item 2's proposal, for the founder. The run is refused on such an account anyway
 /// (DEC-529 item 3, DEC-470 item 1).
 #[test]
@@ -497,7 +498,7 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
 /// DEC-529 item 4 and trading spec §5.3 rules 6 and 9: a place that never reached the broker lists
 /// nothing on the restart, so the order stays `Unknown`; the restart reconciles, runs its cycle
 /// on the same rising closes, and places no opening in SPY while the order is `Unknown`: the
-/// runtime's dry run holds it, since the first opening still works (DEC-1150 item 5).
+/// runtime holds it before any decision, since the first opening still works (DEC-2843).
 #[test]
 fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
     let server = broker(false);
@@ -511,6 +512,13 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
     );
 
     let records = folded(&account_rows(&first));
+    let decided_first = first
+        .journal
+        .read(AGENT_STREAM)
+        .unwrap()
+        .iter()
+        .filter(|row| row.event_type == "DecisionMade")
+        .count();
     let restart = bridge(&server, Line::Up, &records);
     let (outcome, stages) = run(RESTART, &restart, Some(first.journal));
 
@@ -567,10 +575,10 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
         })
         .collect();
     assert_eq!(
-        decided.last(),
-        Some(&("deny".to_owned(), "working_order_limit".to_owned())),
-        "the restart's opening is held while the Unknown one works, by the runtime's dry run \
-         (trading spec §5.3 rule 6, DEC-1150 item 5): {decided:?}"
+        decided.len(),
+        decided_first,
+        "the restart's opening is held while the Unknown one works, with no decision journaled \
+         (trading spec §5.3 rule 6, DEC-2843): {decided:?}"
     );
     assert_eq!(
         gates.len(),

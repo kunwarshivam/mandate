@@ -3,7 +3,7 @@
 //! exponentially), and ordering checks. The transport and the clock are injected so tests replay
 //! recorded responses without a network or real waiting (ADR-0001 ES-19).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
@@ -11,7 +11,8 @@ use std::time::{Duration, SystemTime};
 use mandate_time::{Date, UtcNanos};
 
 use crate::alpaca::{self, WireError};
-use crate::model::{CorporateActions, DatasetId, DayRange, Records, Symbol};
+use crate::batch::{self, BarsBatch, BatchError, MAX_BATCH_SYMBOLS};
+use crate::model::{Bar, CorporateActions, DatasetId, DayRange, Records, Symbol};
 use crate::rate::Pacer;
 pub use crate::rate::RatePolicy;
 use crate::timestamp::TimestampError;
@@ -150,6 +151,8 @@ pub enum FetchError {
     OutOfOrder { time: UtcNanos },
     #[error("building the request: {0}")]
     Request(TimestampError),
+    #[error("the batch cannot be asked: {0}")]
+    Batch(BatchError),
 }
 
 impl FetchError {
@@ -163,6 +166,7 @@ impl FetchError {
             Self::RepeatedPageToken { .. } => "repeated_page_token",
             Self::OutOfOrder { .. } => "out_of_order",
             Self::Request(_) => "request",
+            Self::Batch(_) => "batch",
         }
     }
 }
@@ -266,6 +270,117 @@ impl<T: Transport, P: Pause> Client<T, P> {
             actions.other.extend(parsed.actions.other);
             match parsed.next_page_token {
                 None => return Ok(actions.dated_in(ex_dates)),
+                Some(next) => {
+                    if !seen_tokens.insert(next.clone()) {
+                        return Err(FetchError::RepeatedPageToken { page });
+                    }
+                    token = Some(next);
+                }
+            }
+        }
+    }
+
+    /// Every bar of `batch`, each symbol's apart and in time order, following page tokens to the
+    /// end; a symbol no page answers is answered with no bars (DEC-2283 item 5). A symbol's bar at
+    /// or before its previous one, on any page, refuses the batch.
+    pub async fn fetch_bars_batch(
+        &self,
+        batch: &BarsBatch,
+    ) -> Result<BTreeMap<Symbol, Vec<Bar>>, FetchError> {
+        let mut bars: BTreeMap<Symbol, Vec<Bar>> = batch
+            .symbols()
+            .iter()
+            .map(|symbol| (symbol.clone(), Vec::new()))
+            .collect();
+        let mut seen_tokens = BTreeSet::new();
+        let mut token: Option<String> = None;
+        let mut page = 0_usize;
+        loop {
+            page = page.saturating_add(1);
+            let path = batch::bars_path(batch, self.page_limit, token.as_deref());
+            let body = self.get_with_retry(&path).await?;
+            let parsed = batch::parse_bars_page(batch, &body)
+                .map_err(|source| FetchError::Wire { page, source })?;
+            for (symbol, more) in parsed.bars {
+                let all = bars.entry(symbol).or_default();
+                for bar in more {
+                    if all
+                        .last()
+                        .is_some_and(|previous| previous.start >= bar.start)
+                    {
+                        return Err(FetchError::OutOfOrder { time: bar.start });
+                    }
+                    all.push(bar);
+                }
+            }
+            match parsed.next_page_token {
+                None => return Ok(bars),
+                Some(next) => {
+                    if !seen_tokens.insert(next.clone()) {
+                        return Err(FetchError::RepeatedPageToken { page });
+                    }
+                    token = Some(next);
+                }
+            }
+        }
+    }
+
+    /// Every corporate action of `symbols` dated in `ex_dates`, each symbol's apart, following
+    /// page tokens to the end; every asked symbol is answered. An action ID seen on two pages is
+    /// an error.
+    pub async fn fetch_corporate_actions_batch(
+        &self,
+        symbols: &BTreeSet<Symbol>,
+        ex_dates: DayRange,
+    ) -> Result<BTreeMap<Symbol, CorporateActions>, FetchError> {
+        if symbols.is_empty() {
+            return Err(FetchError::Batch(BatchError::NoSymbols));
+        }
+        if symbols.len() > MAX_BATCH_SYMBOLS {
+            return Err(FetchError::Batch(BatchError::TooManySymbols));
+        }
+        let limit = self.page_limit.min(alpaca::MAX_CORPORATE_ACTIONS_LIMIT);
+        let mut actions: BTreeMap<Symbol, CorporateActions> = symbols
+            .iter()
+            .map(|symbol| (symbol.clone(), CorporateActions::none(symbol.clone())))
+            .collect();
+        let mut ids = BTreeSet::new();
+        let mut seen_tokens = BTreeSet::new();
+        let mut token: Option<String> = None;
+        let mut page = 0_usize;
+        loop {
+            page = page.saturating_add(1);
+            let path = batch::actions_path(symbols, ex_dates, limit, token.as_deref())
+                .map_err(FetchError::Request)?;
+            let body = self.get_with_retry(&path).await?;
+            let parsed = batch::parse_actions_page(symbols, &body)
+                .map_err(|source| FetchError::Wire { page, source })?;
+            let page_ids: BTreeSet<String> = parsed
+                .actions
+                .values()
+                .flat_map(CorporateActions::ids)
+                .map(str::to_owned)
+                .collect();
+            if let Some(repeated) = page_ids.iter().find(|id| ids.contains(*id)) {
+                let source = WireError::DuplicateAction(repeated.clone());
+                return Err(FetchError::Wire { page, source });
+            }
+            ids.extend(page_ids);
+            for (symbol, more) in parsed.actions {
+                let all = actions
+                    .entry(symbol.clone())
+                    .or_insert_with(|| CorporateActions::none(symbol));
+                all.splits.extend(more.splits);
+                all.cash_dividends.extend(more.cash_dividends);
+                all.other.extend(more.other);
+            }
+            match parsed.next_page_token {
+                None => {
+                    return Ok(actions
+                        .into_iter()
+                        .map(|(symbol, all)| (symbol, all.dated_in(ex_dates)))
+                        .collect());
+                }
                 Some(next) => {
                     if !seen_tokens.insert(next.clone()) {
                         return Err(FetchError::RepeatedPageToken { page });

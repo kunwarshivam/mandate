@@ -64,6 +64,43 @@ impl FsArtifactStore {
         }
     }
 
+    /// The bytes of every file under the store, its writes in progress among them, so a cap
+    /// counted from it counts what a crashed put left (DEC-2279 item 4). A put that crashed after
+    /// linking leaves its object and its temporary file, the same bytes under two names, and both
+    /// count: the count errs toward refusing.
+    ///
+    /// # Errors
+    /// `Unavailable` for a directory or file that cannot be read.
+    pub fn stored_bytes(&self) -> Result<u64, ArtifactError> {
+        let mut total: u64 = 0;
+        let mut pending = vec![self.root.join(OBJECTS_DIR), self.root.join(TEMP_DIR)];
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).map_err(unavailable)? {
+                let entry = entry.map_err(unavailable)?;
+                if entry.file_type().map_err(unavailable)?.is_dir() {
+                    pending.push(entry.path());
+                } else {
+                    let length = entry.metadata().map_err(unavailable)?.len();
+                    total = total.saturating_add(length);
+                }
+            }
+        }
+        Ok(total)
+    }
+
+    /// As [`ArtifactStore::put_artifact`], and whether this put linked a new object rather than
+    /// finding the same bytes already stored, so a cap counts each object once (DEC-2279 item 4).
+    ///
+    /// # Errors
+    /// As [`ArtifactStore::put_artifact`].
+    pub fn put_counted(&mut self, bytes: &[u8]) -> Result<(ArtifactRef, bool), ArtifactError> {
+        let reference = ArtifactRef::of(bytes);
+        let temp = self.write_temp(&reference, bytes)?;
+        let published = self.publish(&reference, &temp);
+        fs::remove_file(&temp).ok();
+        published.map(|linked| (reference, linked))
+    }
+
     /// Where the object for `reference` lives.
     pub fn object_path(&self, reference: &ArtifactRef) -> PathBuf {
         let hex = reference.digest().to_hex();
@@ -95,27 +132,37 @@ impl FsArtifactStore {
                 Some((path, file))
             })
             .ok_or(ArtifactError::Unavailable)?;
+        let written = Self::fill_read_only(&mut file, bytes);
+        if written.is_err() {
+            fs::remove_file(&path).ok();
+        }
+        written.map(|()| path)
+    }
+
+    /// Writes `bytes` into the new temporary `file`, makes it read-only and syncs it.
+    fn fill_read_only(file: &mut File, bytes: &[u8]) -> Result<(), ArtifactError> {
         file.write_all(bytes).map_err(unavailable)?;
         let mut permissions = file.metadata().map_err(unavailable)?.permissions();
         permissions.set_readonly(true);
         file.set_permissions(permissions).map_err(unavailable)?;
-        file.sync_all().map_err(unavailable)?;
-        Ok(path)
+        file.sync_all().map_err(unavailable)
     }
 
     /// Links the temporary file into place. A link never replaces an existing name, so when it
     /// fails, for that or any other reason, the put succeeds only if a whole object that
-    /// re-hashes is already there.
-    fn publish(&self, reference: &ArtifactRef, temp: &Path) -> Result<(), ArtifactError> {
+    /// re-hashes is already there. `true` when it linked a new object, `false` when the same
+    /// bytes were already there.
+    fn publish(&self, reference: &ArtifactRef, temp: &Path) -> Result<bool, ArtifactError> {
         let target = self.object_path(reference);
         let shard = target.parent().ok_or(ArtifactError::Unavailable)?;
         fs::create_dir_all(shard).map_err(unavailable)?;
         match fs::hard_link(temp, &target) {
             Ok(()) => File::open(shard)
                 .and_then(|dir| dir.sync_all())
+                .map(|()| true)
                 .map_err(unavailable),
             Err(_) => match get_artifact(self, reference) {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(false),
                 Err(ArtifactError::Missing) => Err(ArtifactError::Unavailable),
                 Err(e) => Err(e),
             },
@@ -136,11 +183,7 @@ impl ArtifactSource for FsArtifactStore {
 /// the put's outcome is the link's.
 impl ArtifactStore for FsArtifactStore {
     fn put_artifact(&mut self, bytes: &[u8]) -> Result<ArtifactRef, ArtifactError> {
-        let reference = ArtifactRef::of(bytes);
-        let temp = self.write_temp(&reference, bytes)?;
-        let published = self.publish(&reference, &temp);
-        fs::remove_file(&temp).ok();
-        published.map(|()| reference)
+        self.put_counted(bytes).map(|(reference, _)| reference)
     }
 }
 

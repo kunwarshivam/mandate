@@ -148,11 +148,11 @@ fn an_uninterpreted_broker_field_names_its_story() {
     let risk_state = event(
         ACCOUNT_STREAM,
         2,
-        "RiskLimitTriggered",
-        with_clock(&[("limit", text("daily_loss"))], 10),
+        "MandateVersionApplied",
+        with_clock(&[("result", text("applied"))], 10),
     );
     let error = fold(&mut state, &risk_state)
-        .expect_err("a risk-state record stream F owns is not interpreted here yet");
+        .expect_err("a version record stream F owns is not interpreted here yet");
     assert_eq!(error.code(), "not_interpreted", "{error}");
     let message = format!("{error}");
     assert!(
@@ -918,7 +918,13 @@ fn a_gate_denial_on_re_check_abandons_the_intent() {
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
         "AccountRestrictionChanged",
-        with_clock(&[("restriction", text("blocked"))], 5),
+        with_clock(
+            &[
+                ("restriction", text("blocked")),
+                ("cause", text("broker_notice")),
+            ],
+            5,
+        ),
     );
     shell.fold_one(&blocked).expect("the restriction folds");
 
@@ -957,7 +963,13 @@ fn a_first_pass_gate_denial_produces_no_order_to_abandon() {
         ACCOUNT_STREAM,
         2,
         "AccountRestrictionChanged",
-        with_clock(&[("restriction", text("blocked"))], 5),
+        with_clock(
+            &[
+                ("restriction", text("blocked")),
+                ("cause", text("broker_notice")),
+            ],
+            5,
+        ),
     );
     shell.fold_one(&blocked).expect("the restriction folds");
     let (mut shell, _) = shell.restart(&ports);
@@ -2427,8 +2439,11 @@ fn the_executor_never_lifts_a_reconciliation_pause_itself() {
     );
 }
 
+/// DEC-2828: §9.28's closed acknowledgment names a triggered limit, never a reconciliation
+/// mismatch, so the mismatch the seven unexplained shares record outlasts it, and resuming waits for
+/// a spec that names how the owner acknowledges a mismatch (backlog E7-4b).
 #[test]
-fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
+fn a_mismatch_outlasts_an_owner_acknowledgment() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -2449,9 +2464,21 @@ fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
         "OwnerAcknowledged",
         with_clock(
             &[
-                ("subject", text(AAPL)),
+                ("agent", text(common::AGENT)),
+                ("event", text(AAPL)),
                 ("user", text("user-1")),
-                ("step_up", text("assertion-1")),
+                ("requested_by", text("user-1")),
+                ("independent_required", mandate_canon::Value::Bool(false)),
+                ("request", mandate_canon::Value::Null),
+                ("submitted_at", int(20_000)),
+                (
+                    "step_up",
+                    object(&[
+                        ("assertion_id", text("assertion-1")),
+                        ("authenticated_at", int(20_000)),
+                        ("method", text("cli_confirm")),
+                    ]),
+                ),
             ],
             20_000,
         ),
@@ -2462,8 +2489,8 @@ fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
         .expect("the copied acknowledgment folds");
 
     assert!(
-        !shell.state.mismatched().contains(&instrument(AAPL)),
-        "resuming needs an owner acknowledgment with step-up evidence, and only that (§11)"
+        shell.state.mismatched().contains(&instrument(AAPL)),
+        "no acknowledgment clears a mismatch until a spec names how (E7-4b)"
     );
 }
 
@@ -3644,20 +3671,20 @@ fn a_second_brackets_end_leaves_the_first_brackets_interval_bounded() {
 
     let early = shell.run(Input::Tick(clock(69)), &ports);
     assert!(
-        !early.notifications.contains(&"unprotected_interval_limit"),
+        !early.notifications.contains(&"protection"),
         "59 seconds after the first partial fill is inside the bound: {:?}",
         early.notifications
     );
     let bound = shell.run(Input::Tick(clock(70)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the first bracket's 6 shares have been unprotected since 10, so at 70 the owner is \
          alerted; the second bracket's end at 30 must not have closed that interval (§5.4): {:?}",
         bound.notifications
     );
     let after = shell.run(Input::Tick(clock(85)), &ports);
     assert!(
-        !after.notifications.contains(&"unprotected_interval_limit"),
+        !after.notifications.contains(&"protection"),
         "the first interval is alerted once, and the second ended at 30, so 65 seconds after the \
          second partial fill nothing alerts again: {:?}",
         after.notifications
@@ -3775,13 +3802,13 @@ fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_b
 
     let early = shell.run(Input::Tick(clock(69)), &ports);
     assert!(
-        !early.notifications.contains(&"unprotected_interval_limit"),
+        !early.notifications.contains(&"protection"),
         "59 seconds after the first partial fill is inside the bound: {:?}",
         early.notifications
     );
     let bound = shell.run(Input::Tick(clock(70)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the first bracket's 6 shares have been unprotected since 10, so at 70 the owner is \
          alerted; the acknowledgment of the second bracket's OCO at 35 must not have closed that \
          interval (§5.4): {:?}",
@@ -3789,7 +3816,7 @@ fn an_acknowledged_oco_for_a_second_bracket_leaves_the_first_brackets_interval_b
     );
     let after = shell.run(Input::Tick(clock(85)), &ports);
     assert!(
-        !after.notifications.contains(&"unprotected_interval_limit"),
+        !after.notifications.contains(&"protection"),
         "the first interval is alerted once, and the second ended at its acknowledgment, so 65 \
          seconds after the second partial fill nothing alerts again: {:?}",
         after.notifications
@@ -3863,13 +3890,13 @@ fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
 
     let early = shell.run(Input::Tick(clock(69)), &ports);
     assert!(
-        !early.notifications.contains(&"unprotected_interval_limit"),
+        !early.notifications.contains(&"protection"),
         "59 seconds after the first partial fill is inside the bound: {:?}",
         early.notifications
     );
     let bound = shell.run(Input::Tick(clock(70)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the first bracket's 6 shares have been unprotected since 10, so at 70 the owner is \
          alerted; the third bracket's start at 32 ended the awaited second interval, not the first \
          (§5.4): {:?}",
@@ -3877,7 +3904,7 @@ fn a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets() {
     );
     let after = shell.run(Input::Tick(clock(85)), &ports);
     assert!(
-        !after.notifications.contains(&"unprotected_interval_limit"),
+        !after.notifications.contains(&"protection"),
         "the first interval is alerted once, the second ended at 32 and the third is 53 seconds \
          old, so nothing alerts again: {:?}",
         after.notifications
@@ -3955,7 +3982,7 @@ fn a_new_start_ends_the_awaited_middle_interval_only() {
         shell
             .run(Input::Tick(clock(at)), &ports)
             .notifications
-            .contains(&"unprotected_interval_limit")
+            .contains(&"protection")
     };
     assert!(!alerted(&mut shell, 69), "nothing is 60 seconds old at 69");
     assert!(
@@ -4088,7 +4115,7 @@ fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
         ran.draft_types()
     );
     assert!(
-        ran.notifications.contains(&"protection_expiring"),
+        ran.notifications.contains(&"protection"),
         "and the owner alerted: {:?}",
         ran.notifications
     );
@@ -4133,7 +4160,7 @@ fn trading_day(
 
 /// Whether `ran` journals `expiry_unreplaceable` or alerts `protection_expiring`.
 fn alerts_the_kept_oco(ran: &common::Ran) -> bool {
-    ran.notifications.contains(&"protection_expiring")
+    ran.notifications.contains(&"protection")
         || ran.drafts.iter().any(|d| {
             d.event_type == "ProtectionChanged"
                 && d.payload
@@ -5731,7 +5758,7 @@ fn a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishe
         confirmed.draft_types()
     );
     assert!(
-        confirmed.notifications.contains(&"exit_unpriced"),
+        confirmed.notifications.contains(&"exit_stalled"),
         "{:?}",
         confirmed.notifications
     );
@@ -6087,7 +6114,7 @@ fn a_broker_id_fill_failing_its_orders_checks_stays_external() {
         assert_eq!(
             ran.draft("FillApplied")
                 .and_then(|applied| applied.payload.get("client_order_id")),
-            None,
+            Some(&mandate_canon::Value::Null),
             "{case}"
         );
         assert!(
@@ -6151,7 +6178,7 @@ fn a_fill_whose_broker_id_names_no_one_order_stays_external() {
         assert_eq!(
             ran.draft("FillApplied")
                 .and_then(|applied| applied.payload.get("client_order_id")),
-            None,
+            Some(&mandate_canon::Value::Null),
             "two orders: {two_orders}"
         );
         assert_eq!(
@@ -6534,7 +6561,7 @@ fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
         .collect();
     assert_eq!(reasons, ["released_to_owner"], "{:?}", sent.draft_types());
     assert!(
-        sent.notifications.contains(&"exit_released"),
+        sent.notifications.contains(&"exit_stalled"),
         "the owner is told the switch has nothing left to sell there: {:?}",
         sent.notifications
     );
@@ -6680,7 +6707,7 @@ fn unpriced_alerts(ran: &common::Ran) -> (usize, usize) {
     let alerts = ran
         .notifications
         .iter()
-        .filter(|key| **key == "exit_unpriced")
+        .filter(|key| **key == "exit_stalled")
         .count();
     (records, alerts)
 }
@@ -7739,7 +7766,7 @@ fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
     );
     assert!(
         actions(&bound).iter().any(|a| a == "interval_limit")
-            && bound.notifications.contains(&"unprotected_interval_limit"),
+            && bound.notifications.contains(&"protection"),
         "the bound journals the interval and alerts the owner: {:?} {:?}",
         actions(&bound),
         bound.notifications
@@ -11017,9 +11044,9 @@ fn an_alert_carries_only_opaque_ids() {
     assert!(!alerts.is_empty(), "an unmapped status alerts the owner");
     for alert in alerts {
         assert!(
-            !alert.message_key.contains(AAPL) && !alert.message_key.contains("150"),
+            !alert.kind.key().contains(AAPL) && !alert.kind.key().contains("150"),
             "a notification carries an opaque id and a message key only (AGENTS.md rule 6): {}",
-            alert.message_key
+            alert.kind.key()
         );
     }
 }
@@ -11305,7 +11332,7 @@ fn a_parked_night_alerts_the_owner_exactly_once() {
         notes[0].subject_event, park.event_id,
         "the alert names the park's own record"
     );
-    assert_eq!(notes[0].message_key, "session_closed");
+    assert_eq!(notes[0].kind.key(), "exit_stalled");
     assert_eq!(
         at_the_open(&mut shell, &ports),
         vec![(format!("{rung}-l1"), true)],
@@ -11326,7 +11353,7 @@ fn a_restart_in_a_parked_night_alerts_nothing_more() {
     let (shell, rung, parked) = parked_in_the_night(&ports);
     assert_eq!(
         parked.notifications,
-        vec!["session_closed"],
+        vec!["exit_stalled"],
         "the park alerts once, when it parks"
     );
     let (mut restarted, started) = shell.restart(&ports);

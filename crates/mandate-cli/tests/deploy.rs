@@ -26,7 +26,7 @@ type Store = BTreeMap<Digest, Vec<u8>>;
 
 const NOW: i64 = 1_790_000_000;
 const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
-const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"SPY"}"#;
+const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
 const MODEL: &str = r#"{"admits_instruments":false,"content_hash":"sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}"#;
 const SNAPSHOT: &str = r#"{"admits_instruments":null,"content_hash":"@H","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}"#;
 const SEEDED: &str = r#"{"actor":{"build":null,"id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"@I","event_time":"2026-10-08T13:00:00.000000000Z","event_type":"@T","payload":@P,"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws1"}"#;
@@ -564,4 +564,59 @@ fn a_store_that_fails_commits_nothing() {
         "{result:?}"
     );
     assert_eq!(world.appends(), before, "nothing appended");
+}
+
+/// The `step_up` member a version 3 `AgentDeployed` or `MandateConfirmed` carries (journal spec
+/// v0.84 §9.9 and §9.24).
+const STEP_UP: &str = r#""step_up":{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-08T12:59:57.000000000Z","method":"passkey"}"#;
+
+/// Journal spec v0.84, DEC-2131 item 4: a version 3 `MandateConfirmed` confirms its version as its
+/// version 2 does, so the deployment commits the same event; and a version 3 `AgentDeployed` is
+/// the agent's active deployment as its version 2 is, so a re-run finds it and commits nothing.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let version = reference(MANDATE);
+    let paths: Vec<String> = PATHS
+        .split_whitespace()
+        .map(|p| format!(r#""/{p}""#))
+        .collect();
+    let confirmed = format!(
+        r#"{{"agent_id":null,"base_version":null,"confirmed_paths":[{}],"mandate_version":"{version}","record_ref":"sha256:{}""#,
+        paths.join(","),
+        "7".repeat(64)
+    );
+    let deployed = format!(
+        r#"{{"agent_id":"{OTHER_AGENT}","mandate_version":"{version}","record_ref":"sha256:{}","connection_id":"conn_alpaca_paper_01""#,
+        "6".repeat(64)
+    );
+    let read = |schema_version: u64, trailing: &str| {
+        let mut world = World::new();
+        world.run(Created("v1")).unwrap();
+        world.seed_at(
+            "MandateConfirmed",
+            &format!("{confirmed}{trailing}}}"),
+            schema_version,
+        );
+        let first = world.run(Deploy(AGENT, "v1", None));
+        world.seed_at(
+            "AgentDeployed",
+            &format!("{deployed}{trailing}}}"),
+            schema_version,
+        );
+        let seeded = world.rows().last().map(|r| (r.event_id.clone(), r.seq));
+        let before = world.appends();
+        let again = world.run(Deploy(OTHER_AGENT, "v1", None));
+        let found = again.map(|s| (s.event_id, s.seq));
+        assert_eq!(found, Ok(seeded.unwrap()), "the seeded deployment, found");
+        assert_eq!(world.appends(), before, "a re-run commits nothing");
+        let rows = world.rows();
+        let versions: Vec<u64> = rows.iter().map(|r| r.schema_version).collect();
+        (first, versions)
+    };
+    let (version_2, versions_2) = read(2, "");
+    let (version_3, versions_3) = read(3, &format!(",{STEP_UP}"));
+    assert!(version_2.is_ok(), "{version_2:?}");
+    assert_eq!(version_3, version_2);
+    assert_eq!(versions_3.iter().filter(|v| **v == 3).count(), 2);
+    assert_eq!(versions_2.iter().filter(|v| **v == 2).count(), 2);
 }

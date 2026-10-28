@@ -34,6 +34,7 @@
 #[cfg(test)]
 extern crate self as mandate_daemon;
 
+pub mod bars;
 pub mod cell;
 #[cfg(test)]
 #[allow(
@@ -50,7 +51,10 @@ pub mod deployment;
 pub mod fixture;
 pub mod launch;
 pub mod meter;
+pub mod models;
+pub mod production;
 pub mod recorded;
+pub mod remote;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -68,7 +72,7 @@ pub mod wake;
 pub mod worker;
 
 pub use runtime::{
-    Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
-    ResearchWorker, RuntimeProcess, Wiring,
+    Alert, ArtifactSink, Config, ContextUnread, FLATTEN_UNPLANNED, ModelsWiring, Refs,
+    ResearchParts, ResearchSource, ResearchWiring, ResearchWorker, RuntimeProcess, Wiring,
 };
 pub use wake::Wake;

@@ -144,6 +144,26 @@ fn members<T: DeserializeOwned + Debug>(objects: &[&Value], tag: Option<(&str, &
     assert_eq!(serde_names::<T>(probe), schema, "{objects:?}");
 }
 
+/// [`members`] for a shape that names `ahead` before its schema does ([DEC-2128] item 5, as
+/// [DEC-2126] item 5: the type takes an optional member in the tests change, and the schema follows
+/// in its own, which carries no code under ES-22). The shape must name each one whether or not the
+/// schema names it yet, and every other member exactly as its schema does. The change that lands
+/// after the schema empties the list, so the struct's members are checked exactly again.
+///
+/// [DEC-2126]: ../../../docs/project/decisions/DEC-2126.md
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+fn members_ahead<T: DeserializeOwned + Debug>(objects: &[&Value], ahead: &[&str]) {
+    let named = |o: &&Value| o["properties"].as_object().cloned();
+    let names = objects.iter().filter_map(named).flatten();
+    let mut schema: BTreeSet<String> = names.map(|(name, _)| name).collect();
+    schema.extend(ahead.iter().map(|member| (*member).to_owned()));
+    assert_eq!(
+        serde_names::<T>(json!({"no_such_member": 1})),
+        schema,
+        "{objects:?}"
+    );
+}
+
 #[test]
 fn every_struct_names_exactly_its_schemas_members() {
     let defs = &file!("workspace-api/envelope.schema.json")["$defs"];
@@ -166,15 +186,15 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<HoldRequest>(&[&schema!("hold-request")], None);
     members::<EndDelegationRequest>(&[&schema!("end-delegation-request")], None);
     members::<LiftHoldRequest>(&[&schema!("lift-hold-request")], None);
-    members::<ResumeRequest>(&[&schema!("resume-request")], None);
+    members_ahead::<ResumeRequest>(&[&schema!("resume-request")], &["step_up_assertion"]);
     members::<AcknowledgeRequest>(&[&schema!("acknowledge-request")], None);
     members::<OwnerRequest>(&[&schema!("owner-request")], None);
-    members::<ConfirmRequest>(&[&schema!("confirm-request")], None);
+    members_ahead::<ConfirmRequest>(&[&schema!("confirm-request")], &["step_up_assertion"]);
     let approval = schema!("approval-response-request");
     members::<ApprovalResponseRequest>(&[&approval], None);
     members::<DelegationChosen>(&[&approval["properties"]["delegation"]["oneOf"][0]], None);
     members::<DelegationPreviewRequest>(&[&schema!("delegation-preview-request")], None);
-    members::<StopRequest>(&[&schema!("stop-request")], None);
+    members_ahead::<StopRequest>(&[&schema!("stop-request")], &["step_up_assertion"]);
     let kill = schema!("kill-switch-request");
     members::<KillSwitchRequest>(&[&kill], None);
     let scope = &kill["properties"]["scope"];
@@ -226,6 +246,50 @@ fn nulls<T: DeserializeOwned + Debug>(objects: &[&Value]) {
     }
 }
 
+/// Members a request schema requires that its type still reads as optional, by the schema's stem:
+/// the schema lands before the change that serves it (ES-22), so for that one change the type is
+/// looser than its schema, and no route decodes the type until the server's change makes the member
+/// required and empties this list ([DEC-2144](../../../docs/project/decisions/DEC-2144.md) item 8).
+const TYPE_BEHIND_SCHEMA: [(&str, &str); 1] = [("acknowledge-request", "subject")];
+
+/// `schema` as its type reads it today: each [`TYPE_BEHIND_SCHEMA`] member of `stem` `null`-able
+/// and not required.
+fn behind(stem: &str, mut schema: Value) -> Value {
+    for (_, member) in TYPE_BEHIND_SCHEMA.iter().filter(|(s, _)| *s == stem) {
+        if let Some(required) = schema["required"].as_array_mut() {
+            required.retain(|name| name != member);
+        }
+        let node = schema["properties"][*member].take();
+        schema["properties"][*member] = json!({"oneOf": [node, {"type": "null"}]});
+    }
+    schema
+}
+
+/// Each [`TYPE_BEHIND_SCHEMA`] member is one its schema requires and its type still reads as
+/// optional, so the entry is removed in the change that makes the type require it.
+#[test]
+fn a_member_behind_its_schema_is_required_there_and_optional_in_its_type() {
+    assert_eq!(
+        TYPE_BEHIND_SCHEMA.len(),
+        1,
+        "each entry's decode check below names its type: add one for a new entry"
+    );
+    let schemas = [("acknowledge-request", schema!("acknowledge-request"))];
+    for (stem, member) in TYPE_BEHIND_SCHEMA {
+        let found = schemas.iter().find(|(s, _)| *s == stem);
+        let (_, schema) = found.expect("each listed stem's schema is read here");
+        let required = schema["required"].as_array().expect("required");
+        assert!(required.contains(&json!(member)), "{stem}: {member}");
+    }
+    let mut body = file!("workspace-api/examples/commands.acknowledge-request.json");
+    body.as_object_mut().expect("an object").remove("subject");
+    let read = decode::<AcknowledgeRequest>(body.to_string().as_bytes());
+    assert!(
+        read.is_ok(),
+        "acknowledge-request without subject: {read:?}"
+    );
+}
+
 #[test]
 fn every_member_is_null_able_and_optional_exactly_as_its_schema_says() {
     let envelope = &file!("workspace-api/envelope.schema.json")["$defs"]["Envelope"];
@@ -238,7 +302,8 @@ fn every_member_is_null_able_and_optional_exactly_as_its_schema_says() {
     nulls::<EndDelegationRequest>(&[&schema!("end-delegation-request")]);
     nulls::<LiftHoldRequest>(&[&schema!("lift-hold-request")]);
     nulls::<ResumeRequest>(&[&schema!("resume-request")]);
-    nulls::<AcknowledgeRequest>(&[&schema!("acknowledge-request")]);
+    let acknowledge = behind("acknowledge-request", schema!("acknowledge-request"));
+    nulls::<AcknowledgeRequest>(&[&acknowledge]);
     nulls::<OwnerRequest>(&[&schema!("owner-request")]);
     nulls::<ConfirmRequest>(&[&schema!("confirm-request")]);
     let approval = schema!("approval-response-request");
@@ -424,7 +489,45 @@ fn response<T: DeserializeOwned + Serialize + Validate + Debug>(cases: [Value; 3
 /// value: absent and `null` are one value for an optional `null`-able member, so the spelling may
 /// change. Its `.invalid` cases are refused.
 fn request<T: DeserializeOwned + Serialize + Validate + PartialEq + Debug>(cases: [Value; 3]) {
-    let (good, bad) = instances(cases);
+    request_behind::<T>("", cases);
+}
+
+/// [`request`], except that a `.invalid` case whose one change removes a [`TYPE_BEHIND_SCHEMA`]
+/// member of `stem`, or sets it `null`, is not asked of the type; a case that changes anything else
+/// as well still is.
+fn request_behind<T: DeserializeOwned + Serialize + Validate + PartialEq + Debug>(
+    stem: &str,
+    cases: [Value; 3],
+) {
+    let [base, valid, invalid] = cases;
+    let behind: Vec<&str> = TYPE_BEHIND_SCHEMA
+        .iter()
+        .filter(|(s, _)| *s == stem)
+        .map(|(_, member)| *member)
+        .collect();
+    let only_behind = |case: &Value| {
+        let removed = case["remove"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let set = case["set"]
+            .as_object()
+            .map(|set| set.iter().collect::<Vec<_>>());
+        let pointer = match (removed, set.as_deref().unwrap_or_default()) {
+            ([pointer], []) => pointer.as_str(),
+            ([], [(pointer, Value::Null)]) => Some(pointer.as_str()),
+            _ => None,
+        };
+        pointer.is_some_and(|pointer| behind.iter().any(|m| pointer == format!("/{m}")))
+    };
+    let kept: Vec<Value> = invalid
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|case| !only_behind(case))
+        .cloned()
+        .collect();
+    let (good, bad) = instances([base, valid, Value::Array(kept)]);
     assert!(good.len() > 1 && !bad.is_empty(), "cases to check");
     for instance in &good {
         let value = decode::<T>(instance.to_string().as_bytes());
@@ -458,7 +561,7 @@ fn the_plain_requests_match_their_examples() {
     request::<EndDelegationRequest>(cases!("end-delegation-request"));
     request::<LiftHoldRequest>(cases!("lift-hold-request"));
     request::<ResumeRequest>(cases!("resume-request"));
-    request::<AcknowledgeRequest>(cases!("acknowledge-request"));
+    request_behind::<AcknowledgeRequest>("acknowledge-request", cases!("acknowledge-request"));
     request::<OwnerRequest>(cases!("owner-request"));
     request::<StepUpChallengeRequest>(cases!("step-up-challenge-request"));
 }
