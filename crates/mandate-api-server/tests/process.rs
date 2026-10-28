@@ -672,3 +672,37 @@ fn the_real_money_mode_refuses_what_dec_2134_refuses() {
     );
     assert!(!text.contains(canary), "{text}");
 }
+
+/// DEC-2146 item 2: a `ci` or `dev` cell starts with the waiver `true`, and refuses at start a
+/// waiver of any other value, naming the setting. Staging, production and an unset tier are
+/// refused before any setting is read, as an unsigned build is (E21-35), so their refusal of the
+/// waiver is `tests/config.rs`'s `cool_off_waiver` cases, the function `main` calls.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_test_cell_starts_with_the_waiver_and_refuses_any_other_value() {
+    for tier in ["dev", "ci"] {
+        let (code, out) = refused(command(
+            &LOCAL,
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", tier),
+                ("MANDATE_API_PASSKEY_COOL_OFF_WAIVER", "yes"),
+            ],
+        ));
+        assert_eq!(code, Some(1), "{tier}: {out}");
+        assert!(
+            out.contains("MANDATE_API_PASSKEY_COOL_OFF_WAIVER"),
+            "{tier}: the refusal names the setting: {out}"
+        );
+        let (mut running, api, _) = start(&[
+            ("MANDATE_DEPLOYMENT_TIER", tier),
+            ("MANDATE_API_PASSKEY_COOL_OFF_WAIVER", "true"),
+        ]);
+        assert_eq!(get(api, "/v1/workspaces/ws_1/agents").status, 401, "{tier}");
+        terminate(&running.0);
+        assert_eq!(
+            wait(&mut running.0, Duration::from_secs(10)),
+            Some(0),
+            "{tier}"
+        );
+    }
+}
