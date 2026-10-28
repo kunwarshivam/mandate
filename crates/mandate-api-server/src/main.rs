@@ -343,6 +343,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             Arc::new(SystemClock),
         ),
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
+        folds: Arc::default(),
     };
     let api = spawn_listener(
         serve(
