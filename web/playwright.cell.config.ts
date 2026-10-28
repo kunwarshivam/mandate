@@ -22,6 +22,12 @@ const UPSTREAM = process.env.OWLHEAD_CELL_API_UPSTREAM ?? "";
 const SPEC = process.env.OWLHEAD_CELL_SPEC ?? "kill-switch.spec.ts";
 /** The whole run's bound; the trade loop waits on the runtime, the host's confirmation and a fill. */
 const TIMEOUT_MS = Number(process.env.OWLHEAD_CELL_TIMEOUT_MS ?? 90_000);
+/**
+ * Whether the driver started this cell waiving a first passkey's cool-off (DEC-2146): then, and only
+ * then, `next dev` builds web/ to try a passkey still in its cool-off and leave the verdict to the
+ * server (DEC-2411). This config is the one place that sets the flag; a test refuses any other.
+ */
+const COOL_OFF_WAIVED = process.env.OWLHEAD_CELL_COOL_OFF_WAIVED === "1";
 
 export default defineConfig({
   testDir: "e2e-cell",
@@ -43,6 +49,7 @@ export default defineConfig({
     },
     {
       command: `npx next dev --experimental-https --experimental-https-key ${KEY} --experimental-https-cert ${CERT} --hostname localhost --port 4317`,
+      env: { NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED: COOL_OFF_WAIVED ? "1" : "0" },
       url: ORIGIN,
       ignoreHTTPSErrors: true,
       reuseExistingServer: false,
