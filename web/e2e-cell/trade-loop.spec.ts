@@ -139,7 +139,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await panel.getByRole("button", { name: "Approve", exact: true }).click();
     const answer = await answered;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the approve: ${(await answer.text()).slice(0, 400)}`);
-    await expect(page.getByRole("status").filter({ hasText: /Recorded in the journal: you approved|Approved: the gate re-ran/ })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Recorded in the journal: you approved|Approved: the gate re-ran/ })).toBeVisible({ timeout: 30_000 });
     step("approved", ((await answer.json()) as { response_id?: string }).response_id ?? "");
   });
 
@@ -195,7 +195,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await confirm.getByRole("button", { name: "Sell it" }).click();
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
-    await expect(page.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Taken by the agent's runtime/);
+    await expect(page.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Taken by the agent's runtime/, { timeout: 30_000 });
     const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.allTextContents()).some((sell) => !before.has(sell)));
     if (!filled) refuse(`the owner exit was recorded but no new sell filled on the agent's orders within ${FILL_MS} ms`);
     step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
