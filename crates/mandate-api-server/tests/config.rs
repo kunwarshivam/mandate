@@ -7,9 +7,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use mandate_api_server::config::{
-    MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE, StartRefusal, authorize_page, check_bind,
-    check_database_url, check_environment, check_key_set_tier, read_session_key,
+    COOL_OFF_WAIVER, MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE, StartRefusal, authorize_page,
+    check_bind, check_database_url, check_environment, check_key_set_tier, cool_off_waiver,
+    read_session_key,
 };
+use mandate_api_server::methods::CoolOffWaiver;
 use mandate_connections::start::AuthorizePage;
 use mandate_release::startup::Tier;
 use std::ffi::OsStr;
@@ -503,4 +505,75 @@ fn a_release_build_refuses_any_set_page_in_every_tier() {
             );
         }
     }
+}
+
+/// DEC-2146 item 2: the waiver is exactly `true`, and only a `dev` or `ci` tier starts with it,
+/// each waiving as its own tier. Unset is no waiver, in every tier.
+#[test]
+fn a_waiver_of_true_starts_only_in_dev_and_ci_and_unset_waives_nothing() {
+    let on = Some(OsStr::new("true"));
+    assert_eq!(cool_off_waiver(Tier::Dev, on), Ok(Some(CoolOffWaiver::Dev)));
+    assert_eq!(cool_off_waiver(Tier::Ci, on), Ok(Some(CoolOffWaiver::Ci)));
+    for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
+        assert_eq!(cool_off_waiver(tier, None), Ok(None), "{tier:?} unset");
+    }
+}
+
+/// DEC-2146 item 2: staging, production, and a tier unset or unknown (which reads as production)
+/// refuse the waiver at start, naming the setting alone, so a misconfigured cell fails closed.
+#[test]
+fn a_waiver_outside_dev_and_ci_refuses_the_start() {
+    let refused = Err(StartRefusal::Setting {
+        name: COOL_OFF_WAIVER,
+    });
+    for setting in [
+        Some("staging"),
+        Some("production"),
+        None,
+        Some("qa"),
+        Some("CI"),
+    ] {
+        let tier = Tier::from_setting(setting);
+        assert_eq!(
+            cool_off_waiver(tier, Some(OsStr::new("true"))),
+            refused,
+            "tier setting {setting:?}"
+        );
+    }
+}
+
+/// DEC-2146 item 2: any value but exactly `true` refuses the start, in a test tier too, and a
+/// value that is not UTF-8 is still a value set.
+#[test]
+fn a_waiver_of_any_other_value_refuses_the_start_in_every_tier() {
+    let refused = Err(StartRefusal::Setting {
+        name: COOL_OFF_WAIVER,
+    });
+    let values = [
+        OsStr::new(""),
+        OsStr::new("false"),
+        OsStr::new("1"),
+        OsStr::new("yes"),
+        OsStr::new("TRUE"),
+        OsStr::new("True"),
+        OsStr::new(" true"),
+        OsStr::new("true\n"),
+        OsStr::from_bytes(b"tru\xffe"),
+    ];
+    for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
+        for value in values {
+            assert_eq!(
+                cool_off_waiver(tier, Some(value)),
+                refused,
+                "{value:?} in {tier:?}"
+            );
+        }
+    }
+}
+
+/// DEC-2146 item 2: the waiver's name holds no part DEC-978 item 2 refuses, so setting it never
+/// stops the server at the secret-name check before the waiver's own check is reached.
+#[test]
+fn the_waivers_name_passes_the_secret_name_check() {
+    assert_eq!(check_environment([(COOL_OFF_WAIVER, "true")]), Ok(()));
 }

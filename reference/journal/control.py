@@ -619,6 +619,16 @@ SCHEMAS[("ctl", "StepUpAsserted")] = rec(
     ("assertion", REF),
 )
 
+# §9.38 v0.112 (DEC-2146): a passkey step-up a `dev` or `ci` test cell counted inside its credential's
+# enrolment cool-off, appended immediately after its `StepUpAsserted` in one batch (rule 317, judged in
+# `cool_off_waivers.py` with stream rule 318).
+SCHEMAS[("ctl", "StepUpCoolOffWaived")] = rec(
+    ("challenge", ULID),
+    ("credential", CREDENTIAL_ID),
+    ("cool_off_ends", TS),
+    ("tier", one_of("dev", "ci")),
+)
+
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
 # stream's three, with `ConnectionEstablished` at version 2 below, and the executor's copies of the
 # establishment and a rotation on the account stream.
@@ -2261,6 +2271,10 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     if event_type == "StepUpAsserted":
         rule("252.cause", draft["causation_id"] is not None, "schema", "causation_id")
         rule("252.user", draft["actor"]["kind"] == "user", "schema", "actor.kind")
+    if event_type == "StepUpCoolOffWaived":
+        rule("316.cause", draft["causation_id"] is not None, "schema", "causation_id")
+        rule("316.user", draft["actor"]["kind"] == "user", "schema", "actor.kind")
+        rule("316.paper", draft["environment"] == "paper", "schema", "environment")
     if event_type == "MandateVersionCreated":
         paths = [(entry["path"] or "").encode() for entry in p["provenance"]]
         rule("17", ascending(paths), "non_canonical", "payload.provenance")

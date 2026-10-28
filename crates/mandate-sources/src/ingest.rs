@@ -146,6 +146,7 @@ fn news_draft(ctx: &IngestContext<'_>, item: &RawValue) -> Result<Draft, SourceE
         content: ContentHash::new(Digest::of(raw.as_bytes())),
         length_bytes: byte_length(raw.as_bytes())?,
         tags: tags(ctx, &symbols, knowledge_time)?,
+        tickers: symbols,
         body_group,
         filing: None,
         text: ItemText {
@@ -399,6 +400,7 @@ pub fn edgar_filing(
         content: ContentHash::new(Digest::of(document)),
         length_bytes: byte_length(document)?,
         tags: tags(ctx, &symbols, knowledge_time)?,
+        tickers: symbols,
         body_group: GroupKey(Digest::of_parts(&[
             b"filing\0",
             entry.accession.as_str().as_bytes(),

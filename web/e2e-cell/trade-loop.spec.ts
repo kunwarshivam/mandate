@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Page, expect, test } from "@playwright/test";
+import { type Locator, type Page, expect, test } from "@playwright/test";
 import { deferredCheckLabel } from "../src/lib/deferred-checks";
 
 /**
@@ -37,6 +37,23 @@ const FILL_MS = Number(process.env.OWLHEAD_CELL_FILL_MS ?? 120_000);
  * vectors so the spec cannot drift from it (DEC-2515 item 5). The driver runs this from `web/`.
  */
 const APPROVER_SENTENCE = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals.approver_sentence;
+
+/** The agent screen's fixed sentences for a section with nothing listed (`api-screens.tsx`'s `AgentActivity`), the only text a failure may quote from it. */
+const SECTION_STATES = ["Reading positions.", "This agent holds nothing.", "Not reported.", "Reading the journal.", "Not available to your role.", "Journal not reported.", "Nothing recorded yet."];
+
+/**
+ * Whether `locator`'s text comes to match `phrase` within `ms`, read here rather than by `expect`, so
+ * a miss prints nothing the page held: the exit's screens name the agent, the instrument and the
+ * quantity, and a failed run's log is uploaded (`AGENTS.md`, no positions in logs).
+ */
+async function comesToSay(locator: Locator, phrase: RegExp, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (phrase.test((await locator.first().textContent({ timeout: 1_000 }).catch(() => null)) ?? "")) return true;
+    await locator.page().waitForTimeout(250);
+  }
+  return false;
+}
 
 const reached: Record<string, string> = {};
 const write = (extra: Record<string, string> = {}) => writeFileSync(RESULT, JSON.stringify({ ...reached, ...extra }));
@@ -160,12 +177,16 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     });
     const held = await until(page, `/agents/${AGENT}`, 30_000, async () => (await positions.count()) > 0 && (await journal.getByRole("listitem").count()) > 0);
     if (!held) {
-      const said = async (title: string) => {
+      /** What a section shows, never what it lists: the uploaded failure carries no position or record (`AGENTS.md`, no positions in logs). */
+      const showed = async (title: string) => {
         const region = page.getByRole("region", { name: title, exact: true });
         if ((await region.count()) === 0) return "absent";
-        return ((await region.first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "unreadable").replace(/\s+/g, " ").slice(0, 240);
+        const listed = await region.first().getByRole("listitem").count();
+        if (listed > 0) return `${listed} listed`;
+        const text = (await region.first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "";
+        return SECTION_STATES.find((state) => text.includes(state)) ?? "an unrecognized state";
       };
-      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s, watched in place; positions: "${await said("This agent's positions")}"; journal: "${await said("Journal")}"; reads (status, route, ms): ${reads.slice(-6).join(", ") || "none"}`);
+      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s, watched in place; positions: ${await showed("This agent's positions")}; journal: ${await showed("Journal")}; reads (status, route, ms): ${reads.slice(-6).join(", ") || "none"}`);
     }
     step("position");
     step("journal", String(await journal.getByRole("listitem").count()));
@@ -191,12 +212,13 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await expect(exit).toBeVisible({ timeout: 30_000 });
     await exit.click();
     const confirm = own.getByRole("group", { name: /^Exit / });
-    await expect(confirm).toContainText("only participation caps pace it");
+    if (!(await comesToSay(confirm, /only participation caps pace it/, 15_000))) refuse("the owner exit's confirmation did not say that only participation caps pace it within 15 s");
     const sent = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/exits`);
     await confirm.getByRole("button", { name: "Sell it" }).click();
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
-    await expect(page.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Taken by the agent's runtime/, { timeout: 30_000 });
+    const exitStatus = page.getByRole("status", { name: /^Your exit from / });
+    if (!(await comesToSay(exitStatus, /Recorded in the journal: your exit|Taken by the agent's runtime/, 30_000))) refuse("the owner exit's status did not read recorded or taken within 30 s");
     const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.allTextContents()).some((sell) => !before.has(sell)));
     if (!filled) refuse(`the owner exit was recorded but no new sell filled on the agent's orders within ${FILL_MS} ms`);
     step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
