@@ -304,7 +304,7 @@ start without them (AGENTS.md rule 3).
 {{- $j := .root.Values.journal -}}
 {{- if .p.db_role }}
 - name: MANDATE_JOURNAL_DSN
-  value: {{ printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt" .p.db_role $j.host $j.port $j.database | quote }}
+  value: {{ include "mandate.journalDsn" (dict "role" .p.db_role "journal" $j) | quote }}
 - name: PGPASSFILE
   value: /run/pg/pgpass
 {{- end }}
@@ -1006,4 +1006,11 @@ metadata:
     {{- include "mandate.labels" . | nindent 4 }}
 data:
   registry.json: {{ .root.Values.modelGateway.registry | quote }}
+{{- end -}}
+
+{{- /* A process's journal DSN, as its own role: TLS verified against the journal's CA, and the
+`journal` schema as its search path in the connection's options (DEC-2083), so a role added after
+the journal's bootstrap, which never had roles.sql's per-role search path, reads the same tables. */ -}}
+{{- define "mandate.journalDsn" -}}
+{{- printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt&options=-c%%20search_path%%3Djournal" .role .journal.host .journal.port .journal.database -}}
 {{- end -}}
