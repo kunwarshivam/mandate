@@ -153,15 +153,28 @@ const bytesOf = (buffer: unknown): Uint8Array | null =>
       : null;
 
 /**
+ * Whether this build lets a passkey in its cool-off be tried (DEC-2411): only `"1"`, which only the
+ * local cell's Playwright config sets, and only when the cell waives a first passkey's cool-off
+ * (DEC-2146). It drops this page's own pre-check and nothing else: the server stays the only judge,
+ * and refuses the passkey everywhere it does not waive the cool-off (`step_up_missing`).
+ */
+export function coolOffWaivedFrom(value: string | undefined): boolean {
+  return value === "1";
+}
+
+const COOL_OFF_WAIVED = coolOffWaivedFrom(process.env.NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED);
+
+/**
  * The member's passkeys that can sign now, by this page's clock (which runs on the server's): none
  * without WebAuthn or a passkey, and none while every one is in its cool-off (DEC-2108 item 5). A
- * passkey still cooling off is never offered, so the authenticator cannot pick one the server refuses.
+ * passkey still cooling off is never offered, so the authenticator cannot pick one the server refuses,
+ * except in a build that tries one, `waived` (DEC-2411), which leaves the verdict to the server.
  */
-export function usablePasskeys(passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp): { ok: true; value: Passkey[] } | { ok: false; reason: AssertionRefusal } {
+export function usablePasskeys(passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp, waived = COOL_OFF_WAIVED): { ok: true; value: Passkey[] } | { ok: false; reason: AssertionRefusal } {
   if (!authenticator) return { ok: false, reason: "passkey_unavailable" };
   if (passkeys.length === 0) return { ok: false, reason: "no_passkey" };
   const at = instant(now);
-  const usable = passkeys.filter((p) => p.cool_off_ends === null || instant(p.cool_off_ends) <= at);
+  const usable = passkeys.filter((p) => waived || p.cool_off_ends === null || instant(p.cool_off_ends) <= at);
   return usable.length > 0 ? { ok: true, value: usable } : { ok: false, reason: "passkey_cooling_off" };
 }
 
