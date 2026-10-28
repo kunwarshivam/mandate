@@ -26,12 +26,77 @@ pub struct Evaluated {
 }
 
 /// The streams the process read for a tick's evaluation: the workspace's control rows, `None` when
-/// they do not read, and the deployment's agent rows. A research deployment's working universe is
-/// read from them (DEC-2827); a pinned one's models need neither.
+/// they do not read, and the deployment's agent stream's thesis records ([`THESES`]), in stream
+/// order, the only records of it a port reads. A research deployment's working universe is read
+/// from them (DEC-2827); a pinned one's models need neither.
 #[derive(Debug, Clone, Copy)]
 pub struct Streams<'a> {
     pub control: Option<&'a [StoredEvent]>,
     pub agent: &'a [StoredEvent],
+}
+
+/// The agent stream's thesis records (mandate spec §8.5, §8.6): what [`Streams::agent`] holds, and
+/// all the process keeps of that stream's records (DEC-2852 item 4).
+pub const THESES: [&str; 3] = ["ThesisProposed", "ThesisRevised", "ThesisInvalidated"];
+
+/// Whether `row` is one of the agent stream's thesis records.
+#[must_use]
+pub fn thesis(row: &StoredEvent) -> bool {
+    THESES.contains(&row.event_type.as_str())
+}
+
+/// The outputs the agent stream journaled, folded a record at a time as the process reads them
+/// (DEC-2852 item 4): what [`fresh`] reads of the whole stream, so a pass reads only what was
+/// appended. A `ModelOutputRecorded` that does not read makes it unreadable from then on, as it
+/// makes every later read of the whole stream.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Outputs {
+    journaled: Vec<OutputKey>,
+    unreadable: bool,
+}
+
+impl Outputs {
+    /// The outputs `agent`, the agent stream's records in order, journaled.
+    #[must_use]
+    pub fn of(agent: &[StoredEvent]) -> Self {
+        let mut outputs = Self::default();
+        for row in agent {
+            outputs.fold(row);
+        }
+        outputs
+    }
+
+    /// Folds `row`, the agent stream's record after the last folded.
+    pub fn fold(&mut self, row: &StoredEvent) {
+        if row.event_type != "ModelOutputRecorded" {
+            return;
+        }
+        match journaled_key(row) {
+            Ok(key) => self.journaled.push(key),
+            Err(ModelsError::Unreadable) => self.unreadable = true,
+        }
+    }
+
+    /// The evaluations of `evaluated` the folded records hold no `ModelOutputRecorded` for, in the
+    /// order given, each such key kept once.
+    ///
+    /// # Errors
+    /// [`ModelsError::Unreadable`] once a folded record's payload did not read.
+    pub fn fresh(&self, evaluated: Vec<Evaluated>) -> Result<Vec<Evaluated>, ModelsError> {
+        if self.unreadable {
+            return Err(ModelsError::Unreadable);
+        }
+        let mut kept = self.journaled.clone();
+        Ok(evaluated
+            .into_iter()
+            .filter(|e| {
+                let key = key_of(&e.output);
+                let new = !kept.contains(&key);
+                kept.push(key);
+                new
+            })
+            .collect())
+    }
 }
 
 /// The model host as the process reads it: every pinned quant model's evaluation at the tick
@@ -58,21 +123,7 @@ pub fn fresh(
     agent: &[StoredEvent],
     evaluated: Vec<Evaluated>,
 ) -> Result<Vec<Evaluated>, ModelsError> {
-    let journaled = agent
-        .iter()
-        .filter(|row| row.event_type == "ModelOutputRecorded")
-        .map(journaled_key)
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut kept = journaled;
-    Ok(evaluated
-        .into_iter()
-        .filter(|e| {
-            let key = key_of(&e.output);
-            let new = !kept.contains(&key);
-            kept.push(key);
-            new
-        })
-        .collect())
+    Outputs::of(agent).fresh(evaluated)
 }
 
 /// What makes two outputs the same record: model, version, instrument, and `as_of` as the

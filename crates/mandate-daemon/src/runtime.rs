@@ -23,7 +23,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::models::{Models, Streams, fresh, inputs};
+use crate::models::{Models, Outputs, Streams, inputs, thesis};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -111,12 +111,11 @@ enum Account {
 }
 
 /// One stream as far as the process has read it (DEC-2852): the seq and hash of the last record,
-/// so the next read asks the store only for what follows, and, where a port reads the whole
-/// stream, every record read.
-#[derive(Default)]
+/// so the next read asks the store only for what follows, and every record read that `keep`
+/// keeps for the ports that read them.
 struct Tail {
     head: Option<(u64, Digest)>,
-    keep: bool,
+    keep: fn(&StoredEvent) -> bool,
     rows: Vec<StoredEvent>,
     /// Whether the next read reads the stream again from its first record, so the store verifies
     /// the whole chain again and the held head is checked against it (DEC-2852 item 6).
@@ -127,11 +126,20 @@ struct Tail {
     broken: bool,
 }
 
+impl Default for Tail {
+    fn default() -> Self {
+        Self::keeping(|_| false)
+    }
+}
+
 impl Tail {
-    fn kept() -> Self {
+    fn keeping(keep: fn(&StoredEvent) -> bool) -> Self {
         Self {
-            keep: true,
-            ..Self::default()
+            head: None,
+            keep,
+            rows: Vec::new(),
+            due: false,
+            broken: false,
         }
     }
 
@@ -174,9 +182,9 @@ impl Tail {
         if let Some(last) = since.last() {
             self.head = Some((last.seq, last.hash));
         }
-        if self.keep {
-            self.rows.extend(since.iter().cloned());
-        }
+        let keep = self.keep;
+        self.rows
+            .extend(since.iter().filter(|row| keep(row)).cloned());
         since
     }
 }
@@ -186,14 +194,16 @@ impl Tail {
 const REVERIFY_S: i64 = 60;
 
 /// The streams the process reads at every pass, each read only past the head it was last read to
-/// (DEC-2852): the control and agent streams kept whole for the ports that read them so, the
-/// account stream kept as nothing but its head, and the clock stream as its latest tick. The
+/// (DEC-2852): the control stream kept whole for the ports that read it so, the agent stream as its
+/// thesis records and the outputs it journaled (item 4), the account stream kept as nothing but its
+/// head, and the clock stream as its latest tick. The
 /// clock is read again from its first record on the pass the production fold first follows the
 /// account, so the fold folds every one of its records in order, as a fold of the whole stream
 /// does, without the process keeping them while it waits.
 struct Tails {
     control: Tail,
     agent: Tail,
+    outputs: Outputs,
     account: Tail,
     clock: Tail,
     latest_tick: Option<UtcNanos>,
@@ -231,8 +241,9 @@ impl Tails {
 impl Default for Tails {
     fn default() -> Self {
         Self {
-            control: Tail::kept(),
-            agent: Tail::kept(),
+            control: Tail::keeping(|_| true),
+            agent: Tail::keeping(thesis),
+            outputs: Outputs::default(),
             account: Tail::default(),
             clock: Tail::default(),
             latest_tick: None,
@@ -267,7 +278,7 @@ pub struct RuntimeProcess<S> {
     /// The deployment's research, when its wiring has one (DEC-2208).
     research: Option<research::Research>,
     /// The latest tick the models were evaluated at in this process; a restart evaluates once
-    /// more, and [`fresh`] keeps it from recording an output twice.
+    /// more, and [`Outputs::fresh`] keeps it from recording an output twice.
     models_at: Option<i64>,
     /// The models' inputs of the latest evaluation not yet handed, in order, ahead of its tick.
     models_queue: VecDeque<Input>,
@@ -642,19 +653,19 @@ impl<S: Store> RuntimeProcess<S> {
     /// The inputs the pinned models' new evaluations at `at` hand, in order, each evaluation's
     /// closes stored first; nothing when the agent stream or its outputs do not read.
     fn models_inputs(&mut self, at: RiskClock) -> Vec<Input> {
-        let Some(rows) = self.agent_rows() else {
+        if !self.read_agent() {
             return Vec::new();
-        };
+        }
         let control = self.control_rows();
         let streams = Streams {
             control: control.as_deref(),
-            agent: &rows,
+            agent: &self.tails.agent.rows,
         };
         let evaluated = match &self.wiring.models {
             Some(wired) => wired.models.evaluate(at, streams),
             None => Vec::new(),
         };
-        let Ok(new) = fresh(&rows, evaluated) else {
+        let Ok(new) = self.tails.outputs.fresh(evaluated) else {
             return Vec::new();
         };
         let mut queued = Vec::new();
@@ -696,13 +707,10 @@ impl<S: Store> RuntimeProcess<S> {
         if facts.working_universe().is_none() {
             return;
         }
-        let rows = self.agent_rows();
-        self.wiring.view.working_universe = match rows {
-            Some(rows) => {
-                facts.feed(&rows);
-                facts.working_universe().unwrap_or_default()
-            }
-            None => BTreeSet::new(),
+        self.wiring.view.working_universe = if self.read_agent() {
+            facts.working_universe().unwrap_or_default()
+        } else {
+            BTreeSet::new()
         };
     }
 
@@ -713,11 +721,25 @@ impl<S: Store> RuntimeProcess<S> {
         Some(self.tails.control.rows.clone())
     }
 
-    /// The agent stream's records, read only past the head it was last read to (DEC-2852).
-    fn agent_rows(&mut self) -> Option<Vec<StoredEvent>> {
-        let agent = self.agent.clone()?;
-        self.tails.agent.read(&self.store, &agent)?;
-        Some(self.tails.agent.rows.clone())
+    /// Reads the agent stream past the head it was last read to, and folds what follows into the
+    /// outputs it journaled, its kept thesis records, and, for an unpinned mandate, the production
+    /// fold, which takes each record once (DEC-2852 item 4); whether it read.
+    fn read_agent(&mut self) -> bool {
+        let Some(agent) = self.agent.clone() else {
+            return false;
+        };
+        let Some(rows) = self.tails.agent.read(&self.store, &agent) else {
+            return false;
+        };
+        for row in &rows {
+            self.tails.outputs.fold(row);
+        }
+        if let Some(facts) = &self.wiring.facts
+            && facts.working_universe().is_some()
+        {
+            facts.feed(&rows);
+        }
+        true
     }
 
     /// Feeds `rows` to the production ports' fold, which takes each row once (DEC-2378 S2).
