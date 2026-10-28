@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/agent-mandate-versions.schema.json",
+  "description": "GET /agents/{id}/mandate-versions (§4.7, DEC-2147): the agent's mandate version history, oldest first, and the version in effect. The first entry is the version its AgentDeployed names; each later one is a MandateConfirmed on the control stream that names the agent (versions 2 and 3), in stream order. in_effect is the deployed version, replaced by the new_version of each MandateVersionApplied with result applied for the agent on the account stream of the connection the deployed document names; null when that account stream is not found (account_ref null), since then it cannot be told, and null once AgentStopped names the agent (stopped_at). Read-only: the route writes nothing. as_of names the control stream and, when read, the account stream.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "agent_id",
+    "account_ref",
+    "in_effect",
+    "stopped_at",
+    "versions"
+  ],
+  "properties": {
+    "agent_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "account_ref": {
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "in_effect": {
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stopped_at": {
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "versions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Version"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Version": {
+      "description": "One entry of the history: the deployment, or a later confirmation for the agent.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Deployed"
+        },
+        {
+          "$ref": "#/$defs/Confirmed"
+        }
+      ]
+    },
+    "Deployed": {
+      "description": "The version AgentDeployed names. It has no base, so its classification is first_version: no earlier version bounds it (mandate spec §9.2; the confirmation screen showed it as risk_increasing, DEC-2101 item 4). created_at is the first MandateVersionCreated naming the version; confirmed_at and confirmation_id the last MandateConfirmed with no agent naming it before the deployment; each null when the control stream holds none. deployed_at is the AgentDeployed's recorded_at. A deployment is not applied by MandateVersionApplied, so application is null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mandate_version",
+        "base_version",
+        "classification",
+        "created_at",
+        "confirmed_at",
+        "confirmation_id",
+        "deployed_at",
+        "application"
+      ],
+      "properties": {
+        "mandate_version": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "base_version": {
+          "type": "null"
+        },
+        "classification": {
+          "const": "first_version"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmed_at": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmation_id": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/EventId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deployed_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "application": {
+          "type": "null"
+        }
+      }
+    },
+    "Confirmed": {
+      "description": "A later version: a MandateConfirmed naming the agent, with the base_version it replaces. classification is mandate spec §9.2's verdict of base_version to mandate_version, computed by the server from the two stored documents, as the confirm computes it (§5.1); null when the store cannot give either document or they do not classify, never read as reducing or neutral. confirmed_at and confirmation_id are the MandateConfirmed's. application is the first MandateVersionApplied for the agent on the account stream whose causation_id is confirmation_id, or null while none is (not yet applied, or the account stream not found). A later version is never deployed, so deployed_at is null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mandate_version",
+        "base_version",
+        "classification",
+        "created_at",
+        "confirmed_at",
+        "confirmation_id",
+        "deployed_at",
+        "application"
+      ],
+      "properties": {
+        "mandate_version": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "base_version": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "classification": {
+          "anyOf": [
+            {
+              "enum": [
+                "risk_increasing",
+                "risk_reducing",
+                "neutral"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmed_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "confirmation_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "deployed_at": {
+          "type": "null"
+        },
+        "application": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Application"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Application": {
+      "description": "The executor's MandateVersionApplied (journal spec §9.3): its result, its reason when rejected, and its recorded_at.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result",
+            "reason",
+            "recorded_at"
+          ],
+          "properties": {
+            "result": {
+              "const": "applied"
+            },
+            "reason": {
+              "type": "null"
+            },
+            "recorded_at": {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result",
+            "reason",
+            "recorded_at"
+          ],
+          "properties": {
+            "result": {
+              "const": "rejected"
+            },
+            "reason": {
+              "enum": [
+                "increase_blocked_while_latched",
+                "equity_below_exposure",
+                "would_trigger_limit",
+                "not_loosening",
+                "waiting_period",
+                "still_below_new_floor"
+              ]
+            },
+            "recorded_at": {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
