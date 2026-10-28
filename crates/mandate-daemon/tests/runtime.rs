@@ -1309,10 +1309,9 @@ fn a_tick_records_each_new_model_output_once_after_its_observation() {
         Some(ids(control)),
         "the host is handed the control rows (DEC-2827)"
     );
-    let agent = ids(agent_rows(&rig));
     assert!(
-        !handed_agent.is_empty() && agent.starts_with(&handed_agent),
-        "the host is handed the agent rows read for the tick: {handed_agent:?}"
+        handed_agent.is_empty() && !agent_rows(&rig).is_empty(),
+        "the host is handed the agent stream's thesis records alone, here none (DEC-2852 item 4)"
     );
     let (observed, output) = (
         positions(&rig, "ObservationRecorded"),
@@ -3349,7 +3348,7 @@ fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
     let mut process = RuntimeProcess::start(
         following.clone(),
         Wiring {
-            facts: Some(mandate_daemon::production::Facts::new(CLOCK, AGENT)),
+            facts: Some(unpinned()),
             ..wiring()
         },
         &config(),
@@ -3364,6 +3363,13 @@ fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
         let read = following.handed.get() - before;
         assert_read(read, rechecks(1, second), &following, second);
     }
+}
+
+/// The production fold of an unpinned mandate, which reads the agent stream at every pass.
+fn unpinned() -> mandate_daemon::production::Facts {
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    facts
 }
 
 /// Whether the pass at `NOW + second` reads every stream again from its first record, the
@@ -3567,4 +3573,105 @@ fn a_check_that_will_not_read_reads_nothing_past_the_head_until_it_does() {
         "pass 72 read {starts:?}"
     );
     assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+fn modelled_following(
+    following: &Following,
+    host: &Host,
+    closes: &Closes,
+) -> RuntimeProcess<Following> {
+    RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    )
+}
+
+/// DEC-2852 item 4: over a long run read past the head, with a check every minute and a restart,
+/// each distinct output the host answers is recorded once and no other, as a fold of the whole
+/// agent stream would record it: the journaled outputs are folded a record at a time. The oracle
+/// counts the agent stream's own records.
+#[test]
+fn a_long_run_records_each_output_once_across_checks_and_a_restart() {
+    let following = Following::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled_following(&following, &host, &closes);
+    let mut answered = BTreeSet::new();
+    for n in 1..=200 {
+        if n % 50 == 1 {
+            let as_of = NOW - 4 * 3_600 + (n / 50) * 3_600;
+            *host.answer.borrow_mut() = vec![daily(as_of)];
+            answered.insert(as_of);
+        }
+        if n == 120 {
+            process = modelled_following(&following, &host, &closes);
+        }
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert_eq!(answered.len(), 4);
+    assert_eq!(count(&following.rig, "ModelOutputRecorded"), answered.len());
+    assert_eq!(count(&following.rig, "ObservationRecorded"), answered.len());
+}
+
+/// DEC-2852 item 4: the host is handed the agent stream's thesis records alone, the only records of
+/// it a port reads, and the only ones the process keeps.
+#[test]
+fn the_host_is_handed_the_agent_streams_thesis_records_alone() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    let laid = row(AGENT_STREAM, 90, "ThesisProposed", "runtime", "{}");
+    rig.agent_extra.borrow_mut().push(laid.clone());
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    let handed = host.handed.borrow().last().cloned().map(|(_, agent)| agent);
+    assert_eq!(handed, Some(vec![laid.event_id]));
+    assert!(agent_rows(&rig).len() > 1);
+}
+
+/// DEC-2856 item 3: an unpinned mandate's thesis that the process read before the control stream
+/// named the account still reaches the production fold once it follows, so the working universe
+/// names its instrument; a fold fed only what followed its head would never take it.
+#[test]
+fn a_thesis_read_before_the_account_is_named_reaches_the_fold_once_it_follows() {
+    let following = Following::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(facts.clone()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    thesis_on(
+        &following.rig,
+        ("01J8Z3MTHE5000000000000001", "01J8Z3MTHE5000000000000002"),
+        RESEARCH_SPY,
+        (&at(NOW - 60).to_string(), &at(NOW + 3_540).to_string()),
+    );
+    for n in 1..=3 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(!facts.following());
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    for n in 4..=6 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(facts.following());
+    assert_eq!(facts.working_instrument().as_deref(), Some(RESEARCH_SPY));
 }
