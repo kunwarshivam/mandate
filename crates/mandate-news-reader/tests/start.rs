@@ -197,3 +197,105 @@ fn a_ready_reader_holds_a_newer_epoch_and_folds_its_stream_at_start() {
         "the reader's start fenced the earlier writer: {fenced:?}"
     );
 }
+
+/// The workspace of `ready_workspace` with one stored item journaled by an earlier writer, at seq
+/// 2 after the stream's `StreamOpened`.
+fn workspace_with_one_item() -> (Journal, Shelf, Recorded) {
+    let (journal, shelf, transport) = ready_workspace();
+    let stream = StreamId::parse(&format!("news:{WS}")).unwrap();
+    let mut writer_store = journal.clone();
+    let epoch = writer_store.take_ownership(&stream).unwrap();
+    let writer = Writer {
+        workspace: WS.to_owned(),
+        environment: Environment::Paper,
+        epoch,
+    };
+    let records = [
+        Record::Opened,
+        Record::Stored(Stored {
+            source: "alpaca.news".to_owned(),
+            allowlist_version: 3,
+            item_id: "1:2026-10-26T12:00:00.000000000Z".to_owned(),
+            symbols: BTreeSet::from(["SPY".to_owned()]),
+            published_at: at("2026-10-26T12:00:00Z"),
+            knowledge_at: at("2026-10-26T14:30:00Z"),
+            item_ref: ArtifactRef::of(&1_u64.to_be_bytes()),
+            licensed: true,
+        }),
+    ];
+    let drafts = writer.drafts(0, t0(), &records).unwrap();
+    let appended = writer_store.append(&stream, 0, epoch, t0(), &drafts);
+    assert!(
+        matches!(appended, mandate_journal::AppendOutcome::Committed(_)),
+        "{appended:?}"
+    );
+    (journal, shelf, transport)
+}
+
+/// The stored item's body with its payload member `name` replaced by `value`, or removed.
+fn with_member(journal: &Journal, name: &str, value: Option<mandate_canon::Value>) -> Vec<u8> {
+    let row = journal.news().into_iter().find(|row| row.seq == 2).unwrap();
+    let mut body = mandate_canon::parse(&row.body).unwrap();
+    let mandate_canon::Value::Object(members) = &mut body else {
+        panic!("a body is an object")
+    };
+    let payload = members
+        .get_mut(&mandate_canon::Key::new("payload").unwrap())
+        .unwrap();
+    let mandate_canon::Value::Object(payload) = payload else {
+        panic!("a payload is an object")
+    };
+    let key = mandate_canon::Key::new(name).unwrap();
+    match value {
+        Some(value) => {
+            payload.insert(key, value);
+        }
+        None => {
+            payload.remove(&key);
+        }
+    }
+    mandate_canon::to_canonical(&body)
+}
+
+/// DEC-2281 item 3, as amended: a stored item the reader cannot read at start would leave its
+/// held ids or its last known time short, so it would store a held item again or ask from too far
+/// back. It stops the start instead: not ready with `news_stream_unreadable`, nothing fetched,
+/// nothing journaled, and a drain on stop. The journal holds the row unchanged.
+#[test]
+fn a_stored_item_it_cannot_read_at_start_stops_it_with_nothing_fetched_or_journaled() {
+    let (journal, shelf, transport) = workspace_with_one_item();
+    let readable = started(&journal, &shelf, &transport, plus(t0(), 1));
+    assert_eq!(readable.not_ready(), None, "the stored item reads");
+    assert_eq!(readable.lifecycle().state(), State::Ready);
+    let cases = [
+        ("an unparseable body", b"{not canonical".to_vec()),
+        ("no item_id", with_member(&journal, "item_id", None)),
+        (
+            "a garbled knowledge_at",
+            with_member(
+                &journal,
+                "knowledge_at",
+                Some(mandate_canon::Value::Str("yesterday".to_owned())),
+            ),
+        ),
+        (
+            "no knowledge_at",
+            with_member(&journal, "knowledge_at", None),
+        ),
+    ];
+    for (case, body) in cases {
+        let (journal, shelf, transport) = workspace_with_one_item();
+        journal.news_bodies.borrow_mut().insert(2, body);
+        let before = journal.news();
+        let mut reader = started(&journal, &shelf, &transport, plus(t0(), 1));
+        for second in 2..7 {
+            block_on(reader.step(plus(t0(), second)));
+        }
+        assert_eq!(reader.not_ready(), Some("news_stream_unreadable"), "{case}");
+        assert_ne!(reader.lifecycle().state(), State::Ready, "{case}");
+        assert!(transport.sent().is_empty(), "{case}: nothing fetched");
+        assert_eq!(journal.news(), before, "{case}: nothing journaled");
+        reader.drain(plus(t0(), 8));
+        assert_eq!(exit(&reader), Some(Exit::Drained), "{case}: it drains");
+    }
+}

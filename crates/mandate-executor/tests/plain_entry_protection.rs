@@ -374,6 +374,63 @@ fn a_stop_that_never_rests_is_flattened_at_the_bound() {
     assert_eq!(exit.qty, qty("10"), "the whole position is exited");
 }
 
+/// DEC-2849 item 7, the founder's ruling of 2026-10-27: the bound's exit is the agent's own and
+/// sells only its own lots. The agent's entry of 4 fills, its stop is refused, and the owner holds
+/// 6 more, bought outside Mandate. At the bound the executor exits the agent's 4, never the 10 the
+/// account holds.
+#[test]
+fn the_bound_sells_only_the_agents_lots_beside_the_owners() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let id = entry(&mut shell, &ports, "4", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    let filled = fill(&mut shell, &ports, "f-1", &id, "4");
+    let reported = report(&mut shell, &ports, entry_state(&id, "4", "4", "filled"));
+    let mut placed = stops(&filled);
+    placed.extend(stops(&reported));
+    let [stop] = placed.as_slice() else {
+        panic!("the stop is sent: {placed:?}");
+    };
+    report(
+        &mut shell,
+        &ports,
+        broker_order(
+            "s-1",
+            Some(stop.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            "4",
+            "0",
+            "rejected",
+        ),
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill("f-owner", None, "6", "149"))),
+        &ports,
+    );
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    let bound = shell.run(Input::Tick(clock(61)), &ports);
+    let exits: Vec<&SubmitOrder> = bound
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell && order.purpose == Purpose::RiskExit)
+        .collect();
+    let [exit] = exits.as_slice() else {
+        panic!("one risk exit at the bound: {:?}", bound.requests);
+    };
+    assert_eq!(exit.qty, qty("4"), "the agent's own 4, never the owner's 6");
+    assert!(flattens(&bound, "4"), "{:?}", bound.draft_types());
+}
+
 /// Whether `ran` handed the executor its own `risk_exit` (`w-<record>`) of `quantity`.
 fn flattens(ran: &Ran, quantity: &str) -> bool {
     ran.drafts.iter().any(|draft| {

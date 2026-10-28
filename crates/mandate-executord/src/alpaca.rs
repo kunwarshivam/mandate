@@ -7,8 +7,8 @@
 //! drives IO as well as time, which the paper host's HTTP transport needs.
 
 use mandate_alpaca::{
-    DeclaredRegime as AlpacaRegime, RetryPolicy, TokioPause, TradingClient, TradingTransport,
-    alpaca_account_rules,
+    DeclaredRegime as AlpacaRegime, RateLimit, RetryPolicy, TokioPause, TradingClient,
+    TradingTransport, alpaca_account_rules,
 };
 use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
 use mandate_connections::record::ConnectionId;
@@ -65,6 +65,11 @@ impl<T: TradingTransport + Clone> Broker for AlpacaBroker<T> {
         true
     }
 
+    /// What the transport's latest trading response reported (DEC-2842).
+    fn rate_limit(&self) -> Option<RateLimit> {
+        self.transport.rate_limit()
+    }
+
     /// The connect check's own §8.1 checks, at every start and daily (DEC-2840).
     fn later_check(
         &self,
@@ -94,12 +99,45 @@ mod tests {
     use mandate_executor::{AccountDeclaration, DeclaredRegime};
     use mandate_time::UtcNanos;
 
+    use mandate_alpaca::{HttpRequest, RateLimit, Response, TradingTransport, TransportError};
     use mandate_connections::checks::{AccountRead, Occasion};
     use mandate_connections::record::ConnectionId;
 
     use super::AlpacaBroker;
     use crate::Broker;
     use crate::paper::FixturePaper;
+
+    /// A transport that answers nothing and reports one rate limit.
+    #[derive(Clone)]
+    struct Limited;
+
+    impl TradingTransport for Limited {
+        async fn send(&self, _request: &HttpRequest) -> Result<Response, TransportError> {
+            Err(TransportError::Request)
+        }
+
+        fn rate_limit(&self) -> Option<RateLimit> {
+            Some(RateLimit {
+                limit: 200,
+                remaining: 3,
+            })
+        }
+    }
+
+    /// DEC-2842: Alpaca's broker reports what its transport's latest trading response did.
+    #[test]
+    fn alpacas_broker_reports_its_transport_s_rate_limit() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let broker = AlpacaBroker::new(Limited)?;
+        assert_eq!(
+            broker.rate_limit(),
+            Some(RateLimit {
+                limit: 200,
+                remaining: 3
+            })
+        );
+        Ok(())
+    }
 
     /// DEC-2840: Alpaca's broker runs the later permission checks, the connect check's own, on
     /// the occasion it is asked.
