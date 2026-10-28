@@ -26,7 +26,7 @@ use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
-use mandate_api_server::methods::{Methods, Passkey};
+use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
@@ -121,6 +121,8 @@ enum Port {
     Unbound,
     /// The server's real binding, as `main.rs` binds it (DEC-2126 item 2).
     Methods,
+    /// [`Port::Methods`] in a test cell started with the cool-off waiver (DEC-2146 item 2).
+    Waived(CoolOffWaiver),
 }
 
 fn fixture() -> Fixture {
@@ -169,12 +171,15 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
     let step_up: Arc<dyn StepUp> = match port {
         Port::Accepting => Arc::clone(&asked) as Arc<dyn StepUp>,
         Port::Unbound => Arc::new(Unbound),
-        Port::Methods => Arc::new(Methods {
+        Port::Methods | Port::Waived(_) => Arc::new(Methods {
             passkey: Passkey {
                 challenges: Arc::clone(&challenges),
                 rp: support_passkey::rp(),
                 keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
-                cool_off_waiver: None,
+                cool_off_waiver: match port {
+                    Port::Waived(waiver) => Some(waiver),
+                    _ => None,
+                },
             },
             cli_confirm: CliConfirm {
                 challenges: Arc::clone(&challenges),
@@ -1692,7 +1697,20 @@ fn passkeyed() -> Passkeyed {
 /// [`passkeyed`], with [`CONNECTION`] established on [`ACCOUNT`] at version 2 before Alice
 /// enrols when `established`, so a deployment of `v1` meets §9.24's rule 201.
 fn passkeyed_with(established: bool) -> Passkeyed {
-    let f = built(Port::Methods, true);
+    passkeyed_in(Port::Methods, established, COOLED)
+}
+
+/// Alice's passkey enrolled at [`ENROLLED`], its cool-off past.
+const COOLED: i64 = T0 - 800;
+/// When Alice enrolls, 900 s before the verifier's `now`.
+const ENROLLED: i64 = T0 - 900;
+/// A first enrolment's `cool_off_ends` (rule 249): 24 hours after [`ENROLLED`], so still cooling
+/// at `T0`.
+const COOLING: i64 = ENROLLED + 86_400;
+
+/// [`passkeyed_with`] on `port`, Alice's passkey's `cool_off_ends` at `cool_off_ends`.
+fn passkeyed_in(port: Port, established: bool, cool_off_ends: i64) -> Passkeyed {
+    let f = built(port, true);
     let signer = Signer::es256();
     f.store.put(&signer.cose_key()).expect("the key");
     {
@@ -1714,8 +1732,8 @@ fn passkeyed_with(established: bool) -> Passkeyed {
         }
         enrol(
             &mut rows,
-            T0 - 900,
-            enrolled(alice(), CREDENTIAL, &signer, 0, Some(T0 - 800)),
+            ENROLLED,
+            enrolled(alice(), CREDENTIAL, &signer, 0, Some(cool_off_ends)),
         );
         streams.insert(ctl(), rows.rows);
     }
@@ -2675,4 +2693,260 @@ fn a_replayed_passkey_resume_answers_as_the_first_and_appends_nothing() {
         text(&self::body(&first), &["command_id"])
     );
     assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// The operation a route's `StepUpCoolOffWaived` is derived under (§3.4): its assertion's, with
+/// `_cool_off_waived` for `_asserted`.
+fn waived_operation(asserted: &str) -> String {
+    format!(
+        "{}_cool_off_waived",
+        asserted
+            .strip_suffix("_asserted")
+            .expect("an assertion's operation")
+    )
+}
+
+/// The last three control rows are `authorized`, its `StepUpAsserted`, then its
+/// `StepUpCoolOffWaived` (DEC-2146 item 4, journal spec §9.38): ids from §3.4 under `operation`
+/// and `key`, both step-up records caused by the authorized event, all three at one `event_time`,
+/// the waiver naming the challenge, the credential, [`COOLING`] and `tier`, and the batch admitted
+/// by the journal's batch rules, 253 and 317 among them.
+fn journals_the_waiver(
+    f: &Fixture,
+    authorized: &str,
+    operation: &str,
+    asserted: &str,
+    key: &str,
+    issued: &Issued,
+    tier: &str,
+) {
+    let rows = control(f);
+    let last: Vec<&StoredEvent> = rows.iter().rev().take(3).rev().collect();
+    let types: Vec<&str> = last.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        [authorized, "StepUpAsserted", "StepUpCoolOffWaived"],
+        "the event, its assertion, then the waiver, in one batch"
+    );
+    let (event, assertion, waiver) = (last[0], last[1], last[2]);
+    assert_eq!(event.event_id, derived(operation, key));
+    assert_eq!(assertion.event_id, derived(asserted, key));
+    assert_eq!(
+        waiver.event_id,
+        derived(&waived_operation(asserted), key),
+        "the waiver's id is §3.4's under its own operation"
+    );
+    let expected = format!(
+        r#"{{"challenge":"{}","cool_off_ends":"{}","credential":"{CREDENTIAL}","tier":"{tier}"}}"#,
+        issued.id,
+        at(COOLING)
+    );
+    assert_eq!(
+        String::from_utf8(to_canonical(&payload(waiver))).expect("UTF-8"),
+        expected
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let envelope = |row: &StoredEvent| parse(&row.body).expect("JSON");
+    let member = |row: &StoredEvent, name: &str| {
+        envelope(row)
+            .get(name)
+            .map(to_canonical)
+            .unwrap_or_else(|| panic!("{} has {name}", row.event_type))
+    };
+    for record in [assertion, waiver] {
+        assert_eq!(
+            envelope(record).get("causation_id").and_then(Value::as_str),
+            Some(event.event_id.as_str()),
+            "{} is caused by the event it authorized (rules 253, 317)",
+            record.event_type
+        );
+        for name in ["event_time", "actor", "environment"] {
+            assert_eq!(
+                member(record, name),
+                member(event, name),
+                "{} shares the event's {name} (DEC-2146 item 4)",
+                record.event_type
+            );
+        }
+    }
+    let drafts: Vec<Draft> = last
+        .iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()), "rules 253 and 317 admit it");
+}
+
+/// DEC-2146 items 1 and 4: in a `ci` or `dev` cell started with the waiver, a version's
+/// confirmation with a passkey still in its 24-hour cool-off commits, and journals the waiver
+/// after its assertion, naming the cell's tier.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_test_cells_waived_confirm_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    for (waiver, tier) in [(CoolOffWaiver::Ci, "ci"), (CoolOffWaiver::Dev, "dev")] {
+        let w = passkeyed_in(Port::Waived(waiver), false, COOLING);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            202,
+            "{tier}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        journals_the_waiver(
+            &w.f,
+            "MandateConfirmed",
+            "confirm_version",
+            "confirm_version_step_up_asserted",
+            KEY,
+            &issued,
+            tier,
+        );
+        assert!(!w.held(&issued), "{tier}: the challenge is taken");
+    }
+}
+
+/// DEC-2146 item 3: a deployment is a route that appends its assertion, so it carries the waiver
+/// the same way.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_ci_cells_waived_deploy_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
+    w.funded();
+    w.confirmed();
+    let issued = w.deploy_challenge();
+    let signed = w.signer.assert(&issued.bytes, 10);
+    let reply = deploy(
+        &w.f,
+        &w.cookie,
+        KEY_2,
+        &w.deploy_body(&issued, Some(signed.json(CREDENTIAL))),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    journals_the_waiver(
+        &w.f,
+        "AgentDeployed",
+        "deploy",
+        "deploy_step_up_asserted",
+        KEY_2,
+        &issued,
+        "ci",
+    );
+    assert_eq!(
+        events(&w.f, "StepUpCoolOffWaived").len(),
+        2,
+        "the confirmation's waiver, then the deployment's: one per step-up"
+    );
+}
+
+/// DEC-2146 items 1 and 2: without the waiver the same cell keeps the cool-off. A passkey still
+/// cooling is `step_up_missing`, nothing is appended, and the challenge is kept.
+#[test]
+fn without_the_waiver_a_fresh_passkey_is_still_step_up_missing() {
+    let w = passkeyed_in(Port::Methods, false, COOLING);
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)))),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(events(&w.f, "StepUpAsserted").is_empty());
+    assert!(events(&w.f, "StepUpCoolOffWaived").is_empty());
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// DEC-2146 item 2: nothing a request carries turns the waiver on: not a header, a query, a body
+/// member, or the evidence's own members. Each such confirm of a cooling passkey on a server
+/// started without the waiver commits nothing and keeps the challenge.
+#[test]
+fn no_header_query_or_request_member_turns_the_waiver_on() {
+    let w = passkeyed_in(Port::Methods, false, COOLING);
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let plain = w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)));
+    let cookie = format!("{COOKIE_NAME}={}", w.cookie);
+    let path = ws(&format!("/mandate-versions/{}/confirm", version("v1")));
+    let mut asks: Vec<(String, Vec<(&str, &str)>, String)> = Vec::new();
+    for (name, value) in [
+        ("X-Mandate-Cool-Off-Waiver", "true"),
+        ("Mandate-Api-Passkey-Cool-Off-Waiver", "true"),
+        ("Mandate-Deployment-Tier", "ci"),
+        ("X-Mandate-Deployment-Tier", "dev"),
+    ] {
+        asks.push((path.clone(), vec![(name, value)], plain.clone()));
+    }
+    for query in [
+        "?cool_off_waiver=true",
+        "?MANDATE_API_PASSKEY_COOL_OFF_WAIVER=true",
+        "?tier=ci",
+    ] {
+        asks.push((format!("{path}{query}"), Vec::new(), plain.clone()));
+    }
+    let mut members: serde_json::Value = serde_json::from_str(&plain).expect("JSON");
+    members["cool_off_waiver"] = serde_json::json!(true);
+    members["tier"] = serde_json::json!("ci");
+    asks.push((path.clone(), Vec::new(), members.to_string()));
+    let mut inner: serde_json::Value = serde_json::from_str(&plain).expect("JSON");
+    inner["step_up"]["cool_off_waived"] = serde_json::json!(true);
+    inner["step_up_assertion"]["cool_off_waiver"] = serde_json::json!("ci");
+    asks.push((path.clone(), Vec::new(), inner.to_string()));
+    for (target, extra, body) in asks {
+        let mut headers = vec![
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Cookie", cookie.as_str()),
+            ("Content-Type", "application/json"),
+            ("Idempotency-Key", KEY),
+        ];
+        headers.extend(extra.iter().copied());
+        let reply = send(w.f.addr, "POST", &target, &headers, body.as_bytes());
+        assert!(
+            matches!(reply.status, 401 | 404 | 422),
+            "{target} {extra:?}: {} {:?}",
+            reply.status,
+            String::from_utf8_lossy(&reply.body)
+        );
+        assert!(
+            events(&w.f, "MandateConfirmed").is_empty(),
+            "{target} {extra:?}"
+        );
+        assert!(
+            events(&w.f, "StepUpCoolOffWaived").is_empty(),
+            "{target} {extra:?}"
+        );
+        assert!(w.held(&issued), "{target} {extra:?}: the challenge is kept");
+    }
+}
+
+/// DEC-2146 items 3 and 4: the waiver counts only a step-up inside the cool-off. With the waiver
+/// on, a passkey whose cool-off ended at the verifier's `now` exactly, or earlier, commits as
+/// before, with no `StepUpCoolOffWaived` (rule 318's near-miss).
+#[test]
+fn the_waiver_writes_nothing_for_a_passkey_past_its_cool_off() {
+    for ends in [T0, COOLED] {
+        let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), false, ends);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            202,
+            "{ends}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let rows = control(&w.f);
+        assert_eq!(
+            rows.last().map(|row| row.event_type.as_str()),
+            Some("StepUpAsserted"),
+            "{ends}: no waiver follows the assertion"
+        );
+        assert!(events(&w.f, "StepUpCoolOffWaived").is_empty());
+    }
 }
