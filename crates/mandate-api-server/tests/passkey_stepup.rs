@@ -816,7 +816,6 @@ fn cooling_in(waiver: Option<CoolOffWaiver>) -> World {
 /// `cool_off_ends` and the tier, beside the same record members a cooled credential's step-up
 /// returns.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waived_step_up_counts_and_carries_its_waiver_inside_the_assertion() {
     for (waiver, tier) in [
         (CoolOffWaiver::Ci, CoolOffWaiver::Ci),
@@ -854,7 +853,6 @@ fn a_waived_step_up_counts_and_carries_its_waiver_inside_the_assertion() {
 /// DEC-2146 item 3: the waiver changes the cool-off check alone. A cooling passkey's step-up that
 /// fails any other check answers that check's code under the waiver, and takes nothing.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_waiver_leaves_every_other_check_as_it_was() {
     let w = cooling_in(Some(CoolOffWaiver::Ci));
     let mut tampered = w.signed(9);

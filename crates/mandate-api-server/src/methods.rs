@@ -32,7 +32,7 @@ use mandate_time::UtcNanos;
 use crate::challenges::Challenges;
 use crate::confirm::CliConfirm;
 use crate::members::credential_records;
-use crate::stepup::{Action, Asserted, Judged, StepUp, Unverified, journaled};
+use crate::stepup::{Action, Asserted, CoolOffWaived, Judged, StepUp, Unverified, journaled};
 
 /// DEC-2108 item 8's passkey verifier.
 pub struct Passkey {
@@ -55,6 +55,16 @@ pub struct Passkey {
 pub enum CoolOffWaiver {
     Dev,
     Ci,
+}
+
+impl CoolOffWaiver {
+    /// The tier as `StepUpCoolOffWaived` records it (journal spec §9.38).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Ci => "ci",
+        }
+    }
 }
 
 /// The assertion's four members, decoded from unpadded base64url.
@@ -145,17 +155,23 @@ impl StepUp for Passkey {
             .map_err(|_| Unverified::Code(ProblemCode::JournalUnavailable))?;
         let fold = CredentialFold::new(records);
         let decoded = Decoded::of(assertion).ok_or_else(missing)?;
-        let enrolled = fold
+        let mut enrolled = fold
             .passkeys(judged.tenant.principal())
             .unwrap_or_default()
             .into_iter()
             .find(|enrolment| enrolment.credential == assertion.passkey_id)
             .and_then(|enrolment| self.credential(&fold, enrolment, &decoded.credential_id));
-        if let (Some(waiver), Some(credential)) = (self.cool_off_waiver, enrolled.as_ref())
-            && judged.now < credential.cool_off_ends
-        {
-            waived(waiver)?;
-        }
+        let waived = match (self.cool_off_waiver, enrolled.as_mut()) {
+            (Some(tier), Some(credential)) if judged.now < credential.cool_off_ends => {
+                let waived = CoolOffWaived {
+                    cool_off_ends: credential.cool_off_ends,
+                    tier,
+                };
+                credential.cool_off_ends = judged.now;
+                Some(waived)
+            }
+            _ => None,
+        };
         let record = self.challenges.held(id);
         let state = match &record {
             None => ChallengeState::Unknown,
@@ -191,19 +207,16 @@ impl StepUp for Passkey {
             .ok()
             .and_then(|bytes| parse(&bytes).ok())
             .ok_or_else(missing)?;
-        Ok(Some(Asserted::new(
-            id.to_owned(),
-            assertion.passkey_id.clone(),
-            consumed.sign_count().unwrap_or_default(),
-            to_canonical(&canonical),
-        )))
+        Ok(Some(
+            Asserted::new(
+                id.to_owned(),
+                assertion.passkey_id.clone(),
+                consumed.sign_count().unwrap_or_default(),
+                to_canonical(&canonical),
+            )
+            .with_waiver(waived),
+        ))
     }
-}
-
-/// A step-up made inside its credential's enrolment cool-off, counted under `waiver` and journaled
-/// as `StepUpCoolOffWaived` (DEC-2146 items 3 and 4): not implemented yet.
-fn waived(_waiver: CoolOffWaiver) -> Result<(), Unverified> {
-    Err(Unverified::Unimplemented { story: "E9-4" })
 }
 
 /// Whether an event on `control` already carries step-up naming the challenge `id`, so the

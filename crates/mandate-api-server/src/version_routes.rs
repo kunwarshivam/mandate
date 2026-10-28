@@ -39,7 +39,7 @@ use crate::real_money::{Action as Gated, gated};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
-use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled, waiver_id};
 use crate::versions::{
     CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, another_on_account,
     check, confirm_digest, deploy_digest, envelope_paths, established_v2, instruments,
@@ -273,14 +273,14 @@ async fn commit(
     app: &App,
     admitted: &Admitted,
     drafted: Drafted,
-    assertion: Option<&[u8]>,
+    assertion: &[Vec<u8>],
 ) -> Result<StoredEvent, Answer> {
     admitted
         .objects
         .put(&drafted.record)
         .map_err(|_| Refused::JournalUnavailable)?;
     let batch: Vec<&[u8]> = std::iter::once(drafted.draft.as_slice())
-        .chain(assertion)
+        .chain(assertion.iter().map(Vec::as_slice))
         .collect();
     let settled = appended_batch_at(
         app,
@@ -294,15 +294,19 @@ async fn commit(
 }
 
 /// The `StepUpAsserted` a step-up `asserted` leaves to append after the event `drafted` names,
-/// under §3.4's id for `operation` (DEC-2128 item 3).
+/// under §3.4's id for `operation` (DEC-2128 item 3), then its `StepUpCoolOffWaived` when a test
+/// cell waived the cool-off (DEC-2146 item 4).
 fn assertion_drafted(
     admitted: &Admitted,
     drafted: &Drafted,
     operation: &str,
     asserted: &Asserted,
-) -> Result<Vec<u8>, Answer> {
-    let (_, event_id) = derived_for(&admitted.gate, &admitted.reader.workspace, operation)
-        .ok_or(Refused::JournalUnavailable)?;
+) -> Result<Vec<Vec<u8>>, Answer> {
+    let derive = |operation: &str| {
+        derived_for(&admitted.gate, &admitted.reader.workspace, operation).map(|(_, id)| id)
+    };
+    let event_id = derive(operation).ok_or(Refused::JournalUnavailable)?;
+    let waiver = waiver_id(asserted, operation, derive).ok_or(Refused::JournalUnavailable)?;
     let writer = Writer {
         workspace: &admitted.reader.workspace,
         principal: &admitted.principal,
@@ -311,7 +315,12 @@ fn assertion_drafted(
         now: admitted.gate.now,
     };
     asserted
-        .drafted(admitted.objects.as_ref(), &writer, &drafted.text)
+        .drafted(
+            admitted.objects.as_ref(),
+            &writer,
+            &drafted.text,
+            waiver.as_deref(),
+        )
         .ok_or(Refused::JournalUnavailable.into())
 }
 
@@ -353,9 +362,6 @@ fn stepped_up(
                 Answer::from(Refused::JournalUnavailable)
             }
             Unverified::Code(code) => Answer::step_up(code),
-            Unverified::Unimplemented { story } => {
-                Answer::Invalid(vec![Unverified::unimplemented(story)])
-            }
         })
 }
 
@@ -471,7 +477,7 @@ async fn created(
     objects
         .put(&canonical)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let row = commit(app, &admitted, drafted, None).await?;
+    let row = commit(app, &admitted, drafted, &[]).await?;
     Ok(version_created(
         StatusCode::ACCEPTED,
         &admitted,
@@ -728,7 +734,7 @@ async fn confirmed(
     let assertion = asserted
         .map(|asserted| assertion_drafted(&admitted, &drafted, CONFIRM_ASSERTED, &asserted))
         .transpose()?;
-    let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
+    let row = commit(app, &admitted, drafted, &assertion.unwrap_or_default()).await?;
     Ok(confirm_accepted(StatusCode::ACCEPTED, &admitted, &row))
 }
 
@@ -1007,7 +1013,7 @@ async fn deployed(
     let assertion = asserted
         .map(|asserted| assertion_drafted(&admitted, &drafted, DEPLOY_ASSERTED, &asserted))
         .transpose()?;
-    let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
+    let row = commit(app, &admitted, drafted, &assertion.unwrap_or_default()).await?;
     Ok(command_accepted(StatusCode::ACCEPTED, &admitted, &row))
 }
 

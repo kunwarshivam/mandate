@@ -6,7 +6,7 @@
 //! carries no evidence never reaches the port: its caller answers `step_up_required` first (§3.5).
 
 use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
-use mandate_api::problem::{ProblemCode, Violation};
+use mandate_api::problem::ProblemCode;
 use mandate_api::wire::encode;
 use mandate_canon::{Digest, Int, Value, parse};
 use mandate_identity::{StepUpActionKind, TenantContext};
@@ -78,6 +78,11 @@ impl Asserted {
         }
     }
 
+    /// This step-up, counted inside its credential's enrolment cool-off under `waived`.
+    pub(crate) fn with_waiver(self, waived: Option<CoolOffWaived>) -> Self {
+        Self { waived, ..self }
+    }
+
     /// The cool-off this step-up was counted inside of, under a test cell's waiver; `None` for a
     /// credential past its cool-off.
     pub fn waived(&self) -> Option<CoolOffWaived> {
@@ -103,15 +108,23 @@ impl Asserted {
         &self.assertion
     }
 
-    /// The `StepUpAsserted` (journal spec §9.32) recording this step-up, written by `writer` and
-    /// caused by the event `causation` names (rule 253), with the assertion stored in `objects`
-    /// first; `None` when the store refuses it or the canonical form cannot hold the record.
+    /// The records of this step-up, written by `writer` and caused by the event `causation` names,
+    /// with the assertion stored in `objects` first: its `StepUpAsserted` (journal spec §9.32, rule
+    /// 253), then, for a step-up counted under a test cell's waiver, its `StepUpCoolOffWaived`
+    /// (§9.38, rule 317) under `waiver_id`, at the same `event_time` (DEC-2146 item 4). `None`
+    /// when the store refuses the assertion, the canonical form cannot hold a record, or a waived
+    /// step-up has no `waiver_id`.
+    ///
+    /// Rule 318 holds by construction: the verifier waives only the principal's own enrolled
+    /// credential whose `cool_off_ends` is after the instant it judged at, which is `writer`'s
+    /// `now`, and a challenge counts once.
     pub(crate) fn drafted(
         &self,
         objects: &dyn ObjectStore,
         writer: &Writer<'_>,
         causation: &str,
-    ) -> Option<Vec<u8>> {
+        waiver_id: Option<&str>,
+    ) -> Option<Vec<Vec<u8>>> {
         let stored = objects.put(&self.assertion).ok()?;
         let reference = string(&stored.to_string());
         let payload = object(vec![
@@ -130,7 +143,52 @@ impl Asserted {
             artifact_refs: vec![reference],
             config_refs: Vec::new(),
         };
-        caused_envelope(writer, &event, Some(causation))
+        let asserted = caused_envelope(writer, &event, Some(causation))?;
+        let Some(waived) = self.waived else {
+            return Some(vec![asserted]);
+        };
+        let payload = object(vec![
+            ("challenge", string(&self.challenge)),
+            ("credential", string(&self.credential)),
+            ("cool_off_ends", string(&waived.cool_off_ends.to_string())),
+            ("tier", string(waived.tier.as_str())),
+        ])?;
+        let event = Event {
+            event_type: "StepUpCoolOffWaived",
+            schema_version: 1,
+            payload,
+            artifact_refs: Vec::new(),
+            config_refs: Vec::new(),
+        };
+        let waiver = Writer {
+            event_id: waiver_id?,
+            ..*writer
+        };
+        Some(vec![
+            asserted,
+            caused_envelope(&waiver, &event, Some(causation))?,
+        ])
+    }
+}
+
+/// The operation §3.4 derives a waiver's `StepUpCoolOffWaived` id under: its assertion's
+/// `operation`, with `_cool_off_waived` for `_asserted`, so each route's waiver has its own id.
+pub(crate) fn waived_operation(operation: &str) -> Option<String> {
+    operation
+        .strip_suffix("_asserted")
+        .map(|stem| format!("{stem}_cool_off_waived"))
+}
+
+/// The id `derive` gives `asserted`'s waiver under [`waived_operation`] of `operation`: `Some(None)`
+/// for a step-up with no waiver, and `None` when a waived one's id does not derive.
+pub(crate) fn waiver_id(
+    asserted: &Asserted,
+    operation: &str,
+    derive: impl FnOnce(&str) -> Option<String>,
+) -> Option<Option<String>> {
+    match asserted.waived {
+        None => Some(None),
+        Some(_) => derive(&waived_operation(operation)?).map(Some),
     }
 }
 
@@ -140,21 +198,6 @@ pub enum Unverified {
     /// The §3.5 code of the first check that failed, or `journal_unavailable` for a read that
     /// could not answer.
     Code(ProblemCode),
-    /// A check its story has not implemented yet (DEC-77): a passkey still in its enrolment
-    /// cool-off under a test cell's waiver, until DEC-2146's verifier lands. It counts nothing.
-    Unimplemented { story: &'static str },
-}
-
-impl Unverified {
-    /// The one violation a stub's report is answered with, `invalid`: coded `unimplemented`, its
-    /// message naming the story, so nothing is committed and the caller sees why.
-    pub(crate) fn unimplemented(story: &'static str) -> Violation {
-        Violation::Schema {
-            path: String::new(),
-            code: "unimplemented".to_owned(),
-            message: format!("{story} has not been implemented yet"),
-        }
-    }
 }
 
 /// Judges evidence a call carries for one action.

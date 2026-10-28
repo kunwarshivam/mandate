@@ -615,7 +615,6 @@ fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts()
 /// `StepUpAsserted`, then its `StepUpCoolOffWaived`, all caused alike and at one `event_time`, the
 /// waiver's id §3.4's under its own operation.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_ci_cells_waived_start_with_a_fresh_passkey_commits_and_journals_the_waiver() {
     let w = world_in(|store| store, Some(CoolOffWaiver::Ci), COOLING);
     let issued = w.challenge();

@@ -678,7 +678,6 @@ fn the_real_money_mode_refuses_what_dec_2134_refuses() {
 /// refused before any setting is read, as an unsigned build is (E21-35), so their refusal of the
 /// waiver is `tests/config.rs`'s `cool_off_waiver` cases, the function `main` calls.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_test_cell_starts_with_the_waiver_and_refuses_any_other_value() {
     for tier in ["dev", "ci"] {
         let (code, out) = refused(command(
