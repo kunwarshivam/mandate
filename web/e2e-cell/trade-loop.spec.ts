@@ -9,8 +9,9 @@ import { deferredCheckLabel } from "../src/lib/deferred-checks";
  * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
  * the fixture broker, the agent's screen shows the order filled, the position and the journal
  * records from the served reads (DEC-2377), the positions screen shows the agent's own position, the
- * audit timeline shows the agent's and its account's records, the browser's kill switch is recorded,
- * and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
+ * audit timeline shows the agent's and its account's records, the owner pauses the agent from its
+ * page (`POST /agents/{id}/pause`, no step-up) and it reads paused, the browser's kill switch is
+ * recorded for the paused agent, which a pause leaves available (trading spec §7.4), and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -71,7 +72,7 @@ async function until(page: Page, path: string, ms: number, ready: () => Promise<
   return ready();
 }
 
-test("the trade loop from web/: approve in the browser, see the fill, the position and the journal, and kill the agent", async ({ page }) => {
+test("the trade loop from web/: approve in the browser, see the fill, the position and the journal, pause the agent, and kill it", async ({ page }) => {
   test.setTimeout(PROPOSAL_MS + CONFIRM_MS + 2 * FILL_MS + 120_000);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, CONFIRM_REQUEST, CONFIRM_DONE })) expect(value, `the driver names ${name}`).not.toBe("");
 
@@ -208,6 +209,21 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const shown = await until(page, "/audit/timeline", 30_000, async () => (await agent.count()) > 0 && (await account.count()) > 0);
     if (!shown) refuse("the audit timeline showed no record of the agent's stream and of an account stream within 30 s");
     step("audit_timeline");
+  });
+
+  await test.step("the owner pauses the agent from its page, and the agent reads paused", async () => {
+    await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
+    const header = page.locator("article header").first();
+    const pause = header.getByRole("button", { name: "Pause", exact: true });
+    await expect(pause).toBeVisible({ timeout: 30_000 });
+    const sent = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/pause`);
+    await pause.click();
+    const answer = await sent;
+    if (!answer.ok()) refuse(`the API answered ${answer.status()} for the pause: ${(await answer.text()).slice(0, 400)}`);
+    await expect(header.getByRole("status").filter({ hasText: /^Pause / })).toHaveText("Pause recorded in the journal.", { timeout: 30_000 });
+    const paused = header.locator('[data-slot="mode-badge"][data-mode="paused"]');
+    if (!(await until(page, `/agents/${AGENT}`, 30_000, async () => (await paused.count()) > 0))) refuse("the pause was recorded but the agent's page did not read it paused within 30 s");
+    step("paused", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
 
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {

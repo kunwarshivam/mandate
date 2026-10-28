@@ -1175,7 +1175,8 @@ pub fn plan(
                     shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
                             the position, the journal and the positions screen shown, the \
-                            owner's exit filled, the audit timeline shown, then its kill switch",
+                            owner's exit filled, the audit timeline shown, the agent paused \
+                            from its page, then its kill switch",
                     agent: WEB_AGENT,
                 }),
                 Part::Gap(Gap {
@@ -3012,10 +3013,11 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
         TradeOutcome::Ran(t) if t.whole() => (
             "ran",
             format!(
-                "approval {}, approved {}, owner exit {}, kill switch {}",
+                "approval {}, approved {}, owner exit {}, pause {}, kill switch {}",
                 t.reached["approval"],
                 t.reached["approved"],
                 t.reached["owner_exit"],
+                t.reached["paused"],
                 t.reached["kill_switch"]
             ),
             false,
@@ -4062,7 +4064,8 @@ mod tests {
         assert!(
             at("positions_screen") < at("owner_exit")
                 && at("owner_exit") < at("audit_timeline")
-                && at("audit_timeline") < at("kill_switch"),
+                && at("audit_timeline") < at("paused")
+                && at("paused") < at("kill_switch"),
             "the exit follows the fill's position and comes before the audit and the kill switch"
         );
         let pinned = parsed(INSTRUMENT_FILE);

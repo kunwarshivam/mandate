@@ -100,7 +100,7 @@ const TRADE_LOOP_TIMEOUT_MS: &str = "400000";
 /// The trade loop spec under `web/e2e-cell/` (lane W, #2462).
 const TRADE_LOOP_SPEC: &str = "trade-loop.spec.ts";
 /// The trade loop's steps, in the order the spec reaches them; its result names each one reached.
-pub const TRADE_LOOP_STEPS: [&str; 11] = [
+pub const TRADE_LOOP_STEPS: [&str; 12] = [
     "approval",
     "challenge",
     "approved",
@@ -110,6 +110,7 @@ pub const TRADE_LOOP_STEPS: [&str; 11] = [
     "positions_screen",
     "owner_exit",
     "audit_timeline",
+    "paused",
     "kill_switch",
     "kill_switch_alert",
 ];
@@ -1041,6 +1042,29 @@ mod tests {
             "{bound} ms cannot hold the spec's {test_timeout} ms and its web servers' starts"
         );
         assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
+        Ok(())
+    }
+
+    /// The trade loop spec writes every step of [`TRADE_LOOP_STEPS`], in that order, so a step the
+    /// driver requires is one the spec reaches and the first one missing is the first not reached.
+    #[test]
+    fn the_trade_loop_spec_writes_every_step_in_its_order() -> Result<()> {
+        let spec = fs::read_to_string(
+            crate::repo_root()?
+                .join("web/e2e-cell")
+                .join(TRADE_LOOP_SPEC),
+        )?;
+        let mut written = Vec::new();
+        for step in TRADE_LOOP_STEPS {
+            let at = spec
+                .find(&format!("step(\"{step}\""))
+                .with_context(|| format!("the spec writes no {step}"))?;
+            written.push(at);
+        }
+        assert!(
+            written.windows(2).all(|w| w[0] < w[1]),
+            "the spec writes the steps in TRADE_LOOP_STEPS' order"
+        );
         Ok(())
     }
 
