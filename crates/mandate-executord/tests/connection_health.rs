@@ -260,3 +260,145 @@ proptest! {
         prop_assert_eq!(health.troubles(), expected);
     }
 }
+
+const EXIT: &str = "01JINTENT0000000000000000C";
+const SWITCH: &str = "01JKILL00000000000000000AA";
+
+/// An executor over a broker whose every answer leaves 3 of a budget of 200 (DEC-2842), its agent
+/// holding the 10 AAPL its opening bought with the opening's protection resting at the broker (the
+/// outage tests' owed exit), handed `owed` before its first pass; the passes go on until the low
+/// headroom has restricted the account to closing.
+fn owed_under_low_headroom(owed: &dyn Fn(&Journal) -> Result<(), Error>) -> Result<Journal, Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    broker.resting("md-protect", "AAPL", "10", "147")?;
+    broker.report_rate_limit(200, 3);
+    let mut process = start_allowing(&journal, &broker)?;
+    owed(&journal)?;
+    process.step(at("2026-09-21T15:00:00Z")?);
+    passes(&mut process, 1, 4)?;
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    assert_eq!(process.state().account_state(), AccountState::ClosingOnly);
+    Ok(journal)
+}
+
+/// Where on the account stream the low headroom's restriction and each sell submitted sit, with
+/// each sell's quantity.
+fn sells_after_restriction(journal: &Journal) -> Result<(usize, Vec<(usize, String)>), Error> {
+    let types = journal.types(ACCOUNT_STREAM);
+    let restricted = types
+        .iter()
+        .position(|kind| kind == "AccountRestrictionChanged")
+        .ok_or("the low headroom restricted nothing")?;
+    let at: Vec<usize> = types
+        .iter()
+        .enumerate()
+        .filter(|(_, kind)| *kind == "OrderSubmitted")
+        .map(|(at, _)| at)
+        .collect();
+    let sells = at
+        .into_iter()
+        .zip(journal.payloads("OrderSubmitted"))
+        .filter(|(_, payload)| payload.get("side").and_then(Value::as_str) == Some("sell"))
+        .map(|(at, payload)| {
+            let qty = payload
+                .get("qty")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            (at, qty.to_owned())
+        })
+        .collect();
+    Ok((restricted, sells))
+}
+
+/// Rule 13 (DEC-2842): a connection degraded by low rate-limit headroom never holds a risk exit.
+/// The agent's exit of its 10 shares is journaled and sent after the account is restricted.
+#[test]
+fn low_headroom_never_holds_a_risk_exit() -> Result<(), Error> {
+    let journal = owed_under_low_headroom(&|journal| {
+        propose(journal, AGENT, EXIT, "sell", "10", "149", "risk_exit")
+    })?;
+    let (restricted, sells) = sells_after_restriction(&journal)?;
+    assert!(
+        sells
+            .iter()
+            .any(|(at, qty)| *at > restricted && qty == "10"),
+        "the exit goes out under the restriction: {sells:?} after {restricted}, {:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    Ok(())
+}
+
+/// Rule 13 (DEC-2842): an agent's kill switch applied after low headroom has restricted the account
+/// to closing still sells the agent's 10 shares. As in the completed tests, the switch follows the
+/// first pass, which already restricts, since every answer from the start leaves 3 of 200.
+#[test]
+fn low_headroom_never_holds_a_kill_switch() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    broker.report_rate_limit(200, 3);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(support::NOON)?);
+    process.step(at(support::NOON)?);
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    support::kill(&journal, AGENT, SWITCH)?;
+    process.step(at(support::NOON)?);
+    let (restricted, sells) = sells_after_restriction(&journal)?;
+    assert!(
+        sells
+            .iter()
+            .any(|(at, qty)| *at > restricted && qty == "10"),
+        "the switch's sell goes out under the restriction: {sells:?} after {restricted}, {:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    Ok(())
+}
+
+/// Rule 13 (DEC-2842): an opening that fills while low headroom holds the account at closing is
+/// still protected: the fill's protection, the bracket's legs, is journaled `placed` after the
+/// restriction.
+#[test]
+fn low_headroom_never_holds_a_fills_protection() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at("2026-09-21T15:00:00Z")?);
+    broker.report_rate_limit(200, 3);
+    passes(&mut process, 1, 3)?;
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    let (restricted, _) = sells_after_restriction(&journal)?;
+    let placed = |journal: &Journal| -> Vec<usize> {
+        journal
+            .types(ACCOUNT_STREAM)
+            .iter()
+            .enumerate()
+            .filter(|(_, kind)| *kind == "ProtectionChanged")
+            .map(|(at, _)| at)
+            .zip(journal.payloads("ProtectionChanged"))
+            .filter(|(_, payload)| payload.get("action").and_then(Value::as_str) == Some("placed"))
+            .map(|(at, _)| at)
+            .collect()
+    };
+    assert!(
+        placed(&journal).is_empty(),
+        "nothing protected before the fill"
+    );
+    broker.fill(OPENING, "150")?;
+    passes(&mut process, 4, 3)?;
+    let after = placed(&journal);
+    assert!(
+        after.len() == 1 && after.iter().all(|at| *at > restricted),
+        "the protection lands while the account is restricted: {:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    assert_eq!(process.state().account_state(), AccountState::ClosingOnly);
+    Ok(())
+}

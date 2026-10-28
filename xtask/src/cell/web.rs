@@ -85,11 +85,17 @@ const TRADE_LOOP_POLLS: u32 = 2_000;
 /// on the scheduler's tick every second and the browser opens after the gestures' Job, and a loop
 /// with no proposal must leave the `cell-demo-web` job its ten minutes (DEC-464).
 const PROPOSAL_MS: &str = "20000";
+/// How long the spec waits for each fill, the opening's and the owner exit's sell: 60 seconds, as
+/// the fixture paper broker fills at once and the executor acts on the scheduler's tick every
+/// second. The spec's own 120 s default would put its worst case, two fills among them, past what
+/// the `cell-demo-web` job's ten minutes leave after the cell comes up (DEC-464).
+const FILL_MS: &str = "60000";
 /// Playwright's bound on the whole trade loop run (`OWLHEAD_CELL_TIMEOUT_MS`, the config's
-/// `globalTimeout`): 400 seconds, past the spec's `test.setTimeout` of 320 s with `PROPOSAL_MS`
-/// and `next dev`'s start, and inside [`TRADE_LOOP_POLLS`]' 500 s, so Playwright ends the run and
-/// writes its result before the driver gives up on it. Unset, the config's 90 s ends every loop
-/// before its fill.
+/// `globalTimeout`): 400 seconds, past the spec's `test.setTimeout` of 320 s with `PROPOSAL_MS` and
+/// `FILL_MS` (the proposal, the host's 60 s, two fills and its 120 s for the rest) and its two web
+/// servers' starts, and inside [`TRADE_LOOP_POLLS`]' 500 s, so Playwright ends the run and writes
+/// its result before the driver gives up on it. Unset, the config's 90 s ends every loop before
+/// its fill.
 const TRADE_LOOP_TIMEOUT_MS: &str = "400000";
 /// The trade loop spec under `web/e2e-cell/` (lane W, #2462).
 const TRADE_LOOP_SPEC: &str = "trade-loop.spec.ts";
@@ -508,13 +514,14 @@ pub fn trade_loop_from_web(
 
 /// What the trade loop's Playwright run is handed beside the shared environment: the spec, the
 /// agent, the host's confirmation files, the proposal's wait, and the run's bound.
-fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, String); 6] {
+fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, String); 7] {
     [
         ("OWLHEAD_CELL_SPEC", TRADE_LOOP_SPEC.to_owned()),
         ("OWLHEAD_CELL_AGENT", agent.to_owned()),
         ("OWLHEAD_CELL_CONFIRM_REQUEST", path_text(request)),
         ("OWLHEAD_CELL_CONFIRM_DONE", path_text(done)),
         ("OWLHEAD_CELL_PROPOSAL_MS", PROPOSAL_MS.to_owned()),
+        ("OWLHEAD_CELL_FILL_MS", FILL_MS.to_owned()),
         ("OWLHEAD_CELL_TIMEOUT_MS", TRADE_LOOP_TIMEOUT_MS.to_owned()),
     ]
 }
@@ -639,6 +646,63 @@ pub fn setup_result(text: &str) -> Result<BTreeMap<String, String>> {
     }
     if let Some(missing) = SETUP_STEPS.iter().find(|s| !steps.contains_key(**s)) {
         bail!("the set-up from web/ did not reach `{missing}`");
+    }
+    Ok(steps)
+}
+
+/// The backtest report spec under `web/e2e-cell/` (the demo's step 5 from web/, lane W).
+const REPORT_SPEC: &str = "backtest-report.spec.ts";
+/// Playwright's bound on the report run (`OWLHEAD_CELL_TIMEOUT_MS`): 270 seconds, which holds the
+/// spec's own 180 s and `next dev`'s 60 s start with room to spare, and ends inside
+/// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
+const REPORT_TIMEOUT_MS: &str = "270000";
+/// The report visit's steps, in the order the spec reaches them; its result names each one.
+pub const REPORT_STEPS: [&str; 2] = ["report_link", "report_shown"];
+
+/// The owner's visit of the backtest `backtest`'s report from `web/` (`backtest-report.spec.ts`) in
+/// `workspace`: the owner, signed in, opens its link, `/backtests/{id}`, since the API lists no
+/// backtests, and sees the report the runner stored, read through the API. Needs no market session.
+/// Answers the steps reached, `report_link` naming the link; an `Err` names the first step that was
+/// not reached, or a run that wrote no result.
+///
+/// # Errors
+/// A missing tool, a run past [`TRADE_LOOP_POLLS`], a run that wrote no result, or a step not
+/// reached.
+pub fn report_from_web(workspace: &str, backtest: &str) -> Result<BTreeMap<String, String>> {
+    let run = spec_run(
+        workspace,
+        &[
+            ("OWLHEAD_CELL_SPEC", REPORT_SPEC.to_owned()),
+            ("OWLHEAD_CELL_BACKTEST", backtest.to_owned()),
+            ("OWLHEAD_CELL_TIMEOUT_MS", REPORT_TIMEOUT_MS.to_owned()),
+        ],
+        "web-report",
+        TRADE_LOOP_POLLS,
+        &mut || Ok(()),
+    )?;
+    let Some(text) = run.result else {
+        bail!(
+            "web/'s report visit wrote no result ({}); its log is {}",
+            run.status,
+            run.log.display()
+        );
+    };
+    report_result(&text)
+}
+
+/// The report spec's result file as the steps it reached; an `error`, or a step of
+/// [`REPORT_STEPS`] missing, is an `Err` naming it.
+///
+/// # Errors
+/// A result that is not a JSON object of strings, names an error, or lacks a step.
+pub fn report_result(text: &str) -> Result<BTreeMap<String, String>> {
+    let steps: BTreeMap<String, String> = serde_json::from_str(text)
+        .context("the report visit's result is not a JSON object of strings")?;
+    if let Some(error) = steps.get("error") {
+        bail!("the report visit from web/ stopped: {error}");
+    }
+    if let Some(missing) = REPORT_STEPS.iter().find(|s| !steps.contains_key(**s)) {
+        bail!("the report visit from web/ did not reach `{missing}`");
     }
     Ok(steps)
 }
@@ -774,9 +838,16 @@ mod tests {
     use super::super::{API_LOCAL_PORT, DEMO_WORKSPACE, STUB_PORT};
     use super::*;
 
-    /// The trade loop spec's own waits past the proposal, as `trade-loop.spec.ts` defaults them: the
-    /// host's confirmation (60 s), the fill (120 s), and the 120 s it allows the rest of its steps.
-    const TRADE_LOOP_SPEC_WAITS_MS: u64 = 60_000 + 120_000 + 120_000;
+    /// The trade loop spec's test timeout, as `trade-loop.spec.ts` sets it from its waits.
+    const TRADE_LOOP_SPEC_TIMEOUT: &str =
+        "test.setTimeout(PROPOSAL_MS + CONFIRM_MS + 2 * FILL_MS + 120_000);";
+    /// The host's confirmation wait, as `trade-loop.spec.ts` defaults it; the driver hands none.
+    const TRADE_LOOP_CONFIRM_MS: u64 = 60_000;
+    /// The 120 s the trade loop spec allows the rest of its steps, as its test timeout adds it.
+    const TRADE_LOOP_REST_MS: u64 = 120_000;
+    /// The longest the TLS front takes to start, as `playwright.cell.config.ts`'s `webServer`
+    /// bounds it, beside `next dev`'s [`NEXT_DEV_START_MS`].
+    const TLS_FRONT_START_MS: u64 = 10_000;
     /// The longest `next dev` takes to start, as `playwright.cell.config.ts`'s `webServer` bounds it.
     const NEXT_DEV_START_MS: u64 = 60_000;
     /// The journey's result passes only when it names every step and no error, and the spec it
@@ -832,6 +903,60 @@ mod tests {
         Ok(())
     }
 
+    /// The report visit's result is every step or the first one missing, and the spec writes each.
+    #[test]
+    fn the_report_visit_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
+        let whole = r#"{"report_link":"/backtests/bt-demo-01","report_shown":"ok"}"#;
+        assert_eq!(
+            report_result(whole)?.get("report_link").map(String::as_str),
+            Some("/backtests/bt-demo-01")
+        );
+        let stopped = r#"{"report_link":"/backtests/bt-demo-01","error":"no comparison shown"}"#;
+        let why = format!("{:#}", report_result(stopped).err().context("an error")?);
+        assert!(why.contains("no comparison shown"), "{why}");
+        let short = r#"{"report_link":"/backtests/bt-demo-01"}"#;
+        let why = format!(
+            "{:#}",
+            report_result(short).err().context("a missing step")?
+        );
+        assert!(why.contains("`report_shown`"), "{why}");
+        assert!(report_result("[]").is_err());
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(REPORT_SPEC))?;
+        for step in REPORT_STEPS {
+            assert!(
+                spec.contains(&format!("step(\"{step}\"")),
+                "the spec writes {step}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The report spec's own test timeout, as `backtest-report.spec.ts` defaults `REPORT_MS`.
+    const REPORT_SPEC_MS: u64 = 180_000;
+
+    /// Playwright's bound on the report visit holds the spec's own test timeout and `next dev`'s
+    /// start, with margin, and ends before the driver's polls do.
+    #[test]
+    fn the_report_visits_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(REPORT_SPEC))?;
+        assert!(
+            spec.contains(&format!(
+                "?? {}_{:03})",
+                REPORT_SPEC_MS / 1000,
+                REPORT_SPEC_MS % 1000
+            )),
+            "the spec defaults REPORT_MS to {REPORT_SPEC_MS} ms"
+        );
+        let bound: u64 = REPORT_TIMEOUT_MS.parse()?;
+        let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
+        assert!(
+            bound > REPORT_SPEC_MS + NEXT_DEV_START_MS,
+            "{bound} ms leaves no margin past the spec's {REPORT_SPEC_MS} ms and next dev's start"
+        );
+        assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
+        Ok(())
+    }
+
     /// The set-up spec's own test timeout, as `setup.spec.ts` defaults `SETUP_MS`.
     const SETUP_SPEC_MS: u64 = 240_000;
 
@@ -859,28 +984,61 @@ mod tests {
         Ok(())
     }
 
-    /// Playwright's bound on the trade loop holds the spec's own test timeout and `next dev`'s
-    /// start, and ends before the driver's polls do, so a slow loop is the spec's failure with a
-    /// result rather than a run the driver kills (#2466's review).
+    /// Playwright's bound on the trade loop holds the spec's own test timeout, as the spec computes
+    /// it from the waits the driver hands it and its own defaults, and both web servers' starts,
+    /// and ends before the driver's polls do, so a slow loop is the spec's named failure with a
+    /// result rather than Playwright's global kill or a run the driver kills (#2466's and #2871's
+    /// reviews). The formula and the defaults are read from the spec and the config, so a wait the
+    /// spec adds fails this test until the bound holds it.
     #[test]
     fn the_trade_loops_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let root = crate::repo_root()?;
+        let spec = fs::read_to_string(root.join("web/e2e-cell").join(TRADE_LOOP_SPEC))?;
+        let config = fs::read_to_string(root.join("web/playwright.cell.config.ts"))?;
+        assert!(
+            spec.contains(TRADE_LOOP_SPEC_TIMEOUT),
+            "the spec's test timeout is {TRADE_LOOP_SPEC_TIMEOUT}"
+        );
+        assert!(
+            spec.contains("process.env.OWLHEAD_CELL_CONFIRM_MS ?? 60_000)"),
+            "the spec defaults CONFIRM_MS to {TRADE_LOOP_CONFIRM_MS} ms"
+        );
+        for start in [TLS_FRONT_START_MS, NEXT_DEV_START_MS] {
+            assert!(
+                config.contains(&format!("timeout: {}_{:03},", start / 1000, start % 1000)),
+                "the config bounds a web server's start at {start} ms"
+            );
+        }
         let env = trade_loop_env("agent", Path::new("request"), Path::new("done"));
-        let handed = env
-            .iter()
-            .find(|(name, _)| *name == "OWLHEAD_CELL_TIMEOUT_MS")
-            .map(|(_, value)| value.as_str())
-            .context("the run is handed no OWLHEAD_CELL_TIMEOUT_MS")?;
-        let bound: u64 = handed.parse()?;
-        let proposal: u64 = PROPOSAL_MS.parse()?;
+        let handed = |name: &str| -> Result<u64> {
+            let value = env
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, value)| value.as_str())
+                .with_context(|| format!("the run is handed no {name}"))?;
+            Ok(value.parse()?)
+        };
+        assert!(
+            env.iter().all(|(n, _)| *n != "OWLHEAD_CELL_CONFIRM_MS"),
+            "the confirmation wait is the spec's default"
+        );
+        let bound = handed("OWLHEAD_CELL_TIMEOUT_MS")?;
+        let test_timeout = handed("OWLHEAD_CELL_PROPOSAL_MS")?
+            + TRADE_LOOP_CONFIRM_MS
+            + 2 * handed("OWLHEAD_CELL_FILL_MS")?
+            + TRADE_LOOP_REST_MS;
         let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
         assert_eq!(
             polls_ms, 500_000,
             "the driver's polls, as their doc gives them"
         );
+        assert_eq!(
+            test_timeout, 320_000,
+            "the spec's test timeout, as the bound's doc gives it"
+        );
         assert!(
-            bound >= proposal + TRADE_LOOP_SPEC_WAITS_MS + NEXT_DEV_START_MS,
-            "{bound} ms cannot hold the spec's {} ms and next dev's start",
-            proposal + TRADE_LOOP_SPEC_WAITS_MS
+            bound >= test_timeout + TLS_FRONT_START_MS + NEXT_DEV_START_MS,
+            "{bound} ms cannot hold the spec's {test_timeout} ms and its web servers' starts"
         );
         assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
         Ok(())

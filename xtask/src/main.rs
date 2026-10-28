@@ -2938,7 +2938,7 @@ const EVERY_JOB_PATHS: [&str; 11] = [
 /// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
 /// Markdown anywhere is known too. A changed path outside every crate and outside this list
 /// selects everything, so a new top-level directory is never assumed unread.
-const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
+const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
     "docs/",
     "web/",
     "python/",
@@ -2954,6 +2954,7 @@ const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
     ".claude/",
     "_typos.toml",
     ".gitleaks.toml",
+    ".gitleaksignore",
     "CODEOWNERS",
     "LICENSE*",
 ];
@@ -4375,6 +4376,11 @@ struct Finding {
     file: String,
     #[serde(rename = "RuleID")]
     rule_id: String,
+    /// The commit a `gitleaks git` finding is in; a `gitleaks dir` finding has none.
+    #[serde(rename = "Commit", default)]
+    commit: String,
+    #[serde(rename = "StartLine", default)]
+    start_line: u64,
 }
 
 /// Cases for the `.gitleaks.toml` exceptions (DEC-89): a line appended to a file, and the rule that
@@ -4615,7 +4621,8 @@ fn secrets() -> Result<()> {
         ),
         None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
     }?;
-    gitleaks_exceptions()
+    gitleaks_exceptions()?;
+    gitleaks_ignore()
 }
 
 /// Scans [`gitleaks_plants`], written to a temporary directory, with the repository's
@@ -4684,6 +4691,156 @@ fn gitleaks_exceptions() -> Result<()> {
         expected.values().sum::<usize>()
     );
     Ok(())
+}
+
+/// The fingerprints gitleaks skips (DEC-2647): each names one finding, one rule on one line of
+/// one file in one commit, for a test-fixture value that only the history still holds.
+const GITLEAKS_IGNORE: &str = ".gitleaksignore";
+
+/// `.gitleaksignore`'s lines that are neither a comment, blank, nor a commit-pinned fingerprint.
+/// A fingerprint without its commit, `<path>:<rule>:<line>`, makes gitleaks skip that line of that
+/// file in every commit, so a key later written there would pass unreported.
+fn gitleaks_ignore_problems(text: &str) -> Vec<String> {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty() && !line.starts_with('#'))
+        .filter(|(_, line)| !is_pinned_fingerprint(line))
+        .map(|(index, line)| {
+            format!(
+                "{GITLEAKS_IGNORE}:{}: `{line}` is not `<40-hex commit>:<path>:<rule>:<line>`",
+                index + 1
+            )
+        })
+        .collect()
+}
+
+/// Whether `line` is `<40 lower-case hex>:<path>:<rule>:<line number from 1>`, with no space.
+fn is_pinned_fingerprint(line: &str) -> bool {
+    let parts: Vec<&str> = line.split(':').collect();
+    let [commit, path, rule, number] = parts.as_slice() else {
+        return false;
+    };
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && !path.is_empty()
+        && !path.contains(char::is_whitespace)
+        && !rule.is_empty()
+        && rule
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !number.starts_with('0')
+        && !number.is_empty()
+        && number.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The repository's [`GITLEAKS_IGNORE`] must hold only commit-pinned fingerprints, and
+/// [`gitleaks_ignore_case`] must show one skipping exactly its own finding.
+fn gitleaks_ignore() -> Result<()> {
+    let path = repo_root()?.join(GITLEAKS_IGNORE);
+    if path.exists() {
+        report(
+            gitleaks_ignore_problems(&fs::read_to_string(&path)?),
+            "gitleaks-ignore",
+        )?;
+    }
+    gitleaks_ignore_case()
+}
+
+/// A planted two-commit repository, scanned with the repository's `.gitleaks.toml`: the first
+/// commit adds a key-ID-shaped line and the second another in the same file. Without a
+/// [`GITLEAKS_IGNORE`] both are reported, so the case is not vacuous; with the first commit's
+/// fingerprint only the second is.
+fn gitleaks_ignore_case() -> Result<()> {
+    let dir = unique_temp_path("mandate-gitleaks-ignore", "");
+    fs::create_dir_all(&dir)?;
+    let outcome = gitleaks_ignore_case_in(&dir);
+    fs::remove_dir_all(&dir)?;
+    outcome
+}
+
+fn gitleaks_ignore_case_in(dir: &Path) -> Result<()> {
+    let git = |args: &[&str]| {
+        let mut full = vec![
+            "-c",
+            "user.name=xtask",
+            "-c",
+            "user.email=xtask@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
+        full.extend_from_slice(args);
+        output_in(dir, "git", &full)
+    };
+    let file = "planted.rs";
+    let first = format!("const FIRST: &str = \"PK{}\";", "PLANTEDKEYID000000");
+    let second = format!("const SECOND: &str = \"PK{}\";", "PLANTEDKEYID000001");
+    git(&["init", "-q"])?;
+    fs::write(dir.join(file), format!("{first}\n"))?;
+    git(&["add", file])?;
+    git(&["commit", "-q", "-m", "first"])?;
+    let first_commit = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+    fs::write(dir.join(file), format!("{first}\n{second}\n"))?;
+    git(&["commit", "-q", "-a", "-m", "second"])?;
+    let second_commit = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+    let rule = "alpaca-key-id";
+    let mut problems = Vec::new();
+    let unignored = gitleaks_git_findings(dir)?;
+    if unignored.len() != 2 {
+        problems.push(format!(
+            "with no fingerprint, {} finding(s), expected both planted keys",
+            unignored.len()
+        ));
+    }
+    fs::write(
+        dir.join(GITLEAKS_IGNORE),
+        format!("{first_commit}:{file}:{rule}:1\n"),
+    )?;
+    let ignored: Vec<(String, String, String, u64)> = gitleaks_git_findings(dir)?
+        .into_iter()
+        .map(|f| (f.file, f.rule_id, f.commit, f.start_line))
+        .collect();
+    let expected = vec![(file.to_owned(), rule.to_owned(), second_commit, 2)];
+    if ignored != expected {
+        problems.push(format!(
+            "with the first commit's fingerprint, {ignored:?}, expected only {expected:?}"
+        ));
+    }
+    report(problems, "gitleaks-ignore")?;
+    eprintln!("    gitleaks-ignore: a fingerprint skips its own finding and no other");
+    Ok(())
+}
+
+/// `gitleaks git` over the repository at `dir`, with the repository's `.gitleaks.toml` and the
+/// `.gitleaksignore` in `dir`, if any: its findings.
+fn gitleaks_git_findings(dir: &Path) -> Result<Vec<Finding>> {
+    let report_path = dir.with_extension("json");
+    eprintln!("    $ (in a planted repository) gitleaks git --config .gitleaks.toml .");
+    let status = Command::new("gitleaks")
+        .current_dir(dir)
+        .args([
+            "git",
+            "--no-banner",
+            "--redact",
+            "--exit-code",
+            "0",
+            "--report-format",
+            "json",
+        ])
+        .arg("--config")
+        .arg(repo_root()?.join(".gitleaks.toml"))
+        .arg("--report-path")
+        .arg(&report_path)
+        .arg(".")
+        .status()
+        .context("starting `gitleaks` (is it installed? see AGENTS.md)")?;
+    let report_text = fs::read_to_string(&report_path);
+    fs::remove_file(&report_path).ok();
+    if !status.success() {
+        bail!("gitleaks failed on the planted repository with {status}");
+    }
+    Ok(serde_json::from_str(&report_text?)?)
 }
 
 /// Runs a tool from the `python/` uv workspace (ruff, pytest, the exporter).
@@ -12984,6 +13141,7 @@ mod tests {
         nextest_runner, rerun_blocked, root_mismatch, summarised, unprivileged_rerun,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
+    use super::{GITLEAKS_IGNORE, gitleaks_ignore_problems};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{
@@ -19815,6 +19973,47 @@ mod tests {
                 follows,
                 SELECT_GATES.iter().any(|(gated, _)| *gated == job),
                 "`{job}` follows the selection exactly when it is a scoped job"
+            );
+        }
+        Ok(())
+    }
+
+    /// The jobs in `ci.yml` that may run past DEC-464's ten minutes, each with its cap: only
+    /// `cell-demo-web`, at fifteen, which runs only on main and is no required check (DEC-2648).
+    const LONGER_CI_JOBS: [(&str, u32); 1] = [("cell-demo-web", 15)];
+
+    /// DEC-464 and DEC-2648 in `ci.yml`: every job's cap is ten minutes or less, but for the jobs
+    /// [`LONGER_CI_JOBS`] names, each capped exactly as it says, so the exception cannot spread to
+    /// another job, a required one among them, without a decision adding it there.
+    #[test]
+    fn only_the_named_ci_jobs_run_past_ten_minutes() -> Result<()> {
+        let ci = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let mut capped = BTreeMap::new();
+        for job in workflow_jobs(&ci) {
+            let lines = workflow_job(&ci, job).with_context(|| format!("ci.yml has `{job}`"))?;
+            let minutes = lines
+                .iter()
+                .find_map(|l| l.trim().strip_prefix("timeout-minutes: "))
+                .map(str::parse::<u32>)
+                .transpose()?;
+            if let Some(minutes) = minutes {
+                capped.insert(job, minutes);
+            }
+        }
+        for (job, minutes) in &capped {
+            match LONGER_CI_JOBS.iter().find(|(named, _)| named == job) {
+                Some((_, cap)) => assert_eq!(minutes, cap, "`{job}` is capped as DEC-2648 says"),
+                None => assert!(
+                    *minutes <= 10,
+                    "`{job}` runs {minutes} minutes, past DEC-464's ten, and no decision names it"
+                ),
+            }
+        }
+        for (job, cap) in LONGER_CI_JOBS {
+            assert_eq!(
+                capped.get(job),
+                Some(&cap),
+                "`{job}` is in ci.yml with its cap"
             );
         }
         Ok(())
@@ -28289,5 +28488,48 @@ jq -r "$filter" "$src"
             codeowners_problems(&unsorted, &layers),
             vec!["CODEOWNERS: `/crates/mandate-a/` must come before `/crates/mandate-c/`; keep the crate lines sorted".to_owned()]
         );
+    }
+
+    #[test]
+    fn gitleaks_fingerprints_must_pin_a_commit() -> Result<()> {
+        let commit = "1c96b0288f5d14abb688e1b3d8b2d18ac570307b";
+        let pinned = format!("{commit}:xtask/src/release.rs:generic-api-key:1976");
+        assert!(gitleaks_ignore_problems(&format!("# a comment\n\n{pinned}\n")).is_empty());
+        let refused = [
+            "xtask/src/release.rs:generic-api-key:1976".to_owned(),
+            format!(
+                "{}:xtask/src/release.rs:generic-api-key:1976",
+                &commit[..39]
+            ),
+            format!(
+                "{}:xtask/src/release.rs:generic-api-key:1976",
+                commit.to_uppercase()
+            ),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:0"),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:01"),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:"),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:1976:extra"),
+            format!("{commit}::generic-api-key:1976"),
+            format!("{commit}:xtask/src/release.rs::1976"),
+            format!("{commit}:xtask/src/release.rs:Generic:1976"),
+            format!("{commit}:xtask/src/my release.rs:generic-api-key:1976"),
+            format!(" {pinned}"),
+        ];
+        for line in &refused {
+            assert_eq!(
+                gitleaks_ignore_problems(&format!("{pinned}\n{line}\n")),
+                vec![format!(
+                    "{GITLEAKS_IGNORE}:2: `{line}` is not `<40-hex commit>:<path>:<rule>:<line>`"
+                )],
+                "{line}"
+            );
+        }
+        let committed = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join(GITLEAKS_IGNORE),
+        )?;
+        assert!(gitleaks_ignore_problems(&committed).is_empty());
+        Ok(())
     }
 }

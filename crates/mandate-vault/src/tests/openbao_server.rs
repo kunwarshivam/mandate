@@ -443,6 +443,85 @@ async fn operator_call(
     }
 }
 
+/// E21-32v on a real vault: provisioning reads the KV mount's configuration right after it
+/// enables the mount, and before it enables the AppRole mount or writes any policy, role or
+/// secret id, so a mount still upgrading stops it while there is nothing yet to redo. An operator
+/// whose policy denies that one read is stopped there, named by that request, with the AppRole
+/// mount never made; let read it, the same provisioning goes on and makes it.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_reads_the_kv_mount_before_it_writes_any_role() {
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
+        },
+    };
+    let all_but_config = format!(
+        "path \"*\" {{\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"list\", \"sudo\"]\n}}\n\
+         path \"kv-{suffix}/config\" {{\n  capabilities = [\"deny\"]\n}}\n"
+    );
+    let policy = format!("all-but-kv-config-{suffix}");
+    operator_call(
+        &address,
+        &ca_pem,
+        &operator,
+        Method::PUT,
+        &format!("sys/policies/acl/{policy}"),
+        Some(json!({ "policy": all_but_config })),
+    )
+    .await;
+    let made = operator_call(
+        &address,
+        &ca_pem,
+        &operator,
+        Method::POST,
+        "auth/token/create",
+        Some(json!({ "policies": [policy], "no_default_policy": true, "ttl": "5m" })),
+    )
+    .await;
+    let limited = SecretString::from(
+        made.pointer("/auth/client_token")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned(),
+    );
+    let stopped = provision(&config, &limited, &[c("c1")], None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        stopped,
+        ProvisionError {
+            error: SourceError::Denied,
+            refused: Some(Refused {
+                method: "GET".to_owned(),
+                path: format!("kv-{suffix}/config"),
+                status: 403,
+            }),
+        }
+    );
+    let auth_mounts = |listed: &Value| listed.get(format!("approle-{suffix}/")).is_some();
+    let listed = operator_call(&address, &ca_pem, &operator, Method::GET, "sys/auth", None).await;
+    assert!(
+        !auth_mounts(listed.get("data").unwrap_or(&listed)),
+        "stopped before the AppRole mount"
+    );
+    provision(&config, &operator, &[c("c1")], None)
+        .await
+        .unwrap();
+    let listed = operator_call(&address, &ca_pem, &operator, Method::GET, "sys/auth", None).await;
+    assert!(auth_mounts(listed.get("data").unwrap_or(&listed)));
+}
+
 /// DEC-2060 items 4 and 7 on a real vault: provisioning, twice, enables both Kubernetes mounts,
 /// points each at the API server, and writes each kind's templated policy keyed by its mount's
 /// own accessor; a login to a role not yet made is `RoleMissing`, which a process may wait out.

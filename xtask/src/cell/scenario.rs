@@ -21,12 +21,12 @@ use sha2::{Digest, Sha256};
 
 use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
-    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
-    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS,
-    RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART, api_diagnosis, api_image_tag,
-    api_port_forward, helm, host_image_source, http, kubectl, open_session, processes, render,
-    render_with, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
-    stub_token, template_args, tools_missing, up, web,
+    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_APP_ORIGIN, DEMO_OWNER,
+    DEPLOY_MANAGER_PROCESS, ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE,
+    RESEARCH_MANAGER_PROCESS, RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART,
+    api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
+    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
+    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -158,6 +158,7 @@ pub enum Part {
     Web(WebCheck),
     WebSignIn(WebCheck),
     WebSetUp(SetUpCheck),
+    WebReport(ReportCheck),
     WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
@@ -238,6 +239,14 @@ pub struct WebCheck {
 #[derive(Debug)]
 pub struct SetUpCheck {
     pub shows: &'static str,
+}
+
+/// The owner's visit of a backtest's report from `web/`: what it shows, and the backtest whose
+/// report it opens from its link.
+#[derive(Debug)]
+pub struct ReportCheck {
+    pub shows: &'static str,
+    pub backtest: &'static str,
 }
 
 /// A link of the story not on `main` yet (DEC-2004): what it would show, what of it is already on
@@ -362,13 +371,6 @@ const WB_SETUP: Wait = Wait {
     lands: "web/'s confirm and deploy with a passkey in the cell, once the founder decides whether \
             a dev or ci cell may waive a first passkey's 24-hour cool-off (workspace API spec \
             §3.6, DEC-79); until then the cell's confirm and deploy stay the CLI's",
-};
-const W2_REPORT_VISIT: Wait = Wait {
-    lane: "W2",
-    story: "E11-9",
-    pr: None,
-    lands: "a browser visit of web/'s report screen at `/backtests/bt-demo-01` in `cell demo`'s web \
-            run, reading the stored report, and a link to it",
 };
 const E2E_FILL: Wait = Wait {
     lane: "E2E",
@@ -1242,13 +1244,11 @@ pub fn plan(
                         ("/backtest/mandate_version", version.clone()),
                     ]),
                 }),
-                Part::Gap(Gap {
-                    what: "the owner opens the backtest's report in web/, from a link (the API \
-                           lists no backtests)",
-                    on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
-                              which renders this report over the API, and the owner's session \
-                              through the stub issuer (#1591)",
-                    waits: vec![W2_REPORT_VISIT],
+                Part::WebReport(ReportCheck {
+                    shows: "the owner opening the backtest's report in web/ from its link (the \
+                            API lists no backtests), and the report the run stored shown, read \
+                            through the API",
+                    backtest: BACKTEST_ID,
                 }),
             ],
         },
@@ -1325,6 +1325,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             | Part::Web(_)
             | Part::WebSignIn(_)
             | Part::WebSetUp(_)
+            | Part::WebReport(_)
             | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
@@ -2056,6 +2057,21 @@ pub fn run_in(name: &str) -> Result<String> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
                         failed.get_or_insert_with(|| format!("web/ set-up: {said}"));
+                    }
+                }
+                Part::WebReport(check) => {
+                    let outcome = match &failed {
+                        Some(_) => SetUpOutcome::AfterFailure,
+                        None => report(&workspace, check.backtest)?,
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = report_verdict(&outcome, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ report visit: {said}"));
                     }
                 }
                 Part::WebTradeLoop(check) => {
@@ -2856,6 +2872,41 @@ pub fn setup_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static st
     }
 }
 
+/// The owner's visit of `backtest`'s report from `web/` in `workspace`, reached as [`set_up`]
+/// reaches the browser, with its outcome read as a set-up's ([`SetUpOutcome`]).
+fn report(workspace: &str, backtest: &str) -> Result<SetUpOutcome> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(SetUpOutcome::Unaskable(why));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok(SetUpOutcome::NoTools(why));
+    }
+    if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
+        return Ok(SetUpOutcome::Unaskable(format!("{why:#}")));
+    }
+    Ok(match web::report_from_web(workspace, backtest) {
+        Ok(reached) => SetUpOutcome::Ran(reached),
+        Err(why) => SetUpOutcome::Failed(format!("{why:#}")),
+    })
+}
+
+/// How the report visit from `web/` reads, as [`setup_verdict`] reads a set-up: `ran` only when
+/// it reached every step of [`web::REPORT_STEPS`], naming the link the owner opens, at `web/`'s
+/// origin.
+pub fn report_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static str, String, bool) {
+    match outcome {
+        SetUpOutcome::Ran(reached) => {
+            let link = reached.get("report_link").map_or("", String::as_str);
+            (
+                "ran",
+                format!("the stored report shown at {}{link}", DEMO_APP_ORIGIN),
+                false,
+            )
+        }
+        _ => setup_verdict(outcome, required),
+    }
+}
+
 /// The signed-in read of every approval in `workspace`, whatever its state.
 pub fn requests_read(workspace: &str) -> ApiCheck {
     ApiCheck {
@@ -3566,19 +3617,22 @@ mod tests {
         );
         assert_eq!(all[record].expect, format!("report={DEMO_REPORT}"));
         assert!(all.iter().filter(|g| g.command.is_some()).count() == 1);
-        let lanes: Vec<&str> = steps[4]
+        assert!(
+            !steps[4].parts.iter().any(|p| matches!(p, Part::Gap(_))),
+            "step 5 waits on no lane: web/ visits the report screen"
+        );
+        let visits: Vec<&str> = steps[4]
             .parts
             .iter()
             .filter_map(|p| match p {
-                Part::Gap(g) => Some(g.waits.iter().map(|w| w.lane)),
+                Part::WebReport(r) => Some(r.backtest),
                 _ => None,
             })
-            .flatten()
             .collect();
         assert_eq!(
-            lanes,
-            ["W2"],
-            "only the web run's visit to the report screen is left"
+            visits,
+            [BACKTEST_ID],
+            "web/ opens the backtest the Job recorded"
         );
     }
 
@@ -4464,7 +4518,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6, the trade
+    /// `main` make steps 2 to 4 partial, step 3's research gestures among them; step 5, the report
+    /// the Job records and web/'s visit of it, runs whole; step 6, the trade
     /// loop's own exit after the fill, runs whole; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
@@ -4474,15 +4529,13 @@ mod tests {
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [
-                Ready, Partial, Partial, Partial, Partial, Ready, Ready, Ready
-            ]
+            [Ready, Partial, Partial, Partial, Ready, Ready, Ready, Ready]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Ready, Partial, Ready
+                Ready, Partial, Partial, Partial, Ready, Ready, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {

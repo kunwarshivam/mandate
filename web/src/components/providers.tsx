@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, forwardRef, useMemo } from "react";
+import { type ReactNode, forwardRef, useEffect, useMemo, useState } from "react";
 import NextLink from "next/link";
 import { MotionConfig } from "motion/react";
 import { Toasty } from "@cloudflare/kumo/components/toast";
@@ -8,7 +8,9 @@ import { TooltipProvider } from "@cloudflare/kumo/components/tooltip";
 import { KumoLocaleProvider, LinkProvider, type LinkComponentProps } from "@cloudflare/kumo/utils";
 import { JournalToasts } from "@/components/shell/journal-toasts";
 import type { Workspace } from "@/fixtures/types";
+import { type Resolved, resolveWorkspace } from "@/api/memberships";
 import { emptyWorkspace } from "@/api/reads";
+import type { SessionKeeper } from "@/api/session";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { browserSessionKeeper } from "@/lib/api-session";
 import type { ApiSource } from "@/lib/data-source";
@@ -58,16 +60,63 @@ export function ApiProviders({
   );
   return (
     <Frame>
-      {source ? (
-        <ApiRuntimeProvider source={source} session={session ?? undefined}>
+      {source && source.workspaceId !== null ? (
+        <ApiRuntimeProvider source={{ origin: source.origin, workspaceId: source.workspaceId }} session={session ?? undefined}>
           {body}
         </ApiRuntimeProvider>
+      ) : source ? (
+        <FromMemberships origin={source.origin} session={session}>
+          {body}
+        </FromMemberships>
       ) : (
         <RuntimeProvider initial={emptyWorkspace("unreachable", new Date().toISOString())} tick={false}>
           {body}
         </RuntimeProvider>
       )}
     </Frame>
+  );
+}
+
+/** What the screens hold while no workspace is named: nothing, in the state that says why. */
+const UNNAMED: Readonly<Record<Exclude<Resolved, { ok: true }>["reason"] | "loading", Workspace["status"]>> = {
+  loading: "loading",
+  signed_out: "signed_out",
+  none: "membership_unavailable",
+  several: "membership_unavailable",
+  unavailable: "unreachable",
+};
+
+/**
+ * The workspace from the session's memberships (`GET /v1/me/workspaces`, DEC-2113), when the
+ * configuration names none. The session is opened first, as every read needs it. Exactly one
+ * membership is read; none or several hold an empty workspace that says so, and take no command.
+ */
+function FromMemberships({ origin, session, children, fetch }: { origin: string; session: SessionKeeper | null; children: ReactNode; fetch?: (input: string, init: RequestInit) => Promise<Response> }) {
+  const [resolved, setResolved] = useState<Resolved | null>(null);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const opened = session ? await session.open() : "open";
+      if (opened !== "open" && opened !== "outage") return live && setResolved({ ok: false, reason: opened === "unreachable" ? "unavailable" : "signed_out" });
+      const answer = await resolveWorkspace(fetch ?? ((input, init) => window.fetch(input, init)), origin);
+      if (live) setResolved(answer);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [origin, session, fetch]);
+  if (resolved?.ok) {
+    return (
+      <ApiRuntimeProvider source={{ origin, workspaceId: resolved.workspaceId }} session={session ?? undefined}>
+        {children}
+      </ApiRuntimeProvider>
+    );
+  }
+  const status = UNNAMED[resolved ? resolved.reason : "loading"];
+  return (
+    <RuntimeProvider key={status} initial={emptyWorkspace(status, new Date().toISOString())} tick={false} offline>
+      {children}
+    </RuntimeProvider>
   );
 }
 

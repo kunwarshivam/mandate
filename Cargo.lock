@@ -2329,6 +2329,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-news-reader"
+version = "0.0.0"
+dependencies = [
+ "mandate-connections",
+ "mandate-sources",
+ "mandate-time",
+ "mandate-vault",
+ "secrecy",
+]
+
+[[package]]
 name = "mandate-notify"
 version = "0.0.0"
 dependencies = [
