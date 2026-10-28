@@ -7660,7 +7660,9 @@ cool-off and answers `step_up_missing` (DEC-2146 item 3).
      - names the same `causation_id` (`causation_id`);
      - was written by the same actor (`actor.id`);
      - names the same `challenge` (`payload.challenge`);
-     - names the same `credential` (`payload.credential`).
+     - names the same `credential` (`payload.credential`);
+     - carries the same `event_time` (`event_time`), the instant the verifier judged the step-up at
+       ([DEC-2146](../project/decisions/DEC-2146.md) item 4).
 
 **Stream rule** on the control stream, the writer's, and failing closed in the verifier's fold:
 
