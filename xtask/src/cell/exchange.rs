@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use sha2::Digest;
 
 use super::executor::{gestures, workspace_opened};
-use super::scenario::{FOUNDER, Gesture, point_api};
+use super::scenario::{FOUNDER, Gesture, SetUpBy, point_api};
 use super::{
     API_LOCAL_PORT, FIXTURE_REDIRECT_URI, NAMESPACE, VAULT_INIT, Verdict, api_port_forward,
     in_vault_pod, kubeconfig, kubectl, open_session, reply_body, run_id, session_cookie, state,
@@ -309,7 +309,7 @@ const TOKEN_READ: &str = "read -r BAO_TOKEN && export BAO_TOKEN && \
 pub fn drill(seeded: bool, late: bool) -> Result<Verdict> {
     let id = run_id()?;
     let workspace = workspace_of(&id);
-    point_api(&workspace)?;
+    point_api(&workspace, SetUpBy::Cli)?;
     let (done, logs) = gestures(&id, "o", &workspace_opened(&workspace), &[])?;
     if !done {
         return Ok(Verdict::Broken(format!(

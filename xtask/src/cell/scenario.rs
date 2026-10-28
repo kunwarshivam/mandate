@@ -2004,7 +2004,7 @@ pub fn run_in(name: &str) -> Result<String> {
     let id = run_id()?;
     let workspace = workspace_of(&id);
     if api_unaskable()?.is_none() {
-        point_api(&workspace)?;
+        point_api(&workspace, SET_UP_BY)?;
     }
     let inputs = demo_inputs()?;
     let connected = if let ImageSource::Pull(_) = host_image_source()? {
@@ -2782,14 +2782,11 @@ fn pointed_values(workspace: &str, by: SetUpBy) -> Vec<String> {
     values
 }
 
-/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010), and the second
-/// manager and the model gateway at its research workspace (DEC-2070, DEC-2397 item 6): a `helm
-/// upgrade` of the workspace release that keeps every other value, then a wait until each of those
-/// Deployments the cell holds has rolled out, so no pod of an earlier run still serves another
-/// workspace; and
-/// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
-/// through it (`api_port_forward` would reuse a forward that still answers its 401).
-pub(super) fn point_api(workspace: &str) -> Result<()> {
+/// The `helm upgrade` [`point_api`] runs for the run's `workspace`, its agent set up `by` the
+/// CLI or `web/`: the workspace release, every other value kept, [`pointed_values`] set, waited
+/// on. Only the demo passes its own [`SET_UP_BY`]; every drill passes [`SetUpBy::Cli`], so no
+/// drill's cell ever waives the cool-off.
+pub(super) fn point_args(workspace: &str, by: SetUpBy) -> Vec<String> {
     let mut args = vec![
         "upgrade".to_owned(),
         "workspace".to_owned(),
@@ -2798,10 +2795,22 @@ pub(super) fn point_api(workspace: &str) -> Result<()> {
         NAMESPACE.to_owned(),
         "--reuse-values".to_owned(),
     ];
-    for value in pointed_values(workspace, SET_UP_BY) {
+    for value in pointed_values(workspace, by) {
         args.extend(["--set".to_owned(), value]);
     }
     args.extend(["--wait", "--wait-for-jobs", "--timeout", "3m"].map(str::to_owned));
+    args
+}
+
+/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010), and the second
+/// manager and the model gateway at its research workspace (DEC-2070, DEC-2397 item 6): a `helm
+/// upgrade` of the workspace release that keeps every other value, then a wait until each of those
+/// Deployments the cell holds has rolled out, so no pod of an earlier run still serves another
+/// workspace; and
+/// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
+/// through it (`api_port_forward` would reuse a forward that still answers its 401).
+pub(super) fn point_api(workspace: &str, by: SetUpBy) -> Result<()> {
+    let args = point_args(workspace, by);
     let upgraded = helm(&args.iter().map(String::as_str).collect::<Vec<_>>());
     if upgraded.is_err() {
         api_diagnosis();
@@ -5433,6 +5442,48 @@ mod tests {
                 row.contains(member) || written || closed,
                 "{}: {member}",
                 check.event_type
+            );
+        }
+    }
+
+    /// R2 on #2885: the cell's `helm upgrade` waives the cool-off exactly when it is told the
+    /// agent is set up from `web/`, and a drill, which is always told the CLI, never does.
+    #[test]
+    fn only_a_web_set_up_waives_the_cool_off_in_the_cells_upgrade() {
+        let run = workspace_of("12");
+        let waiver = "api.stepUpCoolOffWaiver=true".to_owned();
+        let waived = |by| {
+            point_args(&run, by)
+                .windows(2)
+                .any(|w| w == ["--set".to_owned(), waiver.clone()])
+        };
+        assert!(waived(SetUpBy::Web));
+        assert!(!waived(SetUpBy::Cli));
+        let cli = point_args(&run, SetUpBy::Cli);
+        assert_eq!(
+            cli[..6],
+            [
+                "upgrade",
+                "workspace",
+                WORKSPACE_CHART,
+                "--namespace",
+                NAMESPACE,
+                "--reuse-values"
+            ]
+        );
+        assert_eq!(
+            cli[cli.len() - 4..],
+            ["--wait", "--wait-for-jobs", "--timeout", "3m"]
+        );
+        for drill in ["exchange.rs", "executor.rs"] {
+            let source = fs::read_to_string(format!("src/cell/{drill}")).unwrap();
+            assert!(
+                source.contains("point_api(&workspace, SetUpBy::Cli)"),
+                "{drill} tells the CLI"
+            );
+            assert!(
+                !source.contains("SetUpBy::Web") && !source.contains("SET_UP_BY"),
+                "{drill}"
             );
         }
     }

@@ -23,7 +23,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::scenario::{
-    AGENT, FOUNDER, Gesture, MANDATE_FILE, confirm_code, deploy_code, gestures_job,
+    AGENT, FOUNDER, Gesture, MANDATE_FILE, SetUpBy, confirm_code, deploy_code, gestures_job,
     instrument_for_run, lines_of, point_api, reference,
 };
 use super::{NAMESPACE, Verdict, kubectl, render, run_id, run_job};
@@ -391,7 +391,7 @@ pub fn executor_running(pods: &Value, account: &str) -> Option<Option<String>> {
 pub fn drill(seeded: bool) -> Result<Verdict> {
     let id = run_id()?;
     let (workspace, account) = (workspace_of(&id), account_of(&id));
-    point_api(&workspace)?;
+    point_api(&workspace, SetUpBy::Cli)?;
     let mandate = fs::read(MANDATE_FILE).with_context(|| format!("reading {MANDATE_FILE}"))?;
     let version = reference(&mandate);
     let files = [
@@ -511,7 +511,7 @@ const SCHEDULER_POD: &str = "mandate.dev/process=scheduler";
 pub fn ticks_drill(seeded: bool) -> Result<Verdict> {
     let id = run_id()?;
     let workspace = workspace_of(&id);
-    point_api(&workspace)?;
+    point_api(&workspace, SetUpBy::Cli)?;
     if !seeded {
         return Ok(ticks(&id, &workspace)?.map_or(Verdict::Held, Verdict::Broken));
     }
