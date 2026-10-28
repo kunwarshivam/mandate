@@ -253,14 +253,33 @@ impl Http {
         body: &Value,
         judge: impl FnOnce(u16, &[u8]) -> Result<(), SourceError>,
     ) -> Result<Option<Value>, SourceError> {
+        self.judged(Method::POST, path, token, Some(body), judge)
+            .await
+    }
+
+    /// One request to `/v1/<path>` whose refusal `judge` reads from its status and body, as
+    /// [`Http::call`] reads it from the status alone. A refused answer's body is wiped and never
+    /// reaches the error.
+    async fn judged(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&SecretString>,
+        body: Option<&Value>,
+        judge: impl FnOnce(u16, &[u8]) -> Result<(), SourceError>,
+    ) -> Result<Option<Value>, SourceError> {
         self.forget();
+        let asked = method.clone();
         let mut request = self
             .client
-            .post(format!("{}/v1/{path}", self.address))
-            .header("Content-Type", "application/json")
-            .body(body.to_string());
+            .request(method, format!("{}/v1/{path}", self.address));
         if let Some(token) = token {
             request = request.header("X-Vault-Token", token.expose_secret());
+        }
+        if let Some(body) = body {
+            request = request
+                .header("Content-Type", "application/json")
+                .body(body.to_string());
         }
         let response = request.send().await.map_err(|_| SourceError::Unavailable)?;
         let status = response.status();
@@ -270,7 +289,7 @@ impl Http {
             .map_err(|_| SourceError::Unavailable)?
             .to_vec();
         let judged = judge(status.as_u16(), &bytes);
-        self.note(&Method::POST, path, status, &judged);
+        self.note(&asked, path, status, &judged);
         if let Err(refused) = judged {
             bytes.zeroize();
             return Err(refused);
@@ -343,6 +362,36 @@ pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<
             .is_some_and(|answer| answer.get("errors") == Some(&missing));
     if says_missing {
         return Err(SourceError::RoleMissing);
+    }
+    refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
+}
+
+/// OpenBao's answers, verbatim, to every request on a KV v2 mount while the mount finishes the
+/// upgrade it starts in the background when it is enabled (`internal/builtin/logical/kv/upgrade.go`
+/// in OpenBao 2.7.1): first as the node that upgrades, then as one that waits for it.
+const KV_UPGRADING: [&str; 2] = [
+    "Upgrading from non-versioned to versioned data. This backend will be unavailable for a brief \
+     period and will resume service shortly.",
+    "Waiting for the primary to upgrade from non-versioned to versioned data. This backend will be \
+     unavailable for a brief period and will resume service when the primary is finished.",
+];
+
+/// The refusal an answer from a KV v2 mount means, its status and its body: [`refusal`]'s, except
+/// that a 400 whose one error is one of [`KV_UPGRADING`] is [`SourceError::KvUpgrading`], so a
+/// provisioning that enabled the mount a moment ago can wait for the upgrade to finish, and every
+/// other refusal, any other 400 among them, stays a refusal (E21-32v). No part of the body reaches
+/// the error.
+pub fn kv_upgrade_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
+    let says_upgrading = status == 400
+        && serde_json::from_slice::<Value>(body)
+            .ok()
+            .is_some_and(|answer| {
+                KV_UPGRADING
+                    .iter()
+                    .any(|message| answer.get("errors") == Some(&json!([message])))
+            });
+    if says_upgrading {
+        return Err(SourceError::KvUpgrading);
     }
     refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
@@ -1339,6 +1388,25 @@ pub fn provisioned_policy(
     }
 }
 
+/// Reads the KV mount's configuration, so a mount that is still upgrading answers
+/// [`SourceError::KvUpgrading`] before provisioning writes anything to it, or any policy, role or
+/// secret id: the caller waits and provisions again (E21-32v).
+pub(crate) async fn kv_settled(
+    http: &Http,
+    token: Option<&SecretString>,
+    mounts: &Mounts,
+) -> Result<(), SourceError> {
+    http.judged(
+        Method::GET,
+        &format!("{}/config", mounts.kv),
+        token,
+        None,
+        kv_upgrade_refusal,
+    )
+    .await
+    .map(drop)
+}
+
 /// The fingerprint key and registry (DEC-2345): the transit mount, its key, never exportable nor
 /// deletable, and the registry entry made to take only check-and-set writes.
 async fn provision_fingerprints(
@@ -1428,6 +1496,7 @@ async fn provision_over(
         )
         .await?;
     }
+    kv_settled(http, token, mounts).await?;
     provision_fingerprints(http, token, mounts).await?;
     let auth_mounted = http
         .call(

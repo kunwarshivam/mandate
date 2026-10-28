@@ -392,7 +392,12 @@ staging's apply does (DEC-2630), before the workspace chart: it copies its stati
 the k3s node, which runs `mandate vault provision --secrets-namespace ws-ws1 --kubernetes-host`
 through a port-forward on the node's loopback, the root token on its standard input, into `kubectl
 apply`. That issues every AppRole Secret, `vault-approle-provisioner` among them, and sets
-Kubernetes auth up at the `kubernetes` Service's address. A vault that `cell up` has just initialized
+Kubernetes auth up at the `kubernetes` Service's address. A KV v2 mount OpenBao has just enabled
+finishes an upgrade in the background, and until it does, it answers every request with a 400
+that says so. Provisioning reads the mount's configuration before it writes anything to it or any
+policy, role or secret id, and `mandate vault provision` provisions again every half second while
+that read is OpenBao's upgrading answer, for up to a minute (E21-32v, issue #2869). Any other
+refusal stops it at once. A vault that `cell up` has just initialized
 is always provisioned, so no Secret left from an earlier vault keeps a stale secret id; otherwise
 a cell where that Secret is already there is left as it is, so a second `cell up` rotates no
 credential. The provisioner's policy adds a `+`, on the role path under each Kubernetes-auth
