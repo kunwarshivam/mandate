@@ -617,7 +617,8 @@
         "subjectLinks",
         "ingressPeers",
         "vaultBinding",
-        "connectFinish"
+        "connectFinish",
+        "stepUpCoolOffWaiver"
       ],
       "properties": {
         "org": {
@@ -671,6 +672,10 @@
         "connectFinish": {
           "type": "boolean",
           "description": "The connect finish's Deployment, from the API's image, holding the connection manager's AppRole alone as owner-only files, with egress to the journal and the vault on 8200 (DEC-2348 item 3)."
+        },
+        "stepUpCoolOffWaiver": {
+          "type": "boolean",
+          "description": "MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true: a dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up, each waiver journaled as StepUpCoolOffWaived (DEC-2146); any other tier refuses it"
         }
       }
     },
@@ -822,6 +827,38 @@
         },
         "required": [
           "oauthFixture"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentTier": {
+            "enum": [
+              "dev",
+              "ci"
+            ]
+          }
+        },
+        "required": [
+          "deploymentTier"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "api": {
+            "properties": {
+              "stepUpCoolOffWaiver": {
+                "const": true
+              }
+            },
+            "required": [
+              "stepUpCoolOffWaiver"
+            ]
+          }
+        },
+        "required": [
+          "api"
         ]
       },
       "then": {
