@@ -824,7 +824,8 @@ fn a_waived_step_up_counts_and_carries_its_waiver_inside_the_assertion() {
     ] {
         let w = cooling_in(Some(waiver));
         let signed = w.signed(9);
-        let ask = w.ask();
+        let mut ask = w.ask();
+        ask.assertion = Some(signed.wire(CREDENTIAL));
         let answer = w.judge(&ask);
         let Ok(Some(asserted)) = answer else {
             panic!("{waiver:?}: the step-up counts, not {answer:?}");
