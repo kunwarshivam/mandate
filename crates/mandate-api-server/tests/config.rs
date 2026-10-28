@@ -558,7 +558,7 @@ fn a_waiver_of_any_other_value_refuses_the_start_in_every_tier() {
         OsStr::new("True"),
         OsStr::new(" true"),
         OsStr::new("true\n"),
-        OsStr::from_bytes(b"tru\xffe"),
+        OsStr::from_bytes(b"tr\xffue"),
     ];
     for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
         for value in values {
