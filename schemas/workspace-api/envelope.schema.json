@@ -72,9 +72,7 @@
         "busy": "E8-14",
         "fold_unavailable": "E10-13",
         "positions_held": "E10-13",
-        "agents_not_stopped": "E10-13",
-        "acknowledgment_unavailable": "E10-12",
-        "acknowledgment_request_invalid": "E10-12"
+        "agents_not_stopped": "E10-13"
       }
     },
     "Effect": {
