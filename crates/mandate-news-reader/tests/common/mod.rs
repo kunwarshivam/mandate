@@ -1,5 +1,6 @@
 #![allow(
     dead_code,
+    unused_imports,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
