@@ -779,6 +779,41 @@ fn a_filled_brackets_legs_never_read_unknown_and_a_risk_exit_goes_out() -> Resul
         }),
         "the exit fills"
     );
+    let exits: Vec<String> = journal
+        .payloads("OrderStateChanged")
+        .iter()
+        .filter(|change| {
+            change.get("client_order_id").and_then(Value::as_str) == Some(&format!("md-{exit}"))
+        })
+        .filter_map(|change| {
+            change
+                .get("state")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(
+        exits.last().map(String::as_str),
+        Some("filled"),
+        "the exit, which the fixture fills on placement and so lists in no open-orders read, may \
+         pass through unknown, but its own run books its fill and it ends filled: {exits:?}"
+    );
+    let positions = journal.payloads("BrokerPositionObserved");
+    let last = positions.last().ok_or("a position is observed")?;
+    assert_eq!(
+        (
+            last.get("model_qty").and_then(Value::as_str),
+            last.get("broker_qty").and_then(Value::as_str)
+        ),
+        (Some("0"), Some("0")),
+        "the account ends flat: {last:?}"
+    );
+    let runs = journal.payloads("ReconciliationRun");
+    assert!(
+        runs.iter().all(|run| result(run) != Some("mismatch")),
+        "no run finds an unexplained difference; the one booking the exit adopts its state and \
+         fill (§11), and nothing works after it: {runs:?}"
+    );
     Ok(())
 }
 
