@@ -2335,11 +2335,14 @@ dependencies = [
  "mandate-canon",
  "mandate-gate-context",
  "mandate-journal",
+ "mandate-process",
  "mandate-research",
+ "mandate-research-run",
  "mandate-sources",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
+ "proptest",
  "secrecy",
 ]
 

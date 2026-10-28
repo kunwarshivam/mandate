@@ -13,11 +13,14 @@ workspace = true
 mandate-canon.workspace = true
 mandate-gate-context.workspace = true
 mandate-journal.workspace = true
+mandate-process.workspace = true
 mandate-research.workspace = true
+mandate-research-run.workspace = true
 mandate-sources.workspace = true
+mandate-store.workspace = true
 mandate-time.workspace = true
 mandate-vault.workspace = true
 secrecy.workspace = true
 
 [dev-dependencies]
-mandate-store.workspace = true
+proptest.workspace = true
