@@ -326,7 +326,7 @@ describe("no order ticket (DEC-528)", () => {
     memberships: ["MY_WORKSPACES_ROUTE", "myWorkspaces", "pickWorkspace", "resolveWorkspace"],
     "mock-server": ["MOCK_AUTHORIZATION_ORIGIN", "MOCK_MODEL", "MOCK_PASSKEY_ID", "MOCK_PRINCIPAL", "MOCK_RP_ID", "MOCK_USER_HANDLE", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
-    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "coolOffWaivedFrom", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
+    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi", "reconciledHolding"],
     reads: ["emptyWorkspace"],
     records: ["recordsRead"],

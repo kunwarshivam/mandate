@@ -13,6 +13,7 @@
 import { array, closedEnum, isRecord, nullable, object, string, timestamp } from "./decode";
 import type { ContentRef, Decoder, Timestamp } from "./types";
 import type { StepUpChallenge } from "./step-up";
+import { coolOffWaivedFrom } from "@/lib/cool-off-build";
 import { sha256Hex } from "@/lib/sha256";
 
 /** `envelope.schema.json`'s `StepUpEvidence` as a passkey call carries it (DEC-2108 item 7: `authenticated_at` is the challenge's `issued_at`). */
@@ -152,16 +153,7 @@ const bytesOf = (buffer: unknown): Uint8Array | null =>
       ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
       : null;
 
-/**
- * Whether this build lets a passkey in its cool-off be tried (DEC-2411): only `"1"`, which only the
- * local cell's Playwright config sets, and only when the cell waives a first passkey's cool-off
- * (DEC-2146). It drops this page's own pre-check and nothing else: the server stays the only judge,
- * and refuses the passkey everywhere it does not waive the cool-off (`step_up_missing`).
- */
-export function coolOffWaivedFrom(value: string | undefined): boolean {
-  return value === "1";
-}
-
+/** DEC-2411's flag as this build was made with it; the only place it is read (`coolOffWaivedFrom`). */
 const COOL_OFF_WAIVED = coolOffWaivedFrom(process.env.NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED);
 
 /**

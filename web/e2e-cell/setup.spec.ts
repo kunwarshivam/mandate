@@ -18,8 +18,8 @@ import { virtualPasskey } from "./virtual-passkey";
  *    the CLI until then;
  * 4. is offered no deployment, since version 1 is not confirmed.
  *
- * With `OWLHEAD_CELL_SETUP_DEPLOY=1`, in a dev or ci cell that waives a first passkey's cool-off
- * (DEC-2146), steps 3 and 4 are instead the owner confirming version 1 with the passkey
+ * With `OWLHEAD_CELL_SETUP_DEPLOY=1`, which the driver sets only in a dev or ci cell it started
+ * waiving a first passkey's cool-off (DEC-2146), steps 3 and 4 are instead the owner confirming version 1 with the passkey
  * (`POST /mandate-versions/{v}/confirm`) and deploying it to paper (`POST /agents`): web/'s set-up
  * then deploys the run's agent, and the API's id for it is the result's `agent_deployed`, which the
  * driver hands every later step.
@@ -35,9 +35,12 @@ const WORKSPACE = process.env.OWLHEAD_WORKSPACE_ID ?? "";
 const SETUP_MS = Number(process.env.OWLHEAD_CELL_SETUP_MS ?? 240_000);
 const PAGE_MS = 90_000;
 /**
- * Set by the driver when the cell waives a first passkey's cool-off (DEC-2146) and web/'s set-up
- * deploys the run's agent: the owner then confirms and deploys version 1 here, and the driver takes
- * the agent's id from `agent_deployed`. Unset, the confirm is held as the cool-off holds it.
+ * Set by the driver when web/'s set-up deploys the run's agent, which it does only with the cell
+ * started waiving a first passkey's cool-off (DEC-2146; the scenario's tests pin the two together).
+ * The owner then confirms and deploys version 1 here, and the driver takes the agent's id from
+ * `agent_deployed`. Nothing a page can read shows the waiver, so the spec does not check it: in a
+ * cell that does not waive, the API answers the confirm `step_up_missing` and the step refuses with
+ * that answer. Unset, the confirm is held as the cool-off holds it.
  */
 const DEPLOY = process.env.OWLHEAD_CELL_SETUP_DEPLOY === "1";
 /** An agent id as the API mints it, the form the driver accepts. */

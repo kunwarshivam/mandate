@@ -49,7 +49,7 @@ export default defineConfig({
     },
     {
       command: `npx next dev --experimental-https --experimental-https-key ${KEY} --experimental-https-cert ${CERT} --hostname localhost --port 4317`,
-      env: COOL_OFF_WAIVED ? { NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED: "1" } : {},
+      env: { NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED: COOL_OFF_WAIVED ? "1" : "0" },
       url: ORIGIN,
       ignoreHTTPSErrors: true,
       reuseExistingServer: false,
