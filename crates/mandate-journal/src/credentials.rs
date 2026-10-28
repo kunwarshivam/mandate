@@ -5,6 +5,10 @@
 //! rule 249 reads as at version 1, and §9.32's `StepUpAsserted` at version 1, with rule 252 at
 //! append and batch rule 253 in [`check_batch`]. Stream rule 254 is the writer's, as 251 is.
 //!
+//! v0.112 (DEC-2146) closes §9.38's `StepUpCoolOffWaived` at version 1, with rule 316 at append
+//! and batch rule 317 in [`check_batch`], judged after rule 253. Stream rule 318 is the writer's, as
+//! 254 is.
+//!
 //! §9.31's stream rule, 251, is the writer's: the API checks it against its own fold before it
 //! appends, and the verifier's fold fails closed on it, so `append` neither sees the stream nor
 //! judges it (the module's doc in the spec says so in as many words).
@@ -22,9 +26,10 @@ use crate::{Draft, Invalid, InvalidReason, StreamType};
 const ENROLLED: &str = "CredentialEnrolled";
 const REMOVED: &str = "CredentialRemoved";
 const ASSERTED: &str = "StepUpAsserted";
+const WAIVED: &str = "StepUpCoolOffWaived";
 
-/// The control-stream event types §9.31 and §9.32 add to [`crate::control::governs`].
-pub(crate) const CONTROL: [&str; 3] = [ENROLLED, REMOVED, ASSERTED];
+/// The control-stream event types §9.31, §9.32 and §9.38 add to [`crate::control::governs`].
+pub(crate) const CONTROL: [&str; 4] = [ENROLLED, REMOVED, ASSERTED, WAIVED];
 
 /// A cool-off's length when one is owed (identity spec §10.1).
 const DAY_SECS: i64 = 86_400;
@@ -55,6 +60,7 @@ pub(crate) fn schema(
         (ENROLLED, 2, StreamType::Control) => Some(&CREDENTIAL_ENROLLED_V2),
         (REMOVED, 1, StreamType::Control) => Some(&CREDENTIAL_REMOVED),
         (ASSERTED, 1, StreamType::Control) => Some(&STEP_UP_ASSERTED),
+        (WAIVED, 1, StreamType::Control) => Some(&STEP_UP_COOL_OFF_WAIVED),
         _ => None,
     }
 }
@@ -104,27 +110,61 @@ static STEP_UP_ASSERTED: Ty = Ty::Record(&[
     ("assertion", Ty::DigestRef),
 ]);
 
+/// §9.38's `StepUpCoolOffWaived`: the challenge and credential of the step-up a test cell counted
+/// inside the credential's enrolment cool-off, the cool-off's end, and the cell's tier.
+static STEP_UP_COOL_OFF_WAIVED: Ty = Ty::Record(&[
+    ("challenge", Ty::Ulid),
+    ("credential", Ty::Text(credential_id)),
+    ("cool_off_ends", Ty::Timestamp),
+    ("tier", Ty::OneOf(&["dev", "ci"])),
+]);
+
 static CREDENTIAL_REMOVED: Ty = Ty::Record(&[
     ("member", Ty::Ulid),
     ("credential", Ty::Text(credential_id)),
     ("step_up", Ty::Record(STEP_UP)),
 ]);
 
-/// Rules 249, 250 and 252 on a record its schema has normalized, the first that fails reported.
-/// `actor`, `event_time` and `causation_id` are the envelope's.
-pub(crate) fn rules(
-    event_type: &str,
-    payload: &Value,
-    actor: Option<&Value>,
-    event_time: Option<&Value>,
-    causation_id: Option<&Value>,
-) -> Result<(), Invalid> {
+/// The envelope members the rules of this module read.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Read<'a> {
+    pub(crate) actor: Option<&'a Value>,
+    pub(crate) event_time: Option<&'a Value>,
+    pub(crate) causation_id: Option<&'a Value>,
+    pub(crate) environment: Option<&'a Value>,
+}
+
+/// Rules 249, 250, 252 and 316 on a record its schema has normalized, the first that fails
+/// reported.
+pub(crate) fn rules(event_type: &str, payload: &Value, read: Read<'_>) -> Result<(), Invalid> {
     match event_type {
-        ENROLLED => rules_249(payload, actor, event_time),
-        REMOVED => rules_250(payload, actor),
-        ASSERTED => rules_252(payload, actor, causation_id),
+        ENROLLED => rules_249(payload, read.actor, read.event_time),
+        REMOVED => rules_250(payload, read.actor),
+        ASSERTED => rules_252(payload, read.actor, read.causation_id),
+        WAIVED => rules_316(read),
         _ => Ok(()),
     }
+}
+
+/// Rule 316: the waiver names the event the step-up authorized as its cause, its actor is a user,
+/// and it is written in `paper`, since a passkey step-up in `live` is refused before its evidence
+/// is read (DEC-2146 item 3).
+fn rules_316(read: Read<'_>) -> Result<(), Invalid> {
+    ensure(
+        read.causation_id.is_some_and(|c| *c != Value::Null),
+        "causation_id",
+    )?;
+    ensure(
+        read.actor
+            .and_then(|a| a.get("kind"))
+            .and_then(Value::as_str)
+            == Some("user"),
+        "actor.kind",
+    )?;
+    ensure(
+        read.environment.and_then(Value::as_str) == Some("paper"),
+        "environment",
+    )
 }
 
 /// Rule 252: the counter fits 32 bits, the record names the event it authorized as its cause, and
@@ -148,13 +188,9 @@ fn rules_252(
 /// Batch rule 253 (§9.32): each `StepUpAsserted` follows, immediately, the event its cause names
 /// (else its `event_type`), by the same actor (`actor.id`), whose step-up is a passkey's
 /// (`payload.step_up`) over the challenge the assertion answered (`payload.challenge`). Each draft
-/// has already passed `Draft::parse`, so rule 252 has held.
+/// has already passed `Draft::parse`, so rule 252 has held. Then batch rule 317 (§9.38) over every
+/// waiver, in [`check_waivers`].
 pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
-    fn at<'a>(draft: &'a Draft, path: &[&str]) -> Option<&'a Value> {
-        let (first, rest) = path.split_first()?;
-        rest.iter()
-            .try_fold(draft.fields().get(*first)?, |node, name| node.get(name))
-    }
     for (i, draft) in drafts.iter().enumerate() {
         if draft.event_type() != ASSERTED {
             continue;
@@ -180,6 +216,44 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
             at(before, &["payload", "step_up", "assertion_id"]).and_then(Value::as_str);
         if assertion_id != at(draft, &["payload", "challenge"]).and_then(Value::as_str) {
             return refuse("payload.challenge");
+        }
+    }
+    check_waivers(drafts)
+}
+
+/// A draft's member at `path`, dotted from the envelope.
+fn at<'a>(draft: &'a Draft, path: &[&str]) -> Option<&'a Value> {
+    let (first, rest) = path.split_first()?;
+    rest.iter()
+        .try_fold(draft.fields().get(*first)?, |node, name| node.get(name))
+}
+
+/// Batch rule 317 (§9.38): each `StepUpCoolOffWaived` follows, immediately, a `StepUpAsserted`
+/// (else its `event_type`) with the same cause (`causation_id`), actor (`actor.id`), challenge
+/// (`payload.challenge`) and credential (`payload.credential`). Each draft has already passed
+/// `Draft::parse`, so rule 316 has held.
+fn check_waivers(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
+    for (i, draft) in drafts.iter().enumerate() {
+        if draft.event_type() != WAIVED {
+            continue;
+        }
+        let refuse = |path: &str| Err((i, Invalid::new(InvalidReason::Schema, path)));
+        let before = i
+            .checked_sub(1)
+            .and_then(|j| drafts.get(j))
+            .filter(|b| b.event_type() == ASSERTED);
+        let Some(before) = before else {
+            return refuse("event_type");
+        };
+        for (path, member) in [
+            ("causation_id", &["causation_id"][..]),
+            ("actor.id", &["actor", "id"][..]),
+            ("payload.challenge", &["payload", "challenge"][..]),
+            ("payload.credential", &["payload", "credential"][..]),
+        ] {
+            if at(before, member) != at(draft, member) {
+                return refuse(path);
+            }
         }
     }
     Ok(())
