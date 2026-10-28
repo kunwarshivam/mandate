@@ -39,6 +39,11 @@ spec:
     {{- $volumes = "- {name: dispatcher-config, configMap: {name: dispatcher-config, defaultMode: 292, items: [{key: config.json, path: config.json}]}}" }}
     {{- end }}
     {{- $init := "" }}
+    {{- if and (eq .p.name "data") (eq .root.Values.data.source "alpaca-iex") }}
+    {{- $_ := set $launch "mounts" "- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $volumes = include "mandate.vaultVolumes" (dict "root" .root "role" "bars-reader") }}
+    {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "bars-reader") }}
+    {{- end }}
     {{- if and (eq .p.name "model-gateway") .root.Values.modelGateway.registry }}
     {{- $_ := set $launch "mounts" "- {name: model-gateway-registry, mountPath: /run/mandate/model-gateway, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
     {{- $volumes = printf "- {name: model-gateway-registry, configMap: {name: model-gateway-registry, defaultMode: 292, items: [{key: registry.json, path: registry.json}]}}\n%s" (include "mandate.vaultVolumes" (dict "root" .root "role" "model-gateway")) }}

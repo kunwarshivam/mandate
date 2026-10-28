@@ -26,6 +26,8 @@ SQL
 
 sql <<'SQL'
 SELECT format('GRANT CONNECT ON DATABASE %I TO mandate_journal_app', current_database()) \gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO mandate_journal_reader', current_database())
+WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_reader') \gexec
 SQL
 
 for file in "$migrations"/*.sql; do
@@ -50,3 +52,17 @@ SQL
   } | sql -v name="$name" -v digest="$digest"
   echo "applied: $name"
 done
+
+# Last, the read-only group's reads (DEC-2082): select on the journal's tables, as their owner, and
+# nothing else, since a member's binary does not itself refuse a write. A journal bootstrapped
+# before the group was made gets it from CloudNativePG's managed roles; until then this grants
+# nothing, so the Job never fails on it, and the next run grants it. The tables are named, so a
+# journal table a later migration adds is not readable by the group until it is listed here.
+sql <<'SQL'
+SET ROLE mandate_journal_owner;
+SELECT 'GRANT USAGE ON SCHEMA journal TO mandate_journal_reader'
+WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_reader') \gexec
+SELECT 'GRANT SELECT ON journal.event_ids, journal.events, journal.stream_heads TO mandate_journal_reader'
+WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_reader') \gexec
+RESET ROLE;
+SQL

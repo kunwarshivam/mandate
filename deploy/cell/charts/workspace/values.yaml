@@ -88,6 +88,11 @@ dispatcher:
 # CI cell lists any.
 data:
   instruments: []
+  # Where its bars come from (DEC-2082): `recorded`, the listed instruments' recorded series, the
+  # local and CI cell's alone; or `alpaca-iex`, each registered US-equity instrument's settled IEX
+  # bars from data.alpaca.markets under the platform's data key, read once from the vault
+  # (DEC-2283), staging's alone, which lists no instrument.
+  source: recorded
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at

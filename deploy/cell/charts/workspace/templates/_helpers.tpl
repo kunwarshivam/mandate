@@ -16,13 +16,25 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 vault, so its pod carries the label the vault's policy admits on 8200 and an egress rule to it
 alone (DEC-2338). With `modelGateway.registry` the model gateway starts live (DEC-2216 item 4,
 DEC-2081): it reads the registry file the chart renders, logs in to the vault as the model gateway
-with the AppRole `mandate.vaultCopy` puts in its vault directory, and never names `--recorded`. */ -}}
+with the AppRole `mandate.vaultCopy` puts in its vault directory, and never names `--recorded`.
+With `data.source` alpaca-iex the data process stores IEX bars (DEC-2283, DEC-2082): it reads the
+hosted workspace's control stream as its own journal role and Postgres, logs in to the vault as
+`bars-reader`, and reaches its data host; with `recorded` it holds no journal role, since it reads
+no stream. */ -}}
 {{- define "mandate.processes" -}}
 {{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
 {{- $out := list -}}
 {{- range $all -}}
 {{- if and (eq .name "api") $.Values.api.vaultBinding -}}
 {{- $_ := set . "egress" (concat (list (first .egress) "vault") (rest .egress)) -}}
+{{- end -}}
+{{- if eq .name "data" -}}
+{{- if eq $.Values.data.source "alpaca-iex" -}}
+{{- $_ := set . "args" (list "run" "--source" "alpaca-iex" "--workspace" "{hosted_workspace}" "--store" "/var/lib/mandate/artifacts/datasets/alpaca-iex" "--artifacts" "/var/lib/mandate/artifacts" "--vault-address" "{vault}" "--vault-dir" "/run/mandate/vault" "--probe" "/tmp/process.sock") -}}
+{{- $_ := set . "egress" (list "postgres" "vault" "market-data") -}}
+{{- else -}}
+{{- $_ := set . "db_role" nil -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-gateway") $.Values.modelGateway.registry -}}
 {{- $_ := set . "args" (list "run" "--registry" "/run/mandate/model-gateway/registry.json" "--listen" "0.0.0.0:8080" "--probe" "/tmp/process.sock" "--vault-address" "{vault}" "--vault-dir" "/run/mandate/vault") -}}
@@ -379,7 +391,19 @@ local cell serves the recorded bundle alone and names no registry; a hosted cell
 liquidity figures from (DEC-2274), only where the data process stores them. */}}
 {{- if and (has .p.name (list "runtime" "executor")) .root.Values.images.data (include "mandate.artifactsAccess" .) }}
 - name: MANDATE_BARS
-  value: {{ printf "%s/datasets/cell-recorded" (include "mandate.artifactsPath" .) | quote }}
+  value: {{ printf "%s/datasets/%s" (include "mandate.artifactsPath" .) (ternary "alpaca-iex" "cell-recorded" (eq .root.Values.data.source "alpaca-iex")) | quote }}
+{{- end }}
+{{- /* The data process's source (DEC-2082): `recorded` is the local and CI cell's, `alpaca-iex`
+staging's alone, since its data key is the platform's paper data key and the stored bars serve
+managed paper workspaces (DEC-2283). */}}
+{{- if eq .p.name "data" }}
+{{- $iex := eq .root.Values.data.source "alpaca-iex" }}
+{{- if and $iex (or .root.Values.localImages (ne .root.Values.deploymentTier "staging")) }}
+{{- fail (printf "data.source alpaca-iex stores IEX bars in staging alone, and deploymentTier is %q (DEC-2283, DEC-2082)" .root.Values.deploymentTier) }}
+{{- end }}
+{{- if and $iex .root.Values.data.instruments }}
+{{- fail "data.instruments is the recorded series' list: data.source alpaca-iex stores the instruments the control stream registers (DEC-2082)" }}
+{{- end }}
 {{- end }}
 {{- end -}}
 
