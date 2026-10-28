@@ -708,10 +708,7 @@ fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
         "risk_exit",
     )?;
     for _ in 0..20 {
-        assert_eq!(
-            pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
-            Connected::Connecting
-        );
+        assert_eq!(pass(&mut process, &gate, at(NOON)?)?, Connected::Connecting);
         process.step(at(NOON)?);
     }
     assert!(!gate.is_open());
@@ -740,17 +737,11 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
         &broker,
         wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
     )?;
-    assert_eq!(
-        pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
-        Connected::Connecting
-    );
+    assert_eq!(pass(&mut process, &gate, at(NOON)?)?, Connected::Connecting);
     assert!(!gate.is_open());
     process.step(at(NOON)?);
     for _ in 0..3 {
-        assert_eq!(
-            pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
-            Connected::Open
-        );
+        assert_eq!(pass(&mut process, &gate, at(NOON)?)?, Connected::Open);
     }
     assert!(gate.is_open());
     let copies: Vec<_> = journal
@@ -783,13 +774,7 @@ fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Erro
         wired(first.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
     )?;
     process.step(at(NOON)?);
-    pass(
-        &mut process,
-        &first,
-        &scope(),
-        Environment::Paper,
-        at(NOON)?,
-    )?;
+    pass(&mut process, &first, at(NOON)?)?;
     drop(process);
     let restarted = OpeningGate::default();
     let mut process = start_wired(
@@ -800,16 +785,7 @@ fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Erro
             Box::new(TwoPercentStop),
         )?,
     )?;
-    assert_eq!(
-        pass(
-            &mut process,
-            &restarted,
-            &scope(),
-            Environment::Paper,
-            at(NOON)?
-        )?,
-        Connected::Open
-    );
+    assert_eq!(pass(&mut process, &restarted, at(NOON)?)?, Connected::Open);
     assert!(restarted.is_open());
     let copies = journal
         .rows_of(ACCOUNT_STREAM)
@@ -858,7 +834,7 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
         )?;
         for _ in 0..5 {
             assert_eq!(
-                pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
+                pass(&mut process, &gate, at(NOON)?)?,
                 Connected::Closed,
                 "{event_type}"
             );
@@ -923,7 +899,7 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
     for _ in 0..5 {
         process.step(at(NOON)?);
         assert_eq!(
-            pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?),
+            pass(&mut process, &gate, at(NOON)?),
             Err("connection_record_unreadable")
         );
     }
