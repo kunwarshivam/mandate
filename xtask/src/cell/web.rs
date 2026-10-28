@@ -631,7 +631,7 @@ pub fn setup_from_web(workspace: &str, deploys: bool) -> Result<BTreeMap<String,
         ("OWLHEAD_CELL_TIMEOUT_MS", SETUP_TIMEOUT_MS.to_owned()),
     ];
     if deploys {
-        env.push(("OWLHEAD_CELL_SETUP_DEPLOY", "1".to_owned()));
+        env.push((SETUP_DEPLOY_VAR, "1".to_owned()));
     }
     let run = spec_run(workspace, &env, "web-setup", TRADE_LOOP_POLLS, &mut || {
         Ok(())
@@ -749,13 +749,19 @@ struct SpecRun {
     log: PathBuf,
 }
 
+/// The variable `playwright.cell.config.ts` reads to build `next dev` with the browser's side of
+/// the cool-off waiver (lane W's #2908).
+pub const COOL_OFF_VAR: &str = "OWLHEAD_CELL_COOL_OFF_WAIVED";
+/// The variable `setup.spec.ts` reads to confirm and deploy rather than stop at the held confirm.
+pub const SETUP_DEPLOY_VAR: &str = "OWLHEAD_CELL_SETUP_DEPLOY";
+
 /// What every cell spec is told of the step-up cool-off when the run's agent is set up `by`
 /// `web/`: `OWLHEAD_CELL_COOL_OFF_WAIVED=1`, so `next dev` is built with the browser's side of
 /// DEC-2146's waiver, which the cell's API takes only then ([`super::scenario::point_args`]);
 /// nothing when the CLI sets it up, so no spec's browser tries a cooling-off passkey.
 pub fn cool_off_env(by: SetUpBy) -> Vec<(&'static str, &'static str)> {
     match by {
-        SetUpBy::Web => vec![("OWLHEAD_CELL_COOL_OFF_WAIVED", "1")],
+        SetUpBy::Web => vec![(COOL_OFF_VAR, "1")],
         SetUpBy::Cli => Vec::new(),
     }
 }
@@ -928,6 +934,35 @@ mod tests {
             1,
             "spec_run hands it on, from the switch"
         );
+        Ok(())
+    }
+
+    /// R2 on #2885, with lane W: the names xtask hands the specs are the ones `web/` reads, so
+    /// neither side can rename its variable alone. The cell config turns the browser's waiver on
+    /// only on `COOL_OFF_VAR` set to `1`, and the set-up spec deploys only on `SETUP_DEPLOY_VAR`
+    /// set to `1` and writes every step the driver reads when it does.
+    #[test]
+    fn the_specs_read_the_names_xtask_hands_them() -> Result<()> {
+        let web = crate::repo_root()?.join("web");
+        let config = fs::read_to_string(web.join("playwright.cell.config.ts"))?;
+        let spec = fs::read_to_string(web.join("e2e-cell").join(SETUP_SPEC))?;
+        let reads =
+            |text: &str, name: &str| text.contains(&format!("process.env.{name} === \"1\""));
+        assert!(
+            reads(&config, COOL_OFF_VAR),
+            "the cell config reads {COOL_OFF_VAR}"
+        );
+        assert!(
+            reads(&spec, SETUP_DEPLOY_VAR),
+            "the set-up spec reads {SETUP_DEPLOY_VAR}"
+        );
+        assert_eq!(cool_off_env(SetUpBy::Web), [(COOL_OFF_VAR, "1")]);
+        for step in DEPLOY_SETUP_STEPS {
+            assert!(
+                spec.contains(&format!("step(\"{step}\"")),
+                "the spec writes {step}"
+            );
+        }
         Ok(())
     }
 
