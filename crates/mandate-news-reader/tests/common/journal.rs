@@ -27,6 +27,9 @@ pub struct Journal {
     pub appends_down: Rc<Cell<bool>>,
     /// Answers every append `HeadMismatch` while set: a refusal that is not a fence.
     pub appends_refused: Rc<Cell<bool>>,
+    /// The news stream's row bodies a test replaces, by `seq`, as a store that cannot be trusted
+    /// would answer them: what the reader reads at start, never what the journal holds.
+    pub news_bodies: Rc<RefCell<BTreeMap<u64, Vec<u8>>>>,
 }
 
 impl Store for Journal {
@@ -36,7 +39,17 @@ impl Store for Journal {
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
         if stream.stream_type() == StreamType::News {
-            return self.memory.rows(stream);
+            let replaced = self.news_bodies.borrow();
+            return self.memory.rows(stream).map(|rows| {
+                rows.into_iter()
+                    .map(|mut row| {
+                        if let Some(body) = replaced.get(&row.seq) {
+                            row.body.clone_from(body);
+                        }
+                        row
+                    })
+                    .collect()
+            });
         }
         if self.others_down.get() {
             return None;

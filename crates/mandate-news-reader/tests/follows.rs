@@ -263,3 +263,31 @@ fn a_split_on_a_held_instrument_never_stops_its_polling() {
         "the fold goes on past the split"
     );
 }
+
+/// An account row whose body does not parse is reported and passed over, as a refused one is: the
+/// instrument the agent buys after it is still polled.
+#[test]
+fn an_account_row_whose_body_does_not_parse_never_stops_a_held_instrument_s_polling() {
+    let journal = Journal::default();
+    let account_name = format!("acct:{WS}:{ACCOUNT}");
+    journal.push(&account_name, "FeesCharged", object(&[]));
+    journal
+        .others
+        .borrow_mut()
+        .get_mut(&account_name)
+        .unwrap()
+        .last_mut()
+        .unwrap()
+        .body
+        .clone_from(&b"{not canonical".to_vec());
+    bought(&journal, "o1", QQQ, "2");
+    let watched = followed(
+        AGENT,
+        &[],
+        &account_name,
+        &rows(&journal, &account_name),
+        t0(),
+    );
+    assert_eq!(watched.assets, BTreeSet::from([QQQ.to_owned()]));
+    assert!(watched.held_unreadable);
+}
