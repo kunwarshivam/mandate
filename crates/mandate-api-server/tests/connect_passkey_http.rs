@@ -23,14 +23,17 @@ use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{Problem, ProblemCode, Violation};
 use mandate_api::wire::decode;
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::methods::{Methods, Passkey};
+use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::COOKIE_NAME;
 use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_identity::PrincipalId;
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
+use mandate_journal::{
+    ArtifactError, ArtifactRef, ArtifactSource, Draft, StoredEvent, check_batch, get_artifact,
+};
+use mandate_time::UtcNanos;
 use serde_json::json;
 use support_connect::{
     ALICE, APP, Fixture, KEY, MemObjects, StepUpBinding, T0, appended, base, code, ctl, derived,
@@ -98,6 +101,20 @@ fn world() -> World {
 
 /// [`world`] whose object store is `store` made of the in-memory one holding Alice's key.
 fn world_storing(store: impl FnOnce(Arc<MemObjects>) -> Arc<dyn ObjectStore>) -> World {
+    world_in(store, None, T0 - 800)
+}
+
+/// A first enrolment's `cool_off_ends` (rule 249) for Alice's passkey enrolled at `T0 - 900`: 24
+/// hours later, so still cooling at the start.
+const COOLING: i64 = T0 - 900 + 86_400;
+
+/// [`world_storing`] on a server started with `waiver`, Alice's passkey's cool-off ending at
+/// `cool_off_ends`.
+fn world_in(
+    store: impl FnOnce(Arc<MemObjects>) -> Arc<dyn ObjectStore>,
+    waiver: Option<CoolOffWaiver>,
+    cool_off_ends: i64,
+) -> World {
     let signer = Signer::es256();
     let mut held = BTreeMap::new();
     let key = signer.cose_key();
@@ -114,7 +131,7 @@ fn world_storing(store: impl FnOnce(Arc<MemObjects>) -> Arc<dyn ObjectStore>) ->
                         challenges: Arc::clone(&challenges),
                         rp: support_passkey::rp(),
                         keys: Some(keys),
-                        cool_off_waiver: None,
+                        cool_off_waiver: waiver,
                     },
                     cli_confirm: CliConfirm {
                         challenges,
@@ -130,7 +147,13 @@ fn world_storing(store: impl FnOnce(Arc<MemObjects>) -> Arc<dyn ObjectStore>) ->
     enrol(
         &mut rows,
         T0 - 900,
-        enrolled(principal(ALICE), CREDENTIAL, &signer, 0, Some(T0 - 800)),
+        enrolled(
+            principal(ALICE),
+            CREDENTIAL,
+            &signer,
+            0,
+            Some(cool_off_ends),
+        ),
     );
     let seeded = rows.rows.len();
     f.journal
@@ -585,4 +608,90 @@ fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts()
         .collect();
     assert_eq!(kinds, ["ConnectionRequested"], "no assertion record");
     assert!(!w.held(&issued));
+}
+
+/// DEC-2146 item 3: an OAuth connect's start appends its assertion, so it carries the waiver. In a
+/// `ci` cell with the waiver, a fresh passkey's start commits `ConnectionRequested`, its
+/// `StepUpAsserted`, then its `StepUpCoolOffWaived`, all caused alike and at one `event_time`, the
+/// waiver's id §3.4's under its own operation.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_ci_cells_waived_start_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    let w = world_in(|store| store, Some(CoolOffWaiver::Ci), COOLING);
+    let issued = w.challenge();
+    w.f.clock.set(T0 + 5);
+    let signed: Signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.start(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        reply.status,
+        201,
+        "{} after the port answered {:?}",
+        String::from_utf8_lossy(&reply.body),
+        w.answers()
+    );
+    let rows = w.appended();
+    let kinds: Vec<&str> = rows.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(
+        kinds,
+        [
+            "ConnectionRequested",
+            "StepUpAsserted",
+            "StepUpCoolOffWaived"
+        ],
+        "the request, its assertion, then the waiver, in one batch"
+    );
+    assert_eq!(rows[0].event_id, derived("connect"));
+    assert_eq!(rows[1].event_id, derived("connect_step_up_asserted"));
+    assert_eq!(rows[2].event_id, derived("connect_step_up_cool_off_waived"));
+    let expected = format!(
+        r#"{{"challenge":"{}","cool_off_ends":"{}","credential":"{CREDENTIAL}","tier":"ci"}}"#,
+        issued.id,
+        UtcNanos::from_parts(COOLING, 0).expect("a time")
+    );
+    assert_eq!(
+        String::from_utf8(to_canonical(&payload(&rows[2]))).expect("UTF-8"),
+        expected
+    );
+    let envelope = |row: &StoredEvent| parse(&row.body).expect("JSON");
+    for row in &rows[1..] {
+        assert_eq!(
+            envelope(row).get("causation_id").and_then(Value::as_str),
+            Some(derived("connect").as_str()),
+            "{} is caused by the request",
+            row.event_type
+        );
+        for name in ["event_time", "actor", "environment"] {
+            assert_eq!(
+                envelope(row).get(name).map(to_canonical),
+                envelope(&rows[0]).get(name).map(to_canonical),
+                "{} shares the request's {name}",
+                row.event_type
+            );
+        }
+    }
+    let drafts: Vec<Draft> = rows
+        .iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()));
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// DEC-2146 items 1 and 2: without the waiver a fresh passkey's start is `step_up_missing`, and
+/// appends nothing.
+#[test]
+fn without_the_waiver_a_fresh_passkeys_start_is_step_up_missing() {
+    let w = world_in(|store| store, None, COOLING);
+    let issued = w.challenge();
+    w.f.clock.set(T0 + 5);
+    let signed: Signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.start(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        code(&reply),
+        (401, ProblemCode::StepUpMissing),
+        "{:?}",
+        w.answers()
+    );
+    assert!(w.appended().is_empty());
+    assert!(w.held(&issued), "the challenge is kept");
 }

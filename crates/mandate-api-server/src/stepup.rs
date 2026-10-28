@@ -14,6 +14,7 @@ use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::commands::{Event, Writer, caused_envelope};
+use crate::methods::CoolOffWaiver;
 use crate::objects::ObjectStore;
 use crate::routes::string;
 use crate::versions::object;
@@ -47,6 +48,18 @@ pub struct Asserted {
     credential: String,
     sign_count: u32,
     assertion: Vec<u8>,
+    waived: Option<CoolOffWaived>,
+}
+
+/// A test cell's waiver of the signing credential's enrolment cool-off (DEC-2146 items 3 and 4),
+/// carried only inside the [`Asserted`] whose `StepUpAsserted` it follows, so only the writer of
+/// that pair can journal it as `StepUpCoolOffWaived`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoolOffWaived {
+    /// The enrolment's `cool_off_ends`, after the instant the step-up was judged at.
+    pub cool_off_ends: UtcNanos,
+    /// The tier the server started in.
+    pub tier: CoolOffWaiver,
 }
 
 impl Asserted {
@@ -61,7 +74,14 @@ impl Asserted {
             credential,
             sign_count,
             assertion,
+            waived: None,
         }
+    }
+
+    /// The cool-off this step-up was counted inside of, under a test cell's waiver; `None` for a
+    /// credential past its cool-off.
+    pub fn waived(&self) -> Option<CoolOffWaived> {
+        self.waived
     }
 
     /// The challenge's ULID text, the authorized event's `step_up.assertion_id`.

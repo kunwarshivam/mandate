@@ -938,12 +938,18 @@ async fn stepped(
                     now: gate.now,
                 };
                 match forwarded.assertion {
-                    Some(assertion) => app
-                        .step_up
-                        .asserted(evidence, Some(assertion), &action, &judged)
-                        .ok()
-                        .flatten()
-                        .map(Some),
+                    Some(assertion) => {
+                        match app
+                            .step_up
+                            .asserted(evidence, Some(assertion), &action, &judged)
+                        {
+                            Ok(asserted) => asserted.map(Some),
+                            Err(Unverified::Unimplemented { story }) => {
+                                return invalid(vec![Unverified::unimplemented(story)]);
+                            }
+                            Err(Unverified::Code(_)) => None,
+                        }
+                    }
                     None => app
                         .step_up
                         .verify(evidence, &action, &judged)

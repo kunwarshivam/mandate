@@ -685,17 +685,17 @@ fn a_test_cell_starts_with_the_waiver_and_refuses_any_other_value() {
             &LOCAL,
             &[
                 ("MANDATE_DEPLOYMENT_TIER", tier),
-                ("MANDATE_API_PASSKEY_COOL_OFF_WAIVER", "yes"),
+                ("MANDATE_API_STEP_UP_COOL_OFF_WAIVER", "yes"),
             ],
         ));
         assert_eq!(code, Some(1), "{tier}: {out}");
         assert!(
-            out.contains("MANDATE_API_PASSKEY_COOL_OFF_WAIVER"),
+            out.contains("MANDATE_API_STEP_UP_COOL_OFF_WAIVER"),
             "{tier}: the refusal names the setting: {out}"
         );
         let (mut running, api, _) = start(&[
             ("MANDATE_DEPLOYMENT_TIER", tier),
-            ("MANDATE_API_PASSKEY_COOL_OFF_WAIVER", "true"),
+            ("MANDATE_API_STEP_UP_COOL_OFF_WAIVER", "true"),
         ]);
         assert_eq!(get(api, "/v1/workspaces/ws_1/agents").status, 401, "{tier}");
         terminate(&running.0);

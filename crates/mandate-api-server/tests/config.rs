@@ -573,3 +573,10 @@ fn a_waiver_of_any_other_value_refuses_the_start_in_every_tier() {
         }
     }
 }
+
+/// DEC-2146 item 2: the waiver's name holds no part DEC-978 item 2 refuses, so setting it never
+/// stops the server at the secret-name check before the waiver's own check is reached.
+#[test]
+fn the_waivers_name_passes_the_secret_name_check() {
+    assert_eq!(check_environment([(COOL_OFF_WAIVER, "true")]), Ok(()));
+}

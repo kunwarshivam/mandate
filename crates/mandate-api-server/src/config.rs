@@ -175,7 +175,7 @@ pub fn authorize_page(tier: Tier, value: Option<&OsStr>) -> Result<AuthorizePage
 /// The setting a `dev` or `ci` test cell waives a first passkey's enrolment cool-off with
 /// ([DEC-2146](../../../docs/project/decisions/DEC-2146.md) item 2): exactly `true`, which the chart
 /// renders from `api.passkeyCoolOffWaiver` and refuses outside those tiers.
-pub const COOL_OFF_WAIVER: &str = "MANDATE_API_PASSKEY_COOL_OFF_WAIVER";
+pub const COOL_OFF_WAIVER: &str = "MANDATE_API_STEP_UP_COOL_OFF_WAIVER";
 
 /// The waiver [`COOL_OFF_WAIVER`]'s `value` sets in `tier`: none when unset; the tier's own when it
 /// is exactly `true` in `dev` or `ci`. Any other value, and `true` in any other tier, refuses the

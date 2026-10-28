@@ -2884,7 +2884,7 @@ fn no_header_query_or_request_member_turns_the_waiver_on() {
     }
     for query in [
         "?cool_off_waiver=true",
-        "?MANDATE_API_PASSKEY_COOL_OFF_WAIVER=true",
+        "?MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true",
         "?tier=ci",
     ] {
         asks.push((format!("{path}{query}"), Vec::new(), plain.clone()));
@@ -2948,5 +2948,59 @@ fn the_waiver_writes_nothing_for_a_passkey_past_its_cool_off() {
             "{ends}: no waiver follows the assertion"
         );
         assert!(events(&w.f, "StepUpCoolOffWaived").is_empty());
+    }
+}
+
+/// DEC-2146 item 3: resume and Stop append their assertion, so each carries the waiver. In a `ci`
+/// cell with the waiver, a fresh passkey's resume, then its Stop with release, each commit their
+/// `OwnerCommandIssued` with the evidence, then its `StepUpAsserted`, then its
+/// `StepUpCoolOffWaived`.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_ci_cells_waived_resume_and_stop_with_a_fresh_passkey_commit_and_journal_the_waiver() {
+    for (route, kind, confirms, body) in [
+        (
+            "resume",
+            "resume",
+            "resume",
+            resume_body as fn(&str, _) -> String,
+        ),
+        ("stop", "stop", "stop_release", stop_body),
+    ] {
+        let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
+        w.deployed();
+        let issued = w.command_challenge(kind, confirms);
+        let signed = w.signer.assert(&issued.bytes, 11);
+        let evidence = Passkeyed::evidence(&issued, "passkey");
+        let reply = post(
+            &w.f,
+            &ws(&format!("/agents/agt_a/{route}")),
+            &w.cookie,
+            Some(KEY_3),
+            body(&evidence, Some(signed.json(CREDENTIAL))).as_bytes(),
+        );
+        assert_eq!(
+            reply.status,
+            202,
+            "{route}: {}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        journals_the_waiver(
+            &w.f,
+            "OwnerCommandIssued",
+            route,
+            &format!("{route}_step_up_asserted"),
+            KEY_3,
+            &issued,
+            "ci",
+        );
+        let rows = control(&w.f);
+        let command = payload(&rows[rows.len() - 3]);
+        assert_eq!(
+            command.get("step_up").map(to_canonical),
+            Some(to_canonical(&json(&evidence))),
+            "{route}: the command records the evidence the runtime judges"
+        );
+        assert!(!w.held(&issued), "{route}: the challenge is taken");
     }
 }
