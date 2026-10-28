@@ -1,4 +1,4 @@
-//! Journal spec v0.112 §9.38 (DEC-2146): `StepUpCoolOffWaived` on the control stream at schema
+//! Journal spec v0.113 §9.38 (DEC-2146): `StepUpCoolOffWaived` on the control stream at schema
 //! version 1, with rule 316 at append and batch rule 317 after rule 253, through the journal's own
 //! checks against the vectors' `cool_off_waivers` section. Every base and valid draft parses; every
 //! invalid draft is refused with its reason at its path; every batch is judged by `check_batch` as
@@ -178,7 +178,7 @@ fn append_leaves_rule_318_to_the_writer() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
-/// `StepUpCoolOffWaived` is closed on the control stream at version 1 and nowhere else (v0.112).
+/// `StepUpCoolOffWaived` is closed on the control stream at version 1 and nowhere else (v0.113).
 #[test]
 fn the_catalogue_closes_step_up_cool_off_waived_on_the_control_stream_only() {
     assert!(closes("StepUpCoolOffWaived", 1, StreamType::Control));
