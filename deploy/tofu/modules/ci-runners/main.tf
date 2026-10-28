@@ -541,6 +541,7 @@ locals {
     AllowUsers debug
     SSHD
     ${local.debug_boot}
+    install -d -o root -g root -m 0755 /run/sshd
     sshd -t
     systemctl try-restart ssh.service
     install -d -m 0700 /etc/mandate-runner

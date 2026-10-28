@@ -95,6 +95,15 @@ run "the_debug_window_admits_one_address_and_one_key" {
   }
 }
 
+run "the_ssh_runtime_exists_before_sshd_validation" {
+  command = plan
+
+  assert {
+    condition     = length(split("install -d -o root -g root -m 0755 /run/sshd", local.boot)) == 2 && strcontains(element(split("install -d -o root -g root -m 0755 /run/sshd", local.boot), 1), "sshd -t")
+    error_message = "Cloud-init must create sshd's volatile runtime directory before validating the SSH configuration."
+  }
+}
+
 run "refuses_a_debug_range_wider_than_one_host" {
   command = plan
 
