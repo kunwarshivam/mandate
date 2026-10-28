@@ -19820,6 +19820,47 @@ mod tests {
         Ok(())
     }
 
+    /// The jobs in `ci.yml` that may run past DEC-464's ten minutes, each with its cap: only
+    /// `cell-demo-web`, at fifteen, which runs only on main and is no required check (DEC-2648).
+    const LONGER_CI_JOBS: [(&str, u32); 1] = [("cell-demo-web", 15)];
+
+    /// DEC-464 and DEC-2648 in `ci.yml`: every job's cap is ten minutes or less, but for the jobs
+    /// [`LONGER_CI_JOBS`] names, each capped exactly as it says, so the exception cannot spread to
+    /// another job, a required one among them, without a decision adding it there.
+    #[test]
+    fn only_the_named_ci_jobs_run_past_ten_minutes() -> Result<()> {
+        let ci = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let mut capped = BTreeMap::new();
+        for job in workflow_jobs(&ci) {
+            let lines = workflow_job(&ci, job).with_context(|| format!("ci.yml has `{job}`"))?;
+            let minutes = lines
+                .iter()
+                .find_map(|l| l.trim().strip_prefix("timeout-minutes: "))
+                .map(str::parse::<u32>)
+                .transpose()?;
+            if let Some(minutes) = minutes {
+                capped.insert(job, minutes);
+            }
+        }
+        for (job, minutes) in &capped {
+            match LONGER_CI_JOBS.iter().find(|(named, _)| named == job) {
+                Some((_, cap)) => assert_eq!(minutes, cap, "`{job}` is capped as DEC-2648 says"),
+                None => assert!(
+                    *minutes <= 10,
+                    "`{job}` runs {minutes} minutes, past DEC-464's ten, and no decision names it"
+                ),
+            }
+        }
+        for (job, cap) in LONGER_CI_JOBS {
+            assert_eq!(
+                capped.get(job),
+                Some(&cap),
+                "`{job}` is in ci.yml with its cap"
+            );
+        }
+        Ok(())
+    }
+
     /// DEC-1190 item 5 in `nightly.yml`: it runs every night, dispatches `ci` on main (which then
     /// selects everything and reports its own failure), sizes tonight's sweep from the plan and
     /// passes each shard its share, starts the database the gate's Postgres tests need, keeps

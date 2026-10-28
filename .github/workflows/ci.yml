@@ -647,11 +647,14 @@ jobs:
   # loop's links, and their waits, to `cell-demo`, which runs the same scenario and reads them, so
   # this job's web drive fits its ten minutes without dropping a part (DEC-464). It is `1` only
   # when `select` starts `cell-demo` too; on a web-only selection this job reads the loop itself.
+  # Its cap is fifteen minutes, the one exception to DEC-464's ten (DEC-2648): it runs only on
+  # main and is no required check, and in the regular session the trade loop's whole run comes on
+  # top of the cell's start, and a killed job would lose the failure upload below.
   cell-demo-web:
     needs: select
     if: needs.select.outputs.cell_web == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
