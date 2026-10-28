@@ -3447,11 +3447,12 @@ fn an_acknowledgment_answers_only_another_users_unspent_matching_request() {
     w.deployed();
     let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
     let event = &hold.event_id;
-    let asked = |requested_by: &str, subject: &str| {
+    let asked_of = |agent: &str, requested_by: &str, subject: &str| {
         format!(
-            r#"{{"agent":"agt_a","event":"{event}","independent_required":true,"requested_by":"{requested_by}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"subject":"{subject}","submitted_at":1}}"#
+            r#"{{"agent":"{agent}","event":"{event}","independent_required":true,"requested_by":"{requested_by}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"subject":"{subject}","submitted_at":1}}"#
         )
     };
+    let asked = |requested_by: &str, subject: &str| asked_of("agt_a", requested_by, subject);
     let own = seed_hosted(
         &w.f,
         "OwnerAcknowledgmentRequested",
@@ -3476,6 +3477,12 @@ fn an_acknowledgment_answers_only_another_users_unspent_matching_request() {
         2,
         &asked(BOB, "limit"),
     );
+    let other_agent = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked_of("agt_b", BOB, "limit"),
+    );
     seed_hosted(
         &w.f,
         "OwnerAcknowledged",
@@ -3485,8 +3492,16 @@ fn an_acknowledgment_answers_only_another_users_unspent_matching_request() {
             spent.event_id
         ),
     );
-    let keys = ["k7Z-9_gggggggggg", "k8Z-9_hhhhhhhhhh", "k9Z-9_iiiiiiiiii"];
-    for (request, key) in [&own, &other_subject, &spent].into_iter().zip(keys) {
+    let keys = [
+        "k7Z-9_gggggggggg",
+        "k8Z-9_hhhhhhhhhh",
+        "k9Z-9_iiiiiiiiii",
+        "kAZ-9_jjjjjjjjjj",
+    ];
+    for (request, key) in [&own, &other_subject, &spent, &other_agent]
+        .into_iter()
+        .zip(keys)
+    {
         let issued = w.ack_challenge("acknowledge", event, "limit", Some(&request.event_id), key);
         let signed = w.signer.assert(&issued.bytes, 11);
         let body = ack_body(
@@ -4201,5 +4216,120 @@ fn without_the_waiver_a_fresh_passkeys_acknowledgment_is_step_up_missing_and_the
         listed(&list(&w, "?agent=agt_a&state=open")),
         [hold.event_id.clone()],
         "the hold still stands"
+    );
+}
+
+/// §3.11 item 12's order: the hold standing (check 4) is judged before step-up (check 6), so an
+/// acknowledgment of a hold that does not stand, with no step-up at all, is
+/// `acknowledgment_unavailable`, not `step_up_required`, and records nothing.
+#[test]
+fn an_acknowledgment_of_no_standing_hold_is_unavailable_before_step_up_is_judged() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let lifted = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    seed_account(&w.f, "RiskLimitLifted", &limit("max_daily_loss"), None);
+    let before = control(&w.f).len();
+    for route in ["acknowledgments", "acknowledgment-requests"] {
+        let body = match route {
+            "acknowledgments" => ack_body(&lifted.event_id, "limit", None, "null", None),
+            _ => request_body(&lifted.event_id, "limit", "null", None),
+        };
+        refused(
+            &w.post_ack(route, KEY_3, &body),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        );
+    }
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+}
+
+/// A repeat under the key replays before the hold is read (§3.4 step 1), so once the
+/// acknowledgment's hold has been lifted, the repeat still answers as the first did, appending
+/// nothing.
+#[test]
+fn a_repeated_acknowledgment_replays_after_its_hold_is_lifted() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let first = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    seed_account(&w.f, "RiskLimitLifted", &limit("max_daily_loss"), None);
+    let after = control(&w.f).len();
+    let again = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// An account stream the holds are read from that cannot be read fails the acknowledgment with
+/// `journal_unavailable`, never reading it as holding nothing: nothing is recorded, the challenge
+/// is kept, and the list fails the same way.
+#[test]
+fn an_unreadable_account_stream_fails_the_acknowledgment_closed() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    w.f.journal
+        .failing
+        .lock()
+        .expect("unpoisoned")
+        .insert(account());
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "the challenge is kept");
+    let listed = list(&w, "?state=open");
+    assert_eq!(
+        listed.status,
+        503,
+        "{}",
+        String::from_utf8_lossy(&listed.body)
     );
 }
