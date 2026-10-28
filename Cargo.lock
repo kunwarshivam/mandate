@@ -2333,7 +2333,11 @@ name = "mandate-news-reader"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-gate-context",
+ "mandate-journal",
+ "mandate-research",
  "mandate-sources",
+ "mandate-store",
  "mandate-time",
  "mandate-vault",
  "secrecy",
