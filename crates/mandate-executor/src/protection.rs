@@ -9525,6 +9525,57 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2849 item 8: a holder the room has nothing left for gets no leg at all, never one for
+    /// nothing. A leg of 5 no agent owns leaves 10 of 15: `agent-a`'s 10, and none of
+    /// `agent-b`'s 5.
+    #[test]
+    fn a_holder_the_room_leaves_nothing_gets_no_leg() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        holding(
+            &mut executor,
+            ("agent-b", "md-held-2", "5"),
+            Some(("180", "130")),
+        )?;
+        let foreign = "md-foreign-p1";
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(foreign)),
+                ("agent", text("*")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("5")),
+                ("tif", text("gtc")),
+                ("purpose", text("protective")),
+                ("order_class", text("oco")),
+                ("take_profit", text("190")),
+                ("stop", text("120")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(foreign)),
+                ("state", text("accepted")),
+            ],
+        )?;
+        let effects = re_placed(&executor, &ports)?;
+        assert_eq!(
+            legs_sent(&effects)?,
+            vec![(
+                "md-held-1".to_owned(),
+                Qty::parse("10")?,
+                "170/140".to_owned()
+            )]
+        );
+        let end = interval_end(&effects).ok_or(ExecutorError::Unimplemented { story: "test" })?;
+        assert_ne!(end.get("uncovered"), Some(&Value::Bool(true)), "{end:?}");
+        Ok(())
+    }
+
     /// #468 round 2, m7 (DEC-367 item 5): a restart between the confirmed cancel and the
     /// re-placement resumes it; the first input after the restart re-places the held quantity.
     #[test]

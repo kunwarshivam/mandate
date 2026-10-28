@@ -302,13 +302,14 @@ pub(crate) fn leg_excess(
 }
 
 /// What each agent's own sells in `instrument` whose purpose `counts` still have to sell: sent,
-/// not ended, and named for an agent, so an unattributed leg or a `*` exit is no holder's.
+/// not ended, and named for an agent, so an unattributed leg or a `*` exit is no holder's. An
+/// OCO's or a bracket's two legs, `…-tp` and `…-sl`, count once, as the larger (I9).
 fn own_sells(
     view: &ExecutorState,
     instrument: &InstrumentId,
     counts: impl Fn(Purpose) -> bool,
 ) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
-    let mut by_agent: BTreeMap<AgentId, Qty> = BTreeMap::new();
+    let mut by_order: BTreeMap<(&AgentId, &str), Qty> = BTreeMap::new();
     for order in view.orders.values().filter(|order| {
         &order.instrument == instrument
             && order.side == Side::Sell
@@ -319,9 +320,22 @@ fn own_sells(
         let Some(agent) = order.agent.as_ref().filter(|agent| agent.0 != EVERY_AGENT) else {
             continue;
         };
+        let id = order.client_order_id.as_str();
+        let parent = match order.purpose {
+            Purpose::Protective => id
+                .strip_suffix("-tp")
+                .or_else(|| id.strip_suffix("-sl"))
+                .unwrap_or(id),
+            _ => id,
+        };
         let left = order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO);
-        let entry = by_agent.entry(agent.clone()).or_insert(Qty::ZERO);
-        *entry = entry.checked_add(left)?;
+        let counted = by_order.entry((agent, parent)).or_insert(Qty::ZERO);
+        *counted = (*counted).max(left);
+    }
+    let mut by_agent: BTreeMap<AgentId, Qty> = BTreeMap::new();
+    for ((agent, _), left) in by_order {
+        let sum = by_agent.entry(agent.clone()).or_insert(Qty::ZERO);
+        *sum = sum.checked_add(left)?;
     }
     Ok(by_agent)
 }
