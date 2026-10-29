@@ -316,7 +316,7 @@ describe("no order ticket (DEC-528)", () => {
     alerts: ["ALERT_KINDS", "alertsRead", "subjectHref"],
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
-    connect: ["API_CONNECTION_ID", "CONNECTION_STATES", "CONNECT_START_ROUTE", "connectStartBody", "connectStarted", "connectionDetail", "connectionRead", "connectionsRead"],
+    connect: ["API_CONNECTION_ID", "CONNECTION_STATES", "CONNECT_START_ROUTE", "connectPasskeyBody", "connectStartBody", "connectStarted", "connectionDetail", "connectionRead", "connectionsRead"],
     commands: ["UI_BUILD", "isAssetId", "prepareApprovalResponse", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "prepareOwnerExit", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     catalogue: ["instrumentsRead", "signalModelsRead"],
