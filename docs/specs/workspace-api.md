@@ -1071,17 +1071,20 @@ per workspace deployment (item 6).
     3. The agent in the path is one an `AgentDeployed` on the control stream names, and no
        `AgentStopped` names it: else `not_found`, the body an absent agent gets (API-9).
     4. The workspace is `paper`: else `live_unavailable`.
-    5. `size` is present and greater than 0: else `invalid` at `/size`. The schema keeps `size`
+    5. `side` is `buy`: else `invalid` at `/side`. An owner's sale is the owner exit's (§5.4,
+       `AGENTS.md` rule 13), and the runtime records no decision for a sale an owner requested
+       (DEC-2858, lane X); the schema keeps `sell` for a later version.
+    6. `size` is present and greater than 0: else `invalid` at `/size`. The schema keeps `size`
        optional, for the builder to size, but v1 has no sizing rule for an owner request, so the
        server requires it and the builder only clips it.
-    6. `instrument` is one the agent's deployed mandate document pins
+    7. `instrument` is one the agent's deployed mandate document pins
        (`universe.pinned_instruments[].asset_id`): else `invalid` at `/instrument`. A request never
        changes the envelope (rule 11), so an instrument outside the agent's universe, and any
        instrument for an agent whose universe is not pinned, is refused here rather than journaled
        for the runtime to refuse. A document the store cannot give is `journal_unavailable`.
 
     It commits `OwnerRequestSubmitted` (journal spec §9.9) with `agent_id`, `instrument_id` the
-    `instrument`, `side`, `quantity` the `size`, `requested_by` `owner` and `client_id` `null`, the
+    `instrument`, `side` `buy`, `quantity` the `size`, `requested_by` `owner` and `client_id` `null`, the
     actor the calling user (rule 79), under §3.4's id, and answers `202` `commands/command-accepted`,
     whose `command_id` is that event's id. A repeat under the same key answers as before. An append
     that does not settle answers as item 10's do. §5.5's command status follows the request through
