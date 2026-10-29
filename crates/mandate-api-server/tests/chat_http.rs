@@ -509,6 +509,39 @@ fn with_no_gateway_the_run_says_so_and_ends_refused() {
 }
 
 #[test]
+fn a_read_after_a_message_s_seq_serves_only_the_messages_after_it() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "hello").status, 202);
+    let body = settled(&f, &cookie);
+    let seqs: Vec<u64> = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| m.get("seq").and_then(Value::as_int))
+        .collect();
+    assert_eq!(seqs.len(), 2, "{body:?}");
+    let header = format!("{COOKIE_NAME}={cookie}");
+    let path = format!("{}?after={}", messages_path(), seqs[0]);
+    let reply = send(f.addr, "GET", &path, &[("Cookie", &header)], b"");
+    assert_eq!(reply.status, 200);
+    let after = parse(&reply.body).expect("JSON");
+    let served: Vec<u64> = after
+        .get("messages")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| m.get("seq").and_then(Value::as_int))
+        .collect();
+    assert_eq!(
+        served,
+        vec![seqs[1]],
+        "the cursor's own message is not served again"
+    );
+}
+
+#[test]
 fn a_blank_message_or_an_unknown_agent_is_refused_with_nothing_journaled() {
     let f = fixture(None);
     let cookie = signed_in(&f);
