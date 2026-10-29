@@ -7,7 +7,8 @@
 //! it before journaling (DEC-2151) and adding no risk is the safe default (`AGENTS.md` rule 3).
 //! Its `DecisionMade` names the request as `causation_id` and records `requested_by` and
 //! `client_id`, with no conviction, score or model output (journal spec §9.1 rule 8); the mode,
-//! the dry run and the autonomy rules then decide as for any opening, a client's never AUTO. A
+//! the dry run and the autonomy rules then decide as for any opening, a client's never AUTO and an
+//! owner's never asked (DEC-2858 item 10): the owner's Send is the confirmation. A
 //! client's request arrives with an actor of kind `user` and `requested_by` `client` (journal spec
 //! §9.9 rule 79), so who asked is read from `requested_by` and `client_id`.
 
@@ -26,6 +27,9 @@ pub(crate) const REQUEST_SUBMITTED: &str = "OwnerRequestSubmitted";
 
 /// The label of mandate spec §6.2 step 5a's client ceiling, which a client's AUTO opening becomes.
 const CLIENT_CEILING: &str = "client_ceiling";
+
+/// The label of mandate spec §6.2 step 5d, the owner's own request, which an owner's `ask` becomes.
+const OWNER_REQUEST: &str = "owner_request";
 
 /// Decides one `OwnerRequestSubmitted` this runtime has not copied yet: the plan's clipped
 /// proposal, denied by name when the mode admits no opening, otherwise through the dry run and the
@@ -145,13 +149,20 @@ fn mode_denial(mode: Mode) -> Option<&'static str> {
     }
 }
 
-/// Mandate spec §6.2 step 5a, MI-30: a client's opening is never AUTO, so an `auto` becomes an
-/// `ask` labelled `client_ceiling`; an owner's is classified as the rules say.
+/// Mandate spec §6.2 steps 5a and 5d: a client's opening is never AUTO (MI-30), so an `auto`
+/// becomes an `ask` labelled `client_ceiling`; an owner's own request is its own approval
+/// (DEC-2858 item 10, founder-ruled), so an `ask` from the rules, the default or a deferred check
+/// becomes an `auto` labelled `owner_request`. Neither touches a `deny`, and the binding gate judges
+/// every check at submission as for any opening.
 fn ceiling(classified: Classified, requested_by: &Requester) -> Classified {
     match (requested_by, classified.autonomy) {
         (Requester::Client { .. }, Autonomy::Auto) => Classified {
             autonomy: Autonomy::Ask,
             decided_by: Some(CLIENT_CEILING.to_owned()),
+        },
+        (Requester::Owner, Autonomy::Ask) => Classified {
+            autonomy: Autonomy::Auto,
+            decided_by: Some(OWNER_REQUEST.to_owned()),
         },
         _ => classified,
     }
