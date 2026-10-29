@@ -211,7 +211,7 @@ pub fn content(qty: &str, deadline: i64) -> RequestContent {
             purpose: AskablePurpose::Open,
             mandate_version: "v1".to_owned(),
             decided_by: "rule:big-order".to_owned(),
-            combined_score: Signed::parse("0.5").unwrap(),
+            combined_score: Some(Signed::parse("0.5").unwrap()),
             reference_mark: Some(ReferenceMark {
                 price: Price::parse("155").unwrap(),
                 seq: 2,

@@ -50,7 +50,7 @@ pub fn bound() -> BoundAction {
         purpose: AskablePurpose::Open,
         mandate_version: "v3".to_owned(),
         decided_by: "rule:large_order".to_owned(),
-        combined_score: Signed::parse("0.62").unwrap(),
+        combined_score: Some(Signed::parse("0.62").unwrap()),
         reference_mark: Some(ReferenceMark {
             price: price("187"),
             seq: 41,
