@@ -1542,6 +1542,11 @@ fn protection_changed(
             let prices = prices_of(payload)?;
             let created = created_on(payload)?;
             legs(state, &instrument, &orders, covered, created);
+            if let Some(placed) = prices {
+                for id in &orders {
+                    state.details.entry(id.clone()).or_default().placed_prices = Some(placed);
+                }
+            }
             if state.closing_all.contains(&instrument)
                 && let Some(switch) = state.account_switch.as_mut()
             {

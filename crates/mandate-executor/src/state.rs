@@ -337,6 +337,10 @@ pub(crate) struct OrderDetail {
     /// withholds each fill's fee rounded on its own (§6.3), so the stop-limit after it is sized
     /// net of each fill's fee, never of their sum's (DEC-349 item 2).
     pub(crate) fill_qtys: Vec<Qty>,
+    /// The prices of the `ProtectionChanged placed` that made this order protection: a leg the
+    /// broker created, or one placed before its request was recorded, has its own prices here
+    /// though the instrument's protection records only the last placement's (DEC-2849 item 8).
+    pub(crate) placed_prices: Option<ProtectionPrices>,
 }
 
 /// The thesis and lineage an instrument of an agent's working universe is held by, as its last

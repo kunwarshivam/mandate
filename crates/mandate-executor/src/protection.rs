@@ -224,12 +224,13 @@ fn leg_stop(view: &ExecutorState, order: &Order) -> Option<Price> {
     leg_prices(view, order).map(|prices| prices.stop)
 }
 
-/// A resting leg's own prices: its request's, or, for a leg the broker created from a bracket,
-/// its entry's bracket's.
+/// A resting leg's own prices: its request's, else those its `placed` record carried, else, for a
+/// leg the broker created from a bracket, its entry's bracket's.
 fn leg_prices(view: &ExecutorState, order: &Order) -> Option<ProtectionPrices> {
     let request = |id: &ClientOrderId| view.details.get(id)?.request.as_ref();
     request(&order.client_order_id)
         .and_then(request_prices)
+        .or_else(|| view.details.get(&order.client_order_id)?.placed_prices)
         .or_else(|| {
             let entry = order.client_order_id.protected_entry()?;
             request(&entry)?
@@ -1141,12 +1142,7 @@ fn begin(
             .collect(),
         None if passive => protection.resting.clone(),
         None => {
-            let beside = if waiting(&batch.view, &instrument).contains(intent) {
-                Qty::ZERO
-            } else {
-                qty
-            };
-            let named = holders::exit_cancels(&batch.view, &instrument, &agent, beside)?;
+            let named = holders::exit_cancels(&batch.view, &instrument, &agent, qty)?;
             protection
                 .resting
                 .iter()
@@ -1163,15 +1159,23 @@ fn begin(
             Some(entry) => entry,
             None => ClientOrderId::for_intent(intent)?,
         };
-        let whole = cancels.len() == protection.resting.len();
-        let prices = if whole {
-            protection.prices
+        let another_holds = protection.resting.iter().any(|id| {
+            batch.view.orders.get(id).is_some_and(|order| {
+                order
+                    .agent
+                    .as_ref()
+                    .is_some_and(|holder| holder != &agent && holder.0 != EVERY_AGENT)
+            })
+        });
+        let own = cancels
+            .iter()
+            .filter_map(|id| batch.view.orders.get(id))
+            .filter(|order| order.agent.as_ref() == Some(&agent))
+            .find_map(|order| leg_prices(&batch.view, order));
+        let prices = if another_holds {
+            own
         } else {
-            cancels
-                .iter()
-                .filter_map(|id| batch.view.orders.get(id))
-                .find_map(|order| leg_prices(&batch.view, order))
-                .or(protection.prices)
+            protection.prices.or(own)
         };
         let mut pairs = vec![
             (
@@ -6689,6 +6693,88 @@ mod sequence_tests {
             start.payload.get("stop").and_then(Value::as_str),
             Some("140"),
             "agent-a's own stop, not agent-b's 130"
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 8b: a sequence that cancels another holder's leg as well still records the
+    /// exiting agent's own prices, never the last placed protection's. The owner sold one outside
+    /// Mandate, so agent-b's leg of five no longer fits beside agent-a's exit of ten within N = 14
+    /// and both legs go; the start records agent-a's stop of 140, not agent-b's later 130.
+    #[test]
+    fn a_whole_exit_sequence_takes_its_own_agents_prices() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "130")?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-owner-sale")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("1")),
+                ("price", text("150")),
+            ],
+        )?;
+        executor.run(quote("139")?, &ports)?;
+        let started = executor.run(sell(EXIT, "10", "139", Purpose::RiskExit)?, &ports)?;
+        let mut cancelled = cancels(&started);
+        cancelled.sort_unstable();
+        assert_eq!(cancelled, vec!["md-held-1-p1", "md-held-2-p1"]);
+        let start = protection_drafts(&started)
+            .into_iter()
+            .find(|draft| {
+                draft.payload.get("action").and_then(Value::as_str) == Some("unprotected_start")
+            })
+            .ok_or_else(|| missing("the sequence's start"))?;
+        assert_eq!(
+            start.payload.get("stop").and_then(Value::as_str),
+            Some("140"),
+            "agent-a's own stop, not agent-b's 130"
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 8: a leg the broker created has its prices only on its `placed` record, and
+    /// those are its own. `agent-a`'s leg at 170 over 140 and `agent-b`'s at 170 over 135 are known
+    /// only from their placements, `agent-b`'s last; `agent-a`'s exit keeps `agent-b`'s leg, and
+    /// its sequence records `agent-a`'s own stop of 140, never the last placement's.
+    #[test]
+    fn a_placed_legs_own_prices_price_its_agents_sequence() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        for (leg, qty, stop) in [("md-held-1-p1", "10", "140"), ("md-held-2-p1", "5", "135")] {
+            committed(
+                &mut executor,
+                "ProtectionChanged",
+                vec![
+                    ("instrument", text("AAPL")),
+                    ("action", text("placed")),
+                    ("orders", text(leg)),
+                    ("qty", text(qty)),
+                    ("take_profit", text("170")),
+                    ("stop", text(stop)),
+                ],
+            )?;
+        }
+        executor.run(quote("139")?, &ports)?;
+        let started = executor.run(sell(EXIT, "4", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), vec!["md-held-1-p1"]);
+        let start = protection_drafts(&started)
+            .into_iter()
+            .find(|draft| {
+                draft.payload.get("action").and_then(Value::as_str) == Some("unprotected_start")
+            })
+            .ok_or_else(|| missing("the sequence's start"))?;
+        assert_eq!(
+            start.payload.get("stop").and_then(Value::as_str),
+            Some("140"),
+            "agent-a's own placement, not agent-b's later one"
         );
         Ok(())
     }

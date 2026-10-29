@@ -198,13 +198,23 @@ pub(crate) fn coverages(
     instrument: &InstrumentId,
 ) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
     let holders = holders(view, instrument)?;
-    let mut order: Vec<(&AgentId, Qty)> = holders
-        .lots
+    charge(&holders.lots, holders.deficit)
+}
+
+/// Each agent's coverage from its `lots` with `deficit` charged once, largest lots first, ties
+/// by agent id, each taking as much of what is left as its lots allow. An agent with no lots
+/// covers nothing.
+fn charge(
+    lots: &BTreeMap<AgentId, Qty>,
+    deficit: Qty,
+) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
+    let mut order: Vec<(&AgentId, Qty)> = lots
         .iter()
+        .filter(|(_, lots)| **lots > Qty::ZERO)
         .map(|(agent, lots)| (agent, *lots))
         .collect();
     order.sort_by(|(a, x), (b, y)| y.cmp(x).then_with(|| a.cmp(b)));
-    let mut left = holders.deficit;
+    let mut left = deficit;
     let mut covered = BTreeMap::new();
     for (agent, lots) in order {
         let charged = lots.min(left);
@@ -329,24 +339,99 @@ pub(crate) fn exit_cancels(
             .as_ref()
             .is_some_and(|holder| holder != agent && holder.0 != EVERY_AGENT)
     });
-    let mut by_order: BTreeMap<&str, Qty> = BTreeMap::new();
+    let mut by_order: BTreeMap<(&AgentId, &str), Qty> = BTreeMap::new();
     for order in &others {
-        let left = order.qty.checked_sub(order.filled_qty)?;
-        let counted = by_order.entry(oco_parent(order)).or_insert(Qty::ZERO);
+        let Some(holder) = order.agent.as_ref() else {
+            continue;
+        };
+        let left = order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO);
+        let counted = by_order
+            .entry((holder, oco_parent(order)))
+            .or_insert(Qty::ZERO);
         *counted = (*counted).max(left);
     }
-    let kept = by_order
+    let mut held: BTreeMap<&AgentId, Qty> = BTreeMap::new();
+    for ((holder, _), left) in by_order {
+        let sum = held.entry(holder).or_insert(Qty::ZERO);
+        *sum = sum.checked_add(left)?;
+    }
+    let kept = held
         .values()
         .try_fold(Qty::ZERO, |sum, left| sum.checked_add(*left))?;
     let fits = kept
-        .checked_add(still_selling(view, instrument)?)?
+        .checked_add(sent_sells(view, instrument)?)?
         .checked_add(qty)?
         <= long(view, instrument)?;
+    let after = coverages_after(view, instrument, agent, qty)?;
+    let mut exiting: BTreeMap<&AgentId, Qty> = BTreeMap::new();
+    for order in view.orders.values().filter(|order| {
+        &order.instrument == instrument
+            && order.side == Side::Sell
+            && order.purpose != Purpose::Protective
+            && !order.purpose.adds_risk()
+            && !order.state.is_terminal()
+            && order.state != OrderState::Intent
+    }) {
+        if let Some(holder) = order.agent.as_ref().filter(|holder| *holder != agent) {
+            let left = order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO);
+            let sum = exiting.entry(holder).or_insert(Qty::ZERO);
+            *sum = sum.checked_add(left)?;
+        }
+    }
+    let over = |holder: &AgentId| {
+        held.get(holder)
+            .copied()
+            .unwrap_or(Qty::ZERO)
+            .checked_add(exiting.get(holder).copied().unwrap_or(Qty::ZERO))
+            .is_ok_and(|committed| committed > after.get(holder).copied().unwrap_or(Qty::ZERO))
+    };
     Ok(own
         .into_iter()
-        .chain(others.into_iter().filter(|_| !fits))
+        .chain(
+            others
+                .into_iter()
+                .filter(|order| !fits || order.agent.as_ref().is_some_and(over)),
+        )
         .map(|order| order.client_order_id.clone())
         .collect())
+}
+
+/// Every sell already sent in `instrument` that is not protective and has not ended, by what it
+/// has left to sell: what the broker reserves beside the legs. An exit with no order yet counts
+/// nothing here, the exit [`exit_cancels`] weighs included.
+fn sent_sells(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    view.orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && order.side == Side::Sell
+                && order.purpose != Purpose::Protective
+                && !order.state.is_terminal()
+        })
+        .try_fold(Qty::ZERO, |total, order| {
+            total.checked_add(order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO))
+        })
+        .map_err(ExecutorError::from)
+}
+
+/// Each holder's coverage once `agent` has sold `qty` (DEC-2849 I4's "the coverage left after
+/// it"): its lots and N each less `qty`, the deficit charged again as [`coverages`] charges it.
+fn coverages_after(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    agent: &AgentId,
+    qty: Qty,
+) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
+    let holders = holders(view, instrument)?;
+    let mut lots = holders.lots;
+    if let Some(mine) = lots.get_mut(agent) {
+        *mine = mine.checked_sub(qty).unwrap_or(Qty::ZERO);
+    }
+    let position = holders.position.checked_sub(qty).unwrap_or(Qty::ZERO);
+    let total = lots
+        .values()
+        .try_fold(Qty::ZERO, |sum, lots| sum.checked_add(*lots))?;
+    charge(&lots, total.checked_sub(position).unwrap_or(Qty::ZERO))
 }
 
 /// The id an OCO's or a bracket's leg counts under: its parent's, without the `-tp` or `-sl`
