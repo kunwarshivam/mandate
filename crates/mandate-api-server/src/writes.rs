@@ -206,7 +206,7 @@ async fn recorded(
 
 /// Records `command` on the control stream `reader` read, once its scope is found there, or
 /// replays the event its key already recorded.
-async fn committed(
+pub(crate) async fn committed(
     app: &App,
     gate: &Gate,
     reader: &Reader,
@@ -1023,10 +1023,10 @@ pub(crate) fn replayed(gate: &Gate, reader: &Reader, command: &Command) -> Optio
     }
 }
 
-fn asset_text(asset: &Asset) -> Option<String> {
+pub(crate) fn asset_text(asset: &Asset) -> Option<String> {
     json_string(&encode(asset).ok()?)
 }
 
-fn decimal_text(decimal: &Decimal) -> Option<String> {
+pub(crate) fn decimal_text(decimal: &Decimal) -> Option<String> {
     json_string(&encode(decimal).ok()?)
 }

@@ -89,6 +89,13 @@ pub enum Command {
         subject: &'static str,
         step_up: Value,
     },
+    /// The owner's request to buy (§3.11 item 13, DEC-2151), journal spec §9.9's
+    /// `OwnerRequestSubmitted`: the instrument and the size asked for; a sale is the owner exit's.
+    OwnerRequest {
+        agent: String,
+        instrument: String,
+        quantity: String,
+    },
 }
 
 /// The warning a Stop with release names (DEC-136, PX-13 (a)), the text `mandate agent stop
@@ -118,6 +125,7 @@ impl Command {
             Self::OwnerExit { .. } => "owner_exit",
             Self::Acknowledge { .. } => "acknowledge",
             Self::RequestAcknowledgment { .. } => "acknowledgment_request",
+            Self::OwnerRequest { .. } => "owner_request",
         }
     }
 
@@ -134,6 +142,7 @@ impl Command {
             Self::Acknowledge { .. } | Self::RequestAcknowledgment { .. } => {
                 Permission::Acknowledge
             }
+            Self::OwnerRequest { .. } => Permission::OwnerRequest,
         }
     }
 
@@ -161,6 +170,7 @@ impl Command {
             Self::Skip { .. } | Self::Grant { .. } => "ApprovalResponseSubmitted",
             Self::Acknowledge { .. } => "OwnerAcknowledged",
             Self::RequestAcknowledgment { .. } => "OwnerAcknowledgmentRequested",
+            Self::OwnerRequest { .. } => "OwnerRequestSubmitted",
             _ => "OwnerCommandIssued",
         }
     }
@@ -233,6 +243,20 @@ impl Command {
                     ("submitted_at", Value::Int(second)),
                     ("risk_clock", text(risk_clock)),
                     ("step_up", step_up.clone()),
+                ]);
+            }
+            Self::OwnerRequest {
+                agent,
+                instrument,
+                quantity,
+            } => {
+                return object(vec![
+                    ("agent_id", text(agent)),
+                    ("instrument_id", text(instrument)),
+                    ("side", text("buy")),
+                    ("quantity", text(quantity)),
+                    ("requested_by", text("owner")),
+                    ("client_id", Value::Null),
                 ]);
             }
             _ => {}
@@ -310,7 +334,8 @@ impl Command {
             | Self::Resume { agent, .. }
             | Self::Stop { agent, .. }
             | Self::Acknowledge { agent, .. }
-            | Self::RequestAcknowledgment { agent, .. } => (Some(agent), "agent", agent),
+            | Self::RequestAcknowledgment { agent, .. }
+            | Self::OwnerRequest { agent, .. } => (Some(agent), "agent", agent),
             Self::OwnerExit {
                 agent, instrument, ..
             } => (Some(agent), "instrument", instrument),
@@ -328,7 +353,8 @@ impl Command {
             | Self::Stop { agent, .. }
             | Self::OwnerExit { agent, .. }
             | Self::Acknowledge { agent, .. }
-            | Self::RequestAcknowledgment { agent, .. } => Some(agent),
+            | Self::RequestAcknowledgment { agent, .. }
+            | Self::OwnerRequest { agent, .. } => Some(agent),
             Self::KillSwitch(_) => None,
         }
     }

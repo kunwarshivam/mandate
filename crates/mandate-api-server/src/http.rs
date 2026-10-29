@@ -290,13 +290,11 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",
             post(version_routes::go_live).fallback(otherwise.clone()),
-        );
-    #[cfg(debug_assertions)]
-    let routes = routes.route(
-        "/v1/workspaces/{workspace}/agents/{agent}/requests",
-        post(crate::owner_requests::owner_request).fallback(otherwise.clone()),
-    );
-    let routes = routes
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/requests",
+            post(crate::owner_requests::owner_request).fallback(otherwise.clone()),
+        )
         .fallback(otherwise)
         .with_state(Arc::new(app))
         .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
