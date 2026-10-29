@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::thread::sleep;
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -1950,7 +1950,24 @@ pub fn run_in(name: &str) -> Result<String> {
         .and_then(|o| o["metadata"]["name"].as_str())
         .context("the gestures' Job has no name")?
         .to_string();
-    let (succeeded, logs) = run_job(objects)?;
+    let warming = match api_unaskable()? {
+        Some(why) => Err(why),
+        None => {
+            let warmed = workspace.clone();
+            Ok(thread::spawn(move || web::warm(&warmed, WEB_AGENT)))
+        }
+    };
+    let (ran, job_took) = timed(|| run_job(objects));
+    let warmed = match warming {
+        Err(why) => WarmOutcome::NotRun(why),
+        Ok(handle) => match handle.join() {
+            Ok(Ok(warmed)) => WarmOutcome::Warmed(warmed),
+            Ok(Err(why)) => WarmOutcome::NotRun(format!("{why:#}")),
+            Err(_) => WarmOutcome::NotRun("the warm-up's thread panicked".to_owned()),
+        },
+    };
+    eprintln!("{}", warm_report(&warmed, job_took));
+    let (succeeded, logs) = ran?;
     let pods = kubectl(&[
         "get",
         "pods",
@@ -2180,6 +2197,56 @@ pub fn run_in(name: &str) -> Result<String> {
         NODE
     );
     Ok(workspace)
+}
+
+/// What the warm-up of web/'s `next dev` did beside the gestures' Job (E11-9w).
+#[derive(Debug)]
+pub enum WarmOutcome {
+    Warmed(web::Warmed),
+    NotRun(String),
+}
+
+/// The report's line for the warm-up, beside the gestures' Job's `job_took`: the warm-up's time and
+/// how many of its pages loaded, naming each that did not, or why it did not run. A warm-up never
+/// fails the run: it only saves the next run of `next dev` its first compiles.
+pub fn warm_report(warmed: &WarmOutcome, job_took: Duration) -> String {
+    let job = format!(
+        "    the gestures' Job took about {:.1}s",
+        job_took.as_secs_f64()
+    );
+    match warmed {
+        WarmOutcome::NotRun(why) => format!("{job}; web/'s warm-up did not run: {why}"),
+        WarmOutcome::Warmed(w) => {
+            let missed: Vec<String> = w
+                .pages
+                .iter()
+                .filter(|(_, status)| !status.starts_with('2') && !status.starts_with('3'))
+                .map(|(page, status)| format!("{page} {status}"))
+                .collect();
+            let loaded = w.pages.len() - missed.len();
+            let pages = w.pages.len();
+            let line = format!(
+                "{job}; web/'s warm-up beside it took about {:.1}s, {loaded} of {pages} pages loaded",
+                w.seconds
+            );
+            if missed.is_empty() {
+                line
+            } else {
+                format!("{line} (not: {})", missed.join(", "))
+            }
+        }
+    }
+}
+
+/// `work`'s answer and how long it took by the host's clock, for the report's times alone.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host-side scenario reports how long a gesture took on the host's clock"
+)]
+fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
+    let started = Instant::now();
+    let answer = work();
+    (answer, started.elapsed())
 }
 
 /// Reads `check` with the owner's session every two seconds until it passes or [`APPLIED_WITHIN`]
@@ -4037,6 +4104,43 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The warm-up's line sits beside the Job's time: its own time and the pages that loaded, a
+    /// redirect counted as loaded, each page that did not named, or why it did not run.
+    #[test]
+    fn the_warm_up_is_reported_beside_the_job() {
+        let job = Duration::from_millis(312_400);
+        assert_eq!(
+            warm_report(&WarmOutcome::NotRun("no npm".into()), job),
+            "    the gestures' Job took about 312.4s; web/'s warm-up did not run: no npm"
+        );
+        let pages = |list: &[(&str, &str)]| {
+            WarmOutcome::Warmed(web::Warmed {
+                pages: list
+                    .iter()
+                    .map(|(p, s)| ((*p).to_owned(), (*s).to_owned()))
+                    .collect(),
+                seconds: 41.25,
+            })
+        };
+        assert_eq!(
+            warm_report(&pages(&[("/", "200"), ("/agents", "307")]), job),
+            "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 41.2s, \
+             2 of 2 pages loaded"
+        );
+        assert_eq!(
+            warm_report(
+                &pages(&[
+                    ("/", "200"),
+                    ("/alerts", "not loaded: timeout"),
+                    ("/positions", "500")
+                ]),
+                job
+            ),
+            "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 41.2s, \
+             1 of 3 pages loaded (not: /alerts not loaded: timeout, /positions 500)"
+        );
     }
 
     /// Step 6 runs no gesture in the Job, since an owner's exit before the trade loop's fill sells
