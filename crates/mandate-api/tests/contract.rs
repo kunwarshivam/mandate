@@ -140,7 +140,10 @@ const TITLES: &[(&str, &str)] = &[
     ("reduction_only", "Risk reduction only"),
     ("membership_unavailable", "Membership unavailable"),
     ("acknowledgment_unavailable", "Nothing to acknowledge"),
-    ("acknowledgment_request_invalid", "Request cannot be answered"),
+    (
+        "acknowledgment_request_invalid",
+        "Request cannot be answered",
+    ),
 ];
 
 fn title_of(name: &str) -> &'static str {
