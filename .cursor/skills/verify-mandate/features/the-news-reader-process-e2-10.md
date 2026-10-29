@@ -15,7 +15,9 @@
   `mandate-gate-context`'s `Journaled::held`), `src/poll.rs` (a round's tickers in chunks the fetcher takes, a page
   cap per chunk, a pause after an idle or failed round), `src/records.rs` (`StreamOpened` and
   `NewsItemStored` as drafts with deterministic ids, timed `local`), `src/reader.rs`
-  (`NewsReader`: one writer epoch, the stream folded at start, one page a step), `src/items.rs`
+  (`NewsReader`: one writer epoch, the stream folded at start, one page a step; DEC-2289's
+  `Clock`, a round held past `RECEIPT_LEAD_S` of the trusted time, counted and alerted
+  `receipt_ahead` once an episode, every pause by the trusted time), `src/items.rs`
   (each new item's typed record stored and journaled, a batch in doubt retried as the same bytes,
   a refused append stopping the reader), `src/recorded.rs` (DEC-2085: `RecordedNews`, a recording of the vendor's
   items answered one page per request by the tickers asked, reaching no host; `recorded_key`, the
@@ -49,7 +51,9 @@
   gaps, chunking, the page cap and the pause end to end), `tests/reader.rs` (items stored and
   journaled once, known times, skips, pages and pace, a retried batch and a refused append),
   `tests/properties.rs` (each version stored once and known times never going back, against the
-  test's own ledger); `tests/stored_records.rs` (the reader stores exactly `fixtures/news/`'s rows and
+  test's own ledger); `tests/receipt_lead.rs` (a round past the lead held, counted and alerted once an episode, the
+  cooldown by the trusted time, the trusted time's arithmetic, and a fuzz against the journal's own
+  rows); `tests/stored_records.rs` (the reader stores exactly `fixtures/news/`'s rows and
   records); `mandate-runtime`'s `tests/stored_news.rs` (the offer, each mismatch and unreadable case,
   no text) and `tests/event_trigger.rs` (a stored item starts one `monitor` run naming its
   `item_ref`); `mandate-daemon`'s `tests/source.rs` (the stream read under news triggers alone, an

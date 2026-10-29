@@ -15,6 +15,8 @@
 
 mod common;
 
+use std::time::Duration;
+
 use mandate_news_reader::{RECEIPT_AHEAD, RECEIPT_LEAD_S};
 use mandate_process::State;
 use mandate_time::UtcNanos;
@@ -217,5 +219,38 @@ proptest! {
             prop_assert_eq!(reader.counts().receipt_ahead, 0);
             prop_assert!(reader.take_alerts().is_empty());
         }
+    }
+}
+
+/// The binary's trusted time: the host clock at start plus the monotonic clock's elapsed time,
+/// carrying nanoseconds into seconds, and the start itself past the representable range.
+#[test]
+fn the_trusted_time_is_the_start_plus_the_elapsed_time() {
+    let start = UtcNanos::from_parts(1_000, 700_000_000).unwrap();
+    let cases = [
+        (
+            Duration::ZERO,
+            UtcNanos::from_parts(1_000, 700_000_000).unwrap(),
+        ),
+        (
+            Duration::new(5, 200_000_000),
+            UtcNanos::from_parts(1_005, 900_000_000).unwrap(),
+        ),
+        (
+            Duration::new(5, 300_000_000),
+            UtcNanos::from_parts(1_006, 0).unwrap(),
+        ),
+        (
+            Duration::new(5, 400_000_001),
+            UtcNanos::from_parts(1_006, 100_000_001).unwrap(),
+        ),
+        (Duration::from_secs(u64::MAX), start),
+    ];
+    for (elapsed, expected) in cases {
+        assert_eq!(
+            Clock::trusted_after(start, elapsed),
+            expected,
+            "{elapsed:?}"
+        );
     }
 }

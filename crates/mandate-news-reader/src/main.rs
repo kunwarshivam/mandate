@@ -116,25 +116,9 @@ impl Trusted {
     fn clock(&self) -> Clock {
         Clock {
             now: host_now(),
-            trusted: after(self.wall, self.since.elapsed()),
+            trusted: Clock::trusted_after(self.wall, self.since.elapsed()),
         }
     }
-}
-
-/// `start` plus `elapsed`, or `start` itself past the representable range, so a trusted time
-/// that cannot be formed is the earliest it can be and refuses a round rather than admits one.
-fn after(start: UtcNanos, elapsed: Duration) -> UtcNanos {
-    let nanos = u64::from(start.nanos()).saturating_add(u64::from(elapsed.subsec_nanos()));
-    let carry = i64::from(nanos >= 1_000_000_000);
-    let secs = i64::try_from(elapsed.as_secs())
-        .ok()
-        .and_then(|secs| start.secs().checked_add(secs))
-        .and_then(|secs| secs.checked_add(carry));
-    secs.and_then(|secs| {
-        let nanos = u32::try_from(nanos.checked_rem(1_000_000_000)?).ok()?;
-        UtcNanos::from_parts(secs, nanos).ok()
-    })
-    .unwrap_or(start)
 }
 
 fn run(
