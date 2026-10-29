@@ -4033,8 +4033,8 @@ mod sequence_tests {
     use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
     use mandate_time::{Date, ExchangeCalendar};
     use proptest::prelude::{Just, ProptestConfig, Strategy, TestCaseError, any, prop};
-    use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
+    use proptest::{prop_assert, prop_assert_eq, prop_oneof};
 
     use super::closed_form::{
         assert_before_sent, assert_closed, ids, intervals, named, record, records, replayed,
@@ -13085,6 +13085,448 @@ mod sequence_tests {
             ));
         }
         Ok(desk)
+    }
+
+    /// The agents of DEC-2849 item 8's acceptance fuzz: each agent's id, its entry and its own
+    /// leg's stop, distinct so a leg placed at another agent's prices shows.
+    const HOLDERS: [(&str, &str, &str); 3] = [
+        ("agent-a", "md-ea", "140"),
+        ("agent-b", "md-eb", "135"),
+        ("agent-c", "md-ec", "130"),
+    ];
+
+    /// One shared position for the acceptance fuzz: each agent's lots, the owner's buy and sale
+    /// outside Mandate, which agent exits how much, and another agent's risk exit already working
+    /// beside its leg (`working` shares of `worker`'s), which the broker reserves too.
+    #[derive(Debug, Clone)]
+    struct Shared {
+        lots: Vec<i64>,
+        owner_buy: i64,
+        owner_sale: i64,
+        exiting: usize,
+        exit: i64,
+        working: i64,
+        worker: Option<usize>,
+    }
+
+    impl Shared {
+        /// The case as the account can hold it: at least one agent with lots, the exiting agent
+        /// one of them, its exit within its lots, and the owner never selling the position flat.
+        fn held(mut self) -> Self {
+            if self.lots.iter().all(|lots| *lots == 0)
+                && let Some(first) = self.lots.first_mut()
+            {
+                *first = 1;
+            }
+            let holding: Vec<usize> = (0..self.lots.len())
+                .filter(|k| self.lots.get(*k).is_some_and(|lots| *lots > 0))
+                .collect();
+            self.exiting = holding
+                .get(self.exiting.checked_rem(holding.len()).unwrap_or(0))
+                .copied()
+                .unwrap_or(0);
+            let mine = self.lots.get(self.exiting).copied().unwrap_or(1).max(1);
+            self.exit = self
+                .exit
+                .max(1)
+                .saturating_sub(1)
+                .checked_rem(mine)
+                .unwrap_or(0)
+                .saturating_add(1);
+            let before = self.lots.iter().sum::<i64>().saturating_add(self.owner_buy);
+            self.owner_sale = self.owner_sale.min(before.saturating_sub(self.exit));
+            self.worker = holding.iter().copied().find(|k| *k != self.exiting);
+            let room = self.position().saturating_sub(self.exit);
+            self.working = match self.worker {
+                Some(k) => self
+                    .working
+                    .min(self.lots.get(k).copied().unwrap_or(0))
+                    .min(room)
+                    .max(0),
+                None => 0,
+            };
+            self
+        }
+
+        fn position(&self) -> i64 {
+            self.lots
+                .iter()
+                .sum::<i64>()
+                .saturating_add(self.owner_buy)
+                .saturating_sub(self.owner_sale)
+        }
+    }
+
+    /// The acceptance oracle's coverage, apart from `holders`: the deficit, Σ lots less the
+    /// position, charged once, largest lots first and ties by agent, each taking what its lots
+    /// allow.
+    fn oracle_coverage(lots: &[i64], position: i64) -> Vec<i64> {
+        let mut left = lots.iter().sum::<i64>().saturating_sub(position).max(0);
+        let mut order: Vec<(usize, i64)> = lots
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, lots)| *lots > 0)
+            .collect();
+        order.sort_by(|(a, x), (b, y)| y.cmp(x).then(a.cmp(b)));
+        let mut covered = vec![0; lots.len()];
+        for (k, lots) in order {
+            let charged = lots.min(left);
+            left = left.saturating_sub(charged);
+            if let Some(slot) = covered.get_mut(k) {
+                *slot = lots.saturating_sub(charged);
+            }
+        }
+        covered
+    }
+
+    /// `case`'s position on the executor: each agent's filled buy, the owner's buy and sale as
+    /// unattributed fills, and each agent's leg for exactly its coverage at its own stop, as I9
+    /// leaves it.
+    fn shared_position(ports: &Ports<'_>, case: &Shared) -> Result<Executor, ExecutorError> {
+        let mut executor = Executor::opened(ports)?;
+        for ((agent, entry, _), lots) in HOLDERS.iter().zip(&case.lots) {
+            if *lots == 0 {
+                continue;
+            }
+            committed(
+                &mut executor,
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(*entry)),
+                    ("agent", text(*agent)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text(lots.to_string())),
+                    ("limit", text("150")),
+                    ("purpose", text("open")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "FillApplied",
+                vec![
+                    ("fill_id", text(format!("f-{entry}"))),
+                    ("client_order_id", text(*entry)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty_gross", text(lots.to_string())),
+                    ("price", text("150")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(*entry)), ("state", text("filled"))],
+            )?;
+        }
+        for (side, qty) in [("buy", case.owner_buy), ("sell", case.owner_sale)] {
+            if qty > 0 {
+                committed(
+                    &mut executor,
+                    "FillApplied",
+                    vec![
+                        ("fill_id", text(format!("f-owner-{side}"))),
+                        ("instrument", text("AAPL")),
+                        ("side", text(side)),
+                        ("qty_gross", text(qty.to_string())),
+                        ("price", text("150")),
+                    ],
+                )?;
+            }
+        }
+        let covered = oracle_coverage(&case.lots, case.position());
+        for ((agent, entry, stop), qty) in HOLDERS.iter().zip(covered) {
+            if qty > 0 {
+                let leg = format!("{entry}-p1");
+                leg_at(&mut executor, (&leg, agent, &qty.to_string()), stop)?;
+            }
+        }
+        if let Some((agent, entry, _)) = case.worker.and_then(|k| HOLDERS.get(k))
+            && case.working > 0
+        {
+            let id = format!("{entry}-x");
+            committed(
+                &mut executor,
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(&id)),
+                    ("agent", text(*agent)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text(case.working.to_string())),
+                    ("limit", text("150")),
+                    ("purpose", text("risk_exit")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(&id)), ("state", text("accepted"))],
+            )?;
+        }
+        Ok(executor)
+    }
+
+    /// Each agent's resting legs, and each resting leg's agent index and own stop.
+    type RestingLegs = (Vec<i64>, Vec<(usize, String)>);
+
+    /// Each agent's resting legs in AAPL, by the agents' order in [`HOLDERS`], as what they have
+    /// left to sell, and every resting leg's own stop with its agent's index.
+    fn resting_legs(state: &ExecutorState) -> Result<RestingLegs, String> {
+        let mut legs = vec![0_i64; HOLDERS.len()];
+        let mut stops = Vec::new();
+        let aapl = aapl().map_err(|e| e.to_string())?;
+        for id in state
+            .protection
+            .get(&aapl)
+            .map(|protection| protection.resting.clone())
+            .unwrap_or_default()
+        {
+            let order = state.orders.get(&id).ok_or("a resting leg has no order")?;
+            let k = HOLDERS
+                .iter()
+                .position(|(agent, _, _)| order.agent.as_ref().is_some_and(|a| a.0 == *agent))
+                .ok_or_else(|| format!("{id:?} names no holder"))?;
+            let left: i64 = order
+                .qty
+                .checked_sub(order.filled_qty)
+                .map_err(|e| e.to_string())?
+                .to_string()
+                .parse()
+                .map_err(|_| "a whole-share leg")?;
+            if let Some(slot) = legs.get_mut(k) {
+                *slot = slot.saturating_add(left);
+            }
+            let stop = state
+                .details
+                .get(&id)
+                .and_then(|detail| detail.request.as_ref())
+                .and_then(|request| {
+                    request
+                        .oco
+                        .as_ref()
+                        .map(|oco| oco.stop)
+                        .or(request.stop_price)
+                })
+                .map(|stop| stop.to_string())
+                .unwrap_or_default();
+            stops.push((k, stop));
+        }
+        Ok((legs, stops))
+    }
+
+    /// DEC-2849 item 8's acceptance, for one case: the exit cancels exactly its own agent's legs,
+    /// and another holder's only when they would not fit beside it within N or would cover more
+    /// than that holder's coverage after the exit (I-D); it goes for its
+    /// whole quantity (I-A), beside resting legs that leave it room within N (I-F), so no other
+    /// holder's leg cuts it (I4); and once it fills, every agent's legs cover its coverage again
+    /// (I-B, I9), all of them within N (I-C), each at its own agent's stop (I-E). Another holder's
+    /// exit working beside it counts in the fit and in the room until the exit fills; it is then
+    /// cancelled, so the re-placement it holds back (§5.4 waits on every exit working in the
+    /// instrument) goes before the checks. An agent that
+    /// never had a leg has no prices of its own, so it is never protected at another's (DEC-2849
+    /// item 8a): it gets no leg, and is alerted instead. Every expected
+    /// figure is the oracle's, computed from the case alone.
+    fn shared_exit_holds(case: &Shared) -> Result<(), TestCaseError> {
+        let fail = |e: ExecutorError| TestCaseError::fail(e.to_string());
+        let (config, fees) = (executor_config(), fees().map_err(fail)?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = shared_position(&ports, case).map_err(fail)?;
+        let before = case.position();
+        let covered = oracle_coverage(&case.lots, before);
+        let (agent, _, _) = HOLDERS.get(case.exiting).copied().unwrap_or(HOLDERS[0]);
+        let others: i64 = covered
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| *k != case.exiting)
+            .map(|(_, qty)| *qty)
+            .sum();
+        let fits = others
+            .saturating_add(case.working)
+            .saturating_add(case.exit)
+            <= before;
+        let mut lots = case.lots.clone();
+        if let Some(mine) = lots.get_mut(case.exiting) {
+            *mine = mine.saturating_sub(case.exit);
+        }
+        let after = before.saturating_sub(case.exit);
+        let owed = oracle_coverage(&lots, after);
+        let want: BTreeSet<String> = HOLDERS
+            .iter()
+            .zip(covered.iter().zip(&owed))
+            .enumerate()
+            .filter(|(k, (_, (qty, left)))| {
+                let exits = if case.worker == Some(*k) {
+                    case.working
+                } else {
+                    0
+                };
+                **qty > 0 && (*k == case.exiting || !fits || qty.saturating_add(exits) > **left)
+            })
+            .map(|(_, ((_, entry, _), _))| format!("{entry}-p1"))
+            .collect();
+        executor
+            .run(quote("139").map_err(fail)?, &ports)
+            .map_err(fail)?;
+        let qty = case.exit.to_string();
+        let started = executor
+            .run(
+                sell_as(agent, EXIT, &qty, "139", Purpose::RiskExit).map_err(fail)?,
+                &ports,
+            )
+            .map_err(fail)?;
+        let asked: BTreeSet<String> = cancels(&started).into_iter().map(str::to_owned).collect();
+        prop_assert_eq!(&asked, &want, "I-D: the cancels of {:?}", case);
+        let exit = format!("md-{EXIT}");
+        let sent_in = |effects: &[Effect]| {
+            submissions(effects)
+                .into_iter()
+                .find(|order| order.client_order_id.as_str() == exit)
+                .map(|order| order.qty)
+        };
+        let room = |executor: &Executor| -> Result<bool, TestCaseError> {
+            let (legs, _) = resting_legs(&executor.state).map_err(TestCaseError::fail)?;
+            Ok(legs
+                .iter()
+                .sum::<i64>()
+                .saturating_add(case.working)
+                .saturating_add(case.exit)
+                <= before)
+        };
+        let mut sent = sent_in(&started);
+        if sent.is_some() {
+            prop_assert!(room(&executor)?, "I-F: {:?}", case);
+        }
+        for id in &want {
+            let confirmed = executor.run(cancel_accepted(id), &ports).map_err(fail)?;
+            if sent.is_none()
+                && let Some(qty) = sent_in(&confirmed)
+            {
+                sent = Some(qty);
+                prop_assert!(room(&executor)?, "I-F: {:?}", case);
+            }
+        }
+        prop_assert_eq!(
+            sent,
+            Some(Qty::parse(&qty).map_err(|e| fail(e.into()))?),
+            "I-A: {:?}",
+            case
+        );
+        executor
+            .run(filled(EXIT, &qty).map_err(fail)?, &ports)
+            .map_err(fail)?;
+        if let Some((_, entry, _)) = case.worker.and_then(|k| HOLDERS.get(k))
+            && case.working > 0
+        {
+            executor
+                .run(cancel_accepted(&format!("{entry}-x")), &ports)
+                .map_err(fail)?;
+        }
+        let (legs, stops) = resting_legs(&executor.state).map_err(TestCaseError::fail)?;
+        for (k, ((have, need), had)) in legs.iter().zip(&owed).zip(&covered).enumerate() {
+            if *had > 0 {
+                prop_assert!(
+                    have >= need,
+                    "I-B: holder {} has {} of {}: {:?}",
+                    k,
+                    have,
+                    need,
+                    case
+                );
+            } else {
+                prop_assert_eq!(
+                    *have,
+                    0,
+                    "I-B: holder {} had no leg, so no prices of its own to be protected at: {:?}",
+                    k,
+                    case
+                );
+            }
+        }
+        prop_assert!(
+            legs.iter().sum::<i64>() <= after,
+            "I-C: {:?} within {}: {:?}",
+            legs,
+            after,
+            case
+        );
+        for (k, stop) in stops {
+            let own = HOLDERS.get(k).map(|(_, _, stop)| *stop).unwrap_or_default();
+            prop_assert_eq!(stop.as_str(), own, "I-E: holder {}'s leg: {:?}", k, case);
+        }
+        Ok(())
+    }
+
+    /// One case the acceptance fuzz found: `(lots, owner buy, owner sale, exiting agent, exit,
+    /// another agent's working exit)`.
+    type FoundCase = (&'static [i64], i64, i64, usize, i64, i64);
+
+    /// DEC-2849 item 8's acceptance, on every minimal case the fuzz below has found failing, so
+    /// each stays fixed whatever the random draw.
+    #[test]
+    fn the_acceptance_fuzzs_cases_stay_fixed() -> Result<(), String> {
+        let cases: [FoundCase; 9] = [
+            (&[6, 5], 0, 1, 0, 2, 0),
+            (&[11, 2], 3, 4, 0, 10, 0),
+            (&[11, 4], 0, 1, 0, 8, 0),
+            (&[4, 3], 1, 5, 0, 2, 0),
+            (&[4, 5], 2, 7, 1, 1, 0),
+            (&[1, 5], 4, 0, 1, 1, 1),
+            (&[2, 1, 1], 3, 4, 0, 2, 1),
+            (&[7, 1], 3, 3, 0, 1, 1),
+            (&[5, 6, 1], 0, 6, 1, 1, 1),
+        ];
+        for (lots, owner_buy, owner_sale, exiting, exit, working) in cases {
+            let case = Shared {
+                lots: lots.to_vec(),
+                owner_buy,
+                owner_sale,
+                exiting,
+                exit,
+                working,
+                worker: None,
+            }
+            .held();
+            shared_exit_holds(&case).map_err(|e| format!("{e}"))?;
+        }
+        Ok(())
+    }
+
+    /// DEC-2849 item 8's acceptance fuzz (I4, I9) over random shared positions: up to three agents'
+    /// lots, the owner's buy and sale outside Mandate (a deficit included), and one agent's risk
+    /// exit, followed through its cancels, its fill and the re-placement after it.
+    #[test]
+    fn a_shared_positions_exit_is_never_cut_and_every_holder_is_protected_after_it()
+    -> Result<(), String> {
+        let config = ProptestConfig {
+            cases: 1024,
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        };
+        let cases = (
+            prop::collection::vec(0_i64..=12, 1..=3),
+            0_i64..=8,
+            0_i64..=8,
+            0_usize..3,
+            1_i64..=12,
+            0_i64..=4,
+        )
+            .prop_map(|(lots, owner_buy, owner_sale, exiting, exit, working)| {
+                Shared {
+                    lots,
+                    owner_buy,
+                    owner_sale,
+                    exiting,
+                    exit,
+                    working,
+                    worker: None,
+                }
+                .held()
+            });
+        TestRunner::new(config)
+            .run(&cases, |case| shared_exit_holds(&case))
+            .map_err(|e| e.to_string())
     }
 
     /// Rule 13, by an oracle of its own over random scripts of ticks, quotes (a bid, a trade,
