@@ -979,7 +979,8 @@ per workspace deployment (item 6).
          cannot read is `journal_unavailable`. A reconciliation hold of one agent stands for that
          agent alone, so another agent of its account cannot acknowledge it here, though journal
          spec §9.28 and DEC-2830 item 1 let `agent` be any agent of the account: the API reads it
-         narrower on purpose, which adds no risk (DEC-176).
+         narrower on purpose, which adds no risk ([DEC-2149](../project/decisions/DEC-2149.md),
+         under DEC-176).
       6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
          stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
          (a version 1 request, which carries no `subject`, is read as `limit`, as §9.28 reads version
