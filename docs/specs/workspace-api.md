@@ -287,8 +287,8 @@ Errors are RFC 9457 problem documents with these members:
 | `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3); for an acknowledgment or its request, any method but `passkey` (§3.11 item 12) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
-| `acknowledgment_unavailable` | 409 | **(planned: E10-12)** An acknowledgment, or its request, names a hold §3.11 item 12's list does not serve now for that agent and `subject`: never raised, already lifted, or superseded. `effect: none`, `retryable: false`; title "Nothing to acknowledge" |
-| `acknowledgment_request_invalid` | 409 | **(planned: E10-12)** An acknowledgment names a `request` that is not an unspent `OwnerAcknowledgmentRequested` for the same agent, event, and `subject`, or that the caller recorded (journal spec rules 239 to 241). `effect: none`, `retryable: false`; title "Request cannot be answered" |
+| `acknowledgment_unavailable` | 409 | An acknowledgment, or its request, names a hold §3.11 item 12's list does not serve now for that agent and `subject`: never raised, already lifted, or superseded. `effect: none`, `retryable: false`; title "Nothing to acknowledge" |
+| `acknowledgment_request_invalid` | 409 | An acknowledgment names a `request` that is not an unspent `OwnerAcknowledgmentRequested` for the same agent, event, and `subject`, or that the caller recorded (journal spec rules 239 to 241). `effect: none`, `retryable: false`; title "Request cannot be answered" |
 | `deferral_mismatch` | 409 | A grant (§5.2) of an approval whose request's deferred checks are not exactly those of the `DecisionMade` it names, or whose decision is not on the agent stream: the request may hide or invent a check that has not been run (mandate spec §6.4, [DEC-2521](../project/decisions/DEC-2521.md)). `effect: none`, `retryable: false`; title "Request does not match its decision". A Skip of it is never refused for this |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
@@ -947,7 +947,10 @@ per workspace deployment (item 6).
          else `409` `acknowledgment_unavailable`. The writer offers a hold only while it stands
          (§9.28), so an acknowledgment of a trigger already lifted, superseded, or never raised is
          refused here and not journaled for the executor to refuse. An account stream the server
-         cannot read is `journal_unavailable`.
+         cannot read is `journal_unavailable`. A reconciliation hold of one agent stands for that
+         agent alone, so another agent of its account cannot acknowledge it here, though journal
+         spec §9.28 and DEC-2830 item 1 let `agent` be any agent of the account: the API reads it
+         narrower on purpose, which adds no risk (DEC-176).
       6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
          stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
          (a version 1 request, which carries no `subject`, is read as `limit`, as §9.28 reads version
@@ -989,7 +992,9 @@ per workspace deployment (item 6).
       `request_ack` for a request), `agent`, `control_head` (the control stream's head `seq` as a
       decimal string), `instrument`, `bid`, `bid_size`, and `floor` all `null`, and `event` the
       hold's `event_id`; then two members DEC-279's object does not have, `subject`, and, only for
-      an acknowledgment naming one, `request`. The CLI confirms by its typed code, not this
+      an acknowledgment naming one, `request`. A request's challenge is issued for the action kind
+      `acknowledge`, as an acknowledgment's is: `confirms` `request_ack` in the digest is what tells
+      the two apart (DEC-2144). The CLI confirms by its typed code, not this
       digest, so the members added here are the API's own. A control stream
       that moves between the client's read and the call changes `control_head`, so the port answers
       `step_up_mismatch` and nothing is recorded; the client reads again and asks again. Worked
@@ -1042,10 +1047,15 @@ per workspace deployment (item 6).
       order, with the payload's `reason`, or `null`. The phase is `refused` for an
       `OwnerCommandRefused`, an `ApprovalResponded` `refused`, or a `MandateVersionApplied`
       `rejected`; else `applied` for an `AgentModeChanged`, an `AgentModeApplied`, a
-      `KillSwitchActivated`, a `MandateVersionApplied` `applied`, or an `ApprovalRevalidated`
-      `act`; else `ended` for an `ApprovalRevalidated` `skip`, an `ApprovalTimedOut`, or an
-      `ApprovalCanceled`; else `taken` for any step; and `recorded` with none. Only direct
-      causation counts: an order a kill switch canceled names its own cause. The read takes the
+      `KillSwitchActivated`, a `RiskLimitLifted`, a `MandateVersionApplied` `applied`, or an
+      `ApprovalRevalidated` `act`; else `ended` for an `ApprovalRevalidated` `skip`, an
+      `ApprovalTimedOut`, or an `ApprovalCanceled`; else `taken` for any step; and `recorded` with
+      none. Only direct causation counts, with one hop for an acknowledgment: the executor's lift
+      of a hold names the acknowledgment's account-stream copy (`OwnerAcknowledged` on the account
+      stream, journal spec §9.28) as its cause, not the command, so the steps also hold the events
+      whose `causation_id` is that copy, sorted with the rest, and a lifted limit's acknowledgment
+      reads `applied` (DEC-2144). An order a kill switch canceled still names its own cause. The
+      read takes the
       "View agents, positions, decisions" row, users only until client tokens land (E10-14).
     - The hold and its lift wait for the runtime, as item 10 says.
 

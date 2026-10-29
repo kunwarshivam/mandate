@@ -512,12 +512,13 @@ fn a_protective_cancel_is_never_retried_by_this_rule() {
     assert_eq!((sent, alerted), (0, 0));
 }
 
-/// While an order of the switched agent is `Unknown` in one instrument, the switch raises no sell
-/// there (rule 13's hold by an `Unknown` order in the same instrument, DEC-485 item 2): nothing is
-/// denied, and the sell in another instrument goes at once. Once the `Unknown` order resolves, the
-/// held sell goes.
+/// DEC-2857, which ends DEC-485 item 2's wait on an `Unknown` order: while an opening of the
+/// switched agent is `Unknown` in one instrument, the switch still sells the ten it holds there at
+/// once, beside the sell in the other instrument, and nothing is denied. The opening is then found
+/// cancelled with nothing bought, so its remainder finds nothing more to sell.
 #[test]
-fn an_unknown_order_holds_only_its_own_instruments_flatten() {
+#[ignore = "pending E7-4"]
+fn an_unknown_opening_holds_no_flatten_and_leaves_its_remainder_nothing_more() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, FRAC]);
     let instruments = FixedInstruments;
@@ -543,7 +544,7 @@ fn an_unknown_order_holds_only_its_own_instruments_flatten() {
     let ran = shell.run(switch(), &ports);
     assert_eq!(
         sells(&ran),
-        vec![FRAC.to_owned()],
+        vec![AAPL.to_owned(), FRAC.to_owned()],
         "{:?}",
         ran.draft_types()
     );
@@ -568,7 +569,7 @@ fn an_unknown_order_holds_only_its_own_instruments_flatten() {
     for at in SWITCHED_AT + 1..=SWITCHED_AT + 3 {
         released.extend(sells(&shell.run(Input::Tick(clock(at)), &ports)));
     }
-    assert_eq!(released, vec![AAPL.to_owned()]);
+    assert_eq!(released, Vec::<String>::new());
 }
 
 fn sells(ran: &Ran) -> Vec<String> {
