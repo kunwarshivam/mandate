@@ -3849,6 +3849,103 @@ fn an_acknowledgment_to_an_undeployed_agent_is_not_found() {
     assert_eq!(control(&w.f).len(), deployed, "nothing more is recorded");
 }
 
+/// An `OwnerAcknowledgmentRequested` the server cannot read fails the list and an acknowledgment
+/// closed, `journal_unavailable` with nothing recorded, rather than read as no request: a spent or
+/// another hold's request must never read as unspent and matching.
+#[test]
+fn an_unreadable_request_fails_the_list_and_the_acknowledgment_closed() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &format!(
+            r#"{{"event":"{}","requested_by":"{BOB}","subject":"limit"}}"#,
+            hold.event_id
+        ),
+    );
+    refused(
+        &list(&w, "?state=open"),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack(
+            "acknowledgments",
+            KEY_3,
+            &ack_body(&hold.event_id, "limit", None, "null", None),
+        ),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+}
+
+/// A hold of another account blocks no agent of this one, though `agt_b` is deployed on that
+/// account here: `agt_a`'s list leaves it out and an acknowledgment of it through `agt_a` is
+/// `acknowledgment_unavailable`, so it is never copied to a stream where the executor would find
+/// no trigger.
+#[test]
+fn a_hold_of_another_account_blocks_no_agent_of_this_one() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    seed_control_v2(
+        &w.f,
+        "ConnectionEstablished",
+        &established_payload()
+            .replace(CONNECTION, "conn_other")
+            .replace(ACCOUNT, "acct_elsewhere"),
+    );
+    let elsewhere_document = document("v1").replace(CONNECTION, "conn_other");
+    assert_ne!(
+        elsewhere_document,
+        document("v1"),
+        "it names another connection"
+    );
+    w.f.store
+        .put(&to_canonical(&json(&elsewhere_document)))
+        .expect("stored");
+    seed_control_v2(
+        &w.f,
+        "AgentDeployed",
+        &format!(
+            r#"{{"agent_id":"agt_b","connection_id":"conn_other","mandate_version":"{}","record_ref":"{}"}}"#,
+            reference(&elsewhere_document),
+            reference("{}")
+        ),
+    );
+    let elsewhere = seed_stream(
+        &w.f,
+        &format!("acct:{WORKSPACE}:acct_elsewhere"),
+        "AccountRestrictionChanged",
+        &restriction("pattern_day_trader", "closing_only"),
+        None,
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open")),
+        std::slice::from_ref(&elsewhere.event_id),
+        "the workspace's list serves it"
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open&agent=agt_a")),
+        Vec::<String>::new()
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack(
+            "acknowledgments",
+            KEY_3,
+            &ack_body(&elsewhere.event_id, "restriction", None, "null", None),
+        ),
+        409,
+        ProblemCode::AcknowledgmentUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+}
+
 /// A request is refused as an acknowledgment is, with nothing recorded and the challenge kept: a
 /// hold that does not stand, no step-up, a method other than passkey, and no assertion.
 #[test]

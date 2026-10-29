@@ -26,11 +26,12 @@ use mandate_authn::Request;
 use mandate_canon::Value;
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
+use mandate_journal::holds::{Hold, Reason, holds, requests};
 
 use crate::backtests::paper;
 use crate::commands::Command;
 use crate::http::{App, problem, problem_body};
-use crate::reads::{Deployment, account_ref, deployed, envelope};
+use crate::reads::{Deployment, account_ref, deployed};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, document, object, path_refused, served, session,
     string,
@@ -45,275 +46,6 @@ pub const ACKNOWLEDGE_ASSERTED: &str = "acknowledge_step_up_asserted";
 
 /// The operation §3.4 derives an acknowledgment request's `StepUpAsserted` id under.
 pub const REQUEST_ASSERTED: &str = "acknowledgment_request_step_up_asserted";
-
-/// The prefix of a reconciliation hold's `restriction` (journal spec §9.28 version 2).
-const RECONCILIATION: &str = "reconciliation:";
-
-/// The reconciliation subjects that are not an instrument (trading spec §7.1 and §11).
-const ACCOUNT_KINDS: [&str; 4] = ["cash", "fees", "external_activity", "incomplete"];
-
-/// What a hold holds, by `subject`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Reason {
-    /// A latched limit, rung, or tripwire: its `limit` code.
-    Limit(String),
-    /// An account restriction: its `cause`.
-    Cause(String),
-    /// A reconciliation hold: its `restriction`, its kind, and the instrument it holds.
-    Reconciliation {
-        restriction: String,
-        kind: String,
-        instrument: Option<String>,
-    },
-}
-
-impl Reason {
-    /// §9.28 version 2's `subject` for it.
-    pub fn subject(&self) -> &'static str {
-        match self {
-            Self::Limit(_) => "limit",
-            Self::Cause(_) => "restriction",
-            Self::Reconciliation { .. } => "reconciliation",
-        }
-    }
-}
-
-/// Whose a hold is: one agent's, or the account's (a restriction, or a reconciliation hold of
-/// every agent, `*`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Holder {
-    Agent(String),
-    Account,
-}
-
-/// One hold standing on an account stream, by journal spec §9.28's checks 1 and 2 for its subject.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Raised {
-    /// The `event_id` of the record that raised it.
-    pub event: String,
-    pub holder: Holder,
-    pub reason: Reason,
-    /// The agent mode it holds, `None` for a limit.
-    pub mode: Option<&'static str>,
-    /// The raising record's `recorded_at`.
-    pub raised_at: String,
-}
-
-/// The holds that stand at the end of one account stream's `rows`, in the order raised, or `None`
-/// when a record that raises or ends one cannot be read, so the read fails rather than leave a hold
-/// out or serve one already ended.
-///
-/// A `RiskLimitTriggered` stands until a later trigger or lift of the same agent's `limit`; an
-/// `AccountRestrictionChanged` until a later change or lift of its `cause`; and an executor's
-/// reconciliation `AgentModeApplied` to `exits_only` or `paused` until a later `AgentModeApplied`
-/// of the same `agent` and `restriction`.
-pub fn standing(rows: &[StoredEvent]) -> Option<Vec<Raised>> {
-    let mut held: Vec<Raised> = Vec::new();
-    for row in rows {
-        let read = |member: &str| -> Option<String> {
-            let event = envelope(row)?;
-            event
-                .get("payload")?
-                .get(member)?
-                .as_str()
-                .map(str::to_owned)
-        };
-        match row.event_type.as_str() {
-            "RiskLimitTriggered" | "RiskLimitLifted" => {
-                let (agent, limit) = (read("agent_id")?, read("limit")?);
-                held.retain(|hold| {
-                    !(hold.holder == Holder::Agent(agent.clone())
-                        && hold.reason == Reason::Limit(limit.clone()))
-                });
-                if row.event_type == "RiskLimitTriggered" {
-                    held.push(Raised {
-                        event: row.event_id.clone(),
-                        holder: Holder::Agent(agent),
-                        reason: Reason::Limit(limit),
-                        mode: None,
-                        raised_at: row.recorded_at.clone(),
-                    });
-                }
-            }
-            "AccountRestrictionChanged" | "AccountRestrictionLifted" => {
-                let cause = read("cause")?;
-                held.retain(|hold| hold.reason != Reason::Cause(cause.clone()));
-                if row.event_type == "AccountRestrictionChanged" {
-                    let mode = match read("restriction")?.as_str() {
-                        "closing_only" => "exits_only",
-                        "blocked" => "paused",
-                        _ => return None,
-                    };
-                    held.push(Raised {
-                        event: row.event_id.clone(),
-                        holder: Holder::Account,
-                        reason: Reason::Cause(cause),
-                        mode: Some(mode),
-                        raised_at: row.recorded_at.clone(),
-                    });
-                }
-            }
-            "AgentModeApplied" => {
-                let restriction = read("restriction")?;
-                let Some(subject) = restriction.strip_prefix(RECONCILIATION) else {
-                    continue;
-                };
-                let agent = read("agent")?;
-                let holder = match agent.as_str() {
-                    "*" => Holder::Account,
-                    _ => Holder::Agent(agent),
-                };
-                held.retain(|hold| {
-                    !(hold.holder == holder
-                        && matches!(&hold.reason, Reason::Reconciliation { restriction: r, .. } if *r == restriction))
-                });
-                let originated = match envelope(row)?.get("payload")?.get("originated")? {
-                    Value::Bool(originated) => *originated,
-                    _ => return None,
-                };
-                let mode = match read("to")?.as_str() {
-                    "exits_only" => "exits_only",
-                    "paused" => "paused",
-                    _ => continue,
-                };
-                if !originated || subject.is_empty() {
-                    continue;
-                }
-                let account_wide = ACCOUNT_KINDS.contains(&subject);
-                let reason = Reason::Reconciliation {
-                    kind: if account_wide { subject } else { "instrument" }.to_owned(),
-                    instrument: (!account_wide).then(|| subject.to_owned()),
-                    restriction,
-                };
-                held.push(Raised {
-                    event: row.event_id.clone(),
-                    holder,
-                    reason,
-                    mode: Some(mode),
-                    raised_at: row.recorded_at.clone(),
-                });
-            }
-            _ => {}
-        }
-    }
-    Some(held)
-}
-
-/// An unspent `OwnerAcknowledgmentRequested` on the control stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Requested {
-    pub event_id: String,
-    pub agent: String,
-    pub event: String,
-    pub subject: String,
-    pub requested_by: String,
-}
-
-/// Every `OwnerAcknowledgmentRequested` on `control`, in stream order, with whether an
-/// `OwnerAcknowledged` names it (rule 241). A version 1 request's subject reads as `limit`, as
-/// §9.28 reads version 1, and a `subject` that is not text reads as one that matches nothing.
-/// `None` when such a record cannot be read.
-pub fn requests(control: &[StoredEvent]) -> Option<Vec<(Requested, bool)>> {
-    let mut spent: Vec<String> = Vec::new();
-    for row in control
-        .iter()
-        .filter(|r| r.event_type == "OwnerAcknowledged")
-    {
-        let payload = envelope(row)?.get("payload")?.clone();
-        if let Some(request) = payload.get("request").and_then(Value::as_str) {
-            spent.push(request.to_owned());
-        }
-    }
-    let mut found = Vec::new();
-    for row in control
-        .iter()
-        .filter(|r| r.event_type == "OwnerAcknowledgmentRequested")
-    {
-        let payload = envelope(row)?.get("payload")?.clone();
-        let read = |member: &str| {
-            payload
-                .get(member)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        };
-        let subject = match (row.schema_version, payload.get("subject")) {
-            (1, None) => "limit".to_owned(),
-            (_, Some(Value::Str(subject))) => subject.clone(),
-            _ => String::new(),
-        };
-        let requested = Requested {
-            event_id: row.event_id.clone(),
-            agent: read("agent")?,
-            event: read("event")?,
-            subject,
-            requested_by: read("requested_by")?,
-        };
-        let is_spent = spent.contains(&requested.event_id);
-        found.push((requested, is_spent));
-    }
-    Some(found)
-}
-
-/// One hold as the list serves it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hold {
-    pub raised: Raised,
-    /// The agent to post an acknowledgment to.
-    pub agent_id: String,
-    /// The account stream's id.
-    pub account: String,
-    /// The latest unspent request for it.
-    pub request: Option<Requested>,
-}
-
-impl Hold {
-    /// Whether it blocks `agent`, whose account stream is `account`: its own limit or hold, or a
-    /// hold of every agent of that account. A hold of another account never blocks it, so an
-    /// acknowledgment posted to an agent of another account is refused here, not copied to a stream
-    /// where the executor would find no trigger.
-    pub fn blocks(&self, agent: &str, account: &str) -> bool {
-        self.account == account
-            && match &self.raised.holder {
-                Holder::Agent(holder) => holder == agent,
-                Holder::Account => true,
-            }
-    }
-}
-
-/// The holds standing on each account in `accounts` (its stream id, its rows, and its deployed
-/// agents in id order), each with the agent to post to and its unspent request.
-pub fn holds(
-    accounts: &[(String, Vec<StoredEvent>, Vec<String>)],
-    requested: &[(Requested, bool)],
-) -> Option<Vec<Hold>> {
-    let mut listed = Vec::new();
-    for (account, rows, agents) in accounts {
-        for raised in standing(rows)? {
-            let request = requested
-                .iter()
-                .filter(|(r, spent)| {
-                    !spent && r.event == raised.event && r.subject == raised.reason.subject()
-                })
-                .map(|(r, _)| r.clone())
-                .next_back();
-            let agent_id = match (&request, &raised.holder) {
-                (Some(request), _) => request.agent.clone(),
-                (None, Holder::Agent(agent)) => agent.clone(),
-                (None, Holder::Account) => match agents.first() {
-                    Some(agent) => agent.clone(),
-                    None => continue,
-                },
-            };
-            listed.push(Hold {
-                raised,
-                agent_id,
-                account: account.clone(),
-                request,
-            });
-        }
-    }
-    Some(listed)
-}
 
 /// Each deployed agent's account stream id, from the connection its deployed document names
 /// (DEC-1020 item 3), or `None` when a document or its account cannot be found: the read then fails
@@ -368,8 +100,8 @@ async fn read_holds(app: &App, reader: &Reader) -> Result<Read, Refused> {
             .map_err(|_| Refused::JournalUnavailable)?;
         accounts.push((account, rows, agents));
     }
-    let requested = requests(&reader.control).ok_or(Refused::JournalUnavailable)?;
-    let listed = holds(&accounts, &requested).ok_or(Refused::JournalUnavailable)?;
+    let requested = requests(&reader.control).map_err(|_| Refused::JournalUnavailable)?;
+    let listed = holds(&accounts, &requested).map_err(|_| Refused::JournalUnavailable)?;
     Ok(Read {
         holds: listed,
         rows: accounts.into_iter().map(|(_, rows, _)| rows).collect(),
@@ -609,7 +341,7 @@ async fn judged(
     if !paper(&reader.control) {
         return refused(ProblemCode::LiveUnavailable, StatusCode::CONFLICT);
     }
-    let Some(requested) = requests(&reader.control) else {
+    let Ok(requested) = requests(&reader.control) else {
         return Refused::JournalUnavailable.response();
     };
     let named = asked.request.as_ref().map(|id| {
