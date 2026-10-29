@@ -1,4 +1,4 @@
-//! The chat's records (journal spec §9.43, [DEC-2293](../../../docs/project/decisions/DEC-2293.md)),
+//! The chat's records (journal spec §9.39, [DEC-2293](../../../docs/project/decisions/DEC-2293.md)),
 //! on the control stream, which the workspace API writes:
 //! - `ChatMessagePosted`: a message the owner or the agent posts;
 //! - `ChatTurnRecorded`: one model call and the tool calls it asked for, before any of them runs;
@@ -15,7 +15,7 @@ use mandate_canon::Value;
 use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamType};
 
-/// The control-stream event types §9.43 adds.
+/// The control-stream event types §9.39 adds.
 pub(crate) const CONTROL: [&str; 7] = [MESSAGE, TURN, RESULTS, ENDED, STOP, SETTINGS, GOALS];
 
 const MESSAGE: &str = "ChatMessagePosted";
@@ -40,7 +40,7 @@ const ENDS: [&str; 7] = [
     "ceiling",
 ];
 
-/// The §9.43 schema of `event_type` at `schema_version` on `stream`, or `None`.
+/// The §9.39 schema of `event_type` at `schema_version` on `stream`, or `None`.
 pub(crate) fn schema(
     event_type: &str,
     schema_version: u64,

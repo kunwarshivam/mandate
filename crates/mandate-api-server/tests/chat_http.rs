@@ -1,7 +1,7 @@
 //! The agent's chat over HTTP ([DEC-2293], workspace API §4.6.2): the owner's message is journaled
 //! before its `202`, its run goes to the model gateway service over the frame protocol, every model
 //! call and every tool result is journaled before anything acts on it, the agent's reply is
-//! journaled before the thread serves it, and every record passes the journal's own §9.43 schemas
+//! journaled before the thread serves it, and every record passes the journal's own §9.39 schemas
 //! and rules. The gateway here is the real one, over a recorded OpenRouter fake.
 //!
 //! [DEC-2293]: ../../../docs/project/decisions/DEC-2293.md
@@ -461,7 +461,7 @@ fn a_message_runs_through_the_gateway_and_every_step_is_journaled_before_it_show
     for row in chat_rows(&f) {
         assert!(
             Draft::parse(&row.body).is_ok(),
-            "{} passes journal §9.43: {:?}",
+            "{} passes journal §9.39: {:?}",
             row.event_type,
             Draft::parse(&row.body).err()
         );

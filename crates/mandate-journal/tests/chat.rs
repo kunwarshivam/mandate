@@ -1,4 +1,4 @@
-//! Journal spec §9.43 (DEC-2293): the chat's records on the control stream, with rules 330 to 334.
+//! Journal spec §9.39 (DEC-2293): the chat's records on the control stream, with rules 330 to 334.
 //! Each well-formed record parses; each rule refuses its case.
 
 use mandate_canon::{parse, to_canonical};

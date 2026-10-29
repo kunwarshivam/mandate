@@ -833,7 +833,7 @@ SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("wor
 SCHEMAS[("meter", "MeterReserved")] = rec(
     ("call_id", ULID),
     ("agent_id", opt(IDENT_T)),
-    ("purpose", one_of(*AGENT_PURPOSES, *NO_AGENT_PURPOSES)),
+    ("purpose", one_of(*AGENT_PURPOSES, "chat", *NO_AGENT_PURPOSES)),
     ("model", MODEL_REF),
     ("endpoint", STR),
     ("key_owner", one_of("platform", "customer")),
