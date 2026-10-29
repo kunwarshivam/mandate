@@ -6,6 +6,8 @@
   longer set `api.stepUpCoolOffWaiver` or `api.stepUpCoolOffWaiverUntil`; the API server refuses the
   waiver in `staging` at start again, and drops `STAGING_WAIVER_CEILING` and
   `MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL`; and the chart's schema and render refuse it in
-  `staging` again. A decision records the removal, superseding DEC-2150 item 1, and journal spec
+  `staging` again; and `web/` drops [DEC-2412](../decisions/DEC-2412.md)'s
+  `NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL` (its line in `web-deploy.yml`, `STAGING_WAIVER_CEILING` in
+  `src/lib/cool-off-build.ts`, and its names in xtask's workflow env lists). A decision records the removal, superseding DEC-2150 item 1, and journal spec
   §9.38 keeps `staging` as a valid `tier` for the waivers already journaled.
 <!-- section: E9 Identity, tenancy, and policy -->

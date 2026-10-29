@@ -329,6 +329,7 @@ describe("no order ticket (DEC-528)", () => {
     passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi", "reconciledHolding"],
     reads: ["emptyWorkspace"],
+    price: ["PRICE_REASONS", "priceRead", "priceRoute"],
     records: ["recordsRead"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
     theses: ["ADMISSION_REASONS", "thesesOf"],

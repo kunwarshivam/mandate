@@ -8,7 +8,8 @@ import type { CatalogueAnswer, CatalogueInstrument } from "@/api/catalogue";
 import { KEY } from "@/components/kumo/key";
 import { ModeBadge } from "@/components/domain/mode";
 import { Section, WorkspaceGate } from "@/components/screens/common";
-import { type AskOutcome, useRuntime } from "@/lib/mock-runtime";
+import { type AskOutcome, type PriceAnswer, useRuntime } from "@/lib/mock-runtime";
+import { dateLabel, price } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
@@ -92,6 +93,40 @@ export function InstrumentSearch() {
         )}
       </div>
     </WorkspaceGate>
+  );
+}
+
+/** How often the instrument's page reads its price again: a daily close moves once a session. */
+export const PRICE_POLL_MS = 30_000;
+
+/**
+ * The last trusted daily close (DEC-2152), labelled as what it is, with the session it closed: never
+ * "price now" or a bid. Anything the deployment does not report, or a read that fails, says so.
+ */
+function LastClose({ instrumentId }: { instrumentId: string }) {
+  const { price: readPrice } = useRuntime();
+  const [answer, setAnswer] = useState<PriceAnswer | null>(null);
+  useEffect(() => {
+    if (!readPrice) return;
+    let live = true;
+    const load = () => void readPrice(instrumentId).then((next) => live && setAnswer(next));
+    load();
+    const poll = window.setInterval(load, PRICE_POLL_MS);
+    return () => {
+      live = false;
+      window.clearInterval(poll);
+    };
+  }, [readPrice, instrumentId]);
+  if (answer?.ok && answer.value.reported)
+    return (
+      <p className="text-sm" data-slot="quote">
+        Last daily close <span className="font-mono font-medium tabular">{price(answer.value.close)}</span>, the session of {dateLabel(answer.value.bar_start)}. Not a live price.
+      </p>
+    );
+  return (
+    <p className={cn("text-sm", NOT_REPORTED)} data-slot="quote">
+      {answer === null ? "Reading the last close." : "Price not reported by your deployment."}
+    </p>
   );
 }
 
@@ -222,9 +257,7 @@ export function InstrumentScreen({ instrumentId }: { instrumentId: string }) {
             <header className="grid gap-1">
               <h1 className="font-mono text-h1">{instrument.symbol}</h1>
               <p className="text-sm text-muted-foreground">{CLASS_LABEL[instrument.asset_class]}</p>
-              <p className={cn("text-sm", NOT_REPORTED)} data-slot="quote">
-                Quote not reported by your deployment.
-              </p>
+              <LastClose instrumentId={instrument.instrument_id} />
             </header>
             <Section title="Ask your agent">
               <p className="max-w-measure text-sm text-muted-foreground">

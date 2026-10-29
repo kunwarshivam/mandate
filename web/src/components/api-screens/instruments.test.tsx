@@ -86,7 +86,7 @@ describe("asking an agent to buy (DEC-2151)", () => {
     const sent = mount(<InstrumentScreen instrumentId={INSTRUMENTS.XYZ.asset_id} />);
     const ask = await askFor(SWING.agent_id);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("XYZ");
-    expect(document.querySelector('[data-slot="quote"]')?.textContent).toBe("Quote not reported by your deployment.");
+    await waitFor(() => expect(document.querySelector('[data-slot="quote"]')?.textContent).toMatch(/^Last daily close \$[0-9,]+\.[0-9]{2,}, the session of [A-Z][a-z]{2} \d{1,2}, \d{4}\. Not a live price\.$/), { timeout: 5_000 });
     expect(screen.queryAllByRole("button", { name: /^buy$/i })).toEqual([]);
     fireEvent.change(within(ask).getByLabelText("Quantity of XYZ"), { target: { value: " 2.5 " } });
     fireEvent.click(within(ask).getByRole("button", { name: "Ask agent to buy" }));
@@ -156,6 +156,12 @@ describe("asking an agent to buy (DEC-2151)", () => {
     await waitFor(() => expect(ask.querySelector('[data-reason="instrument_not_pinned"]')).not.toBeNull(), { timeout: 5_000 });
     expect(ask.textContent).toContain("This agent's mandate doesn't include XYZ");
     expect(sent).toHaveLength(1);
+  });
+
+  it("says the price is not reported when the deployment reports none, and never calls it a live price or a bid", async () => {
+    mount(<InstrumentScreen instrumentId={INSTRUMENTS.BTC.asset_id} />);
+    await waitFor(() => expect(document.querySelector('[data-slot="quote"]')?.textContent).toBe("Price not reported by your deployment."), { timeout: 5_000 });
+    expect(document.body.textContent).not.toMatch(/price now|\bbid\b|real-time/i);
   });
 
   it("says an instrument the deployment has not registered is not registered", async () => {
