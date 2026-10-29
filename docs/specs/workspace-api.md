@@ -1428,7 +1428,8 @@ land (E10-14), and is served in a `live` workspace too, since a read adds no ris
   and no `application`; a later version has a `base_version`, no `deployed_at`, and an
   `application` that is `applied` with no `reason`, `rejected` with one, or `null`. The server
   enforces more than the schema can state: an application must name the entry's version over its
-  base, tell the classification the server computed (when it computes one), give a `reason`
+  base, tell the classification the server computed (when it computes one; when it cannot, any
+  recorded classification is accepted and the entry's is `null`), give a `reason`
   exactly when `rejected` (journal spec §9.3 rule 30), and be the only one answering its
   confirmation. Rule 33 (a reason only an increase meets is `risk_increasing`) is the journal's
   check at append; the read does not check it again yet (E10-28). One that is not fails the read `journal_unavailable`
