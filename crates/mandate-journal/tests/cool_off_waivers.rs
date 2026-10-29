@@ -89,9 +89,6 @@ fn each_base_and_every_valid_step_up_cool_off_waived_draft_parse() {
         }
     }
     for case in list(&section, "valid_drafts") {
-        if in_staging(case) {
-            continue;
-        }
         if let Err(e) = Draft::parse(&draft(&section, case)) {
             failed.push(format!("valid {}: {e:?}", text(case, "name")));
         }
@@ -99,22 +96,14 @@ fn each_base_and_every_valid_step_up_cool_off_waived_draft_parse() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
-/// Whether a valid draft names `tier` `staging`, the tier journal spec v0.116 adds (DEC-2150):
-/// [`a_staging_cells_waiver_parses`] reads those.
-fn in_staging(case: &Value) -> bool {
-    text(case, "name").contains("_staging_")
-}
-
-/// v0.116 (DEC-2150): a staging cell's waiver, before its expiry, names `tier` `staging`. Before it
-/// the journal refuses that tier as `non_canonical`, so a staging cell's waived step-up never
-/// commits.
+/// v0.116 (DEC-2150): a staging cell's waiver, before its expiry, names `tier` `staging`, and the
+/// section holds at least one such draft.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_staging_cells_waiver_parses() {
     let section = section();
     let cases: Vec<&Value> = list(&section, "valid_drafts")
         .iter()
-        .filter(|case| in_staging(case))
+        .filter(|case| text(case, "name").contains("_staging_"))
         .collect();
     assert!(
         !cases.is_empty(),

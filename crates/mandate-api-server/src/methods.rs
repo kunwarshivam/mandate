@@ -49,7 +49,8 @@ pub struct Passkey {
     pub cool_off_waiver: Option<CoolOffWaiver>,
     /// The waiver's expiry ([DEC-2150](../../../docs/project/decisions/DEC-2150.md) item 4), set
     /// only by [`crate::config::cool_off_waiver`] at start: no step-up judged at or after it is
-    /// waived. `None` is no expiry, which only a `dev` or `ci` cell starts with.
+    /// waived ([`Passkey::waiving_at`]). `None` is no expiry, which only a `dev` or `ci` cell
+    /// starts with.
     pub cool_off_waiver_until: Option<UtcNanos>,
 }
 
@@ -103,6 +104,22 @@ impl Decoded {
 }
 
 impl Passkey {
+    /// The waiver's tier when it holds at `now`: the server started with one, and `now` is before
+    /// its expiry when it has one ([DEC-2150](../../../docs/project/decisions/DEC-2150.md) item 4).
+    /// The expiry is judged against the verifier's own instant, so the clock can only end it.
+    pub fn waiving_at(&self, now: UtcNanos) -> Option<CoolOffWaiver> {
+        self.cool_off_waiver
+            .filter(|_| self.cool_off_waiver_until.is_none_or(|until| now < until))
+    }
+
+    /// Whether a credential whose enrolment names `cool_off_ends` is past its cool-off at `now`,
+    /// the waiver included: it has no cool-off, its cool-off has ended, or the waiver holds at
+    /// `now`. A waiver counted this way is journaled only by [`StepUp::asserted`]'s route
+    /// (DEC-2146 item 3); a caller that journals no assertion reads it at its own risk.
+    pub fn past_cool_off(&self, cool_off_ends: Option<UtcNanos>, now: UtcNanos) -> bool {
+        cool_off_ends.is_none_or(|ends| ends <= now) || self.waiving_at(now).is_some()
+    }
+
     /// The enrolled credential `enrolment` is, with its last counter and its key read from the
     /// store; `None` for a version 1 enrolment, which records no backup-eligible flag, for a
     /// holder the fold finds broken, and for a key that does not resolve or parse.
@@ -167,7 +184,7 @@ impl StepUp for Passkey {
             .into_iter()
             .find(|enrolment| enrolment.credential == assertion.passkey_id)
             .and_then(|enrolment| self.credential(&fold, enrolment, &decoded.credential_id));
-        let waived = match (self.cool_off_waiver, enrolled.as_mut()) {
+        let waived = match (self.waiving_at(judged.now), enrolled.as_mut()) {
             (Some(tier), Some(credential)) if judged.now < credential.cool_off_ends => {
                 let waived = CoolOffWaived {
                     cool_off_ends: credential.cool_off_ends,

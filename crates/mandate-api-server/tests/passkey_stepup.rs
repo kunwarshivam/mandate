@@ -879,7 +879,6 @@ fn a_staging_waiver_before_its_expiry_counts_and_names_staging() {
 /// and the challenge is kept. Without the expiry the same step-up counts, so the expiry alone ends
 /// it.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_judged_at_or_after_its_expiry_counts_nothing() {
     for waiver in [
         CoolOffWaiver::Staging,
@@ -898,6 +897,45 @@ fn a_waiver_judged_at_or_after_its_expiry_counts_nothing() {
             );
             assert!(w.held(), "{waiver:?} until {until}: nothing is taken");
         }
+    }
+}
+
+/// DEC-2150 item 4: `past_cool_off` is the one rule a caller reads: a credential with no cool-off
+/// or one that has ended is past it; one still cooling is past it only while the server's waiver
+/// holds at that instant, which an expiry at or before the instant ends.
+#[test]
+fn past_cool_off_reads_the_cool_off_and_the_waiver_by_one_instant() {
+    let now = at(ISSUED + 30);
+    let mut w = world();
+    let passkey = &mut w.port.passkey;
+    assert!(passkey.past_cool_off(None, now), "no cool-off");
+    assert!(passkey.past_cool_off(Some(now), now), "ends at the instant");
+    assert!(
+        passkey.past_cool_off(Some(at(ISSUED)), now),
+        "ended before it"
+    );
+    assert!(
+        !passkey.past_cool_off(Some(at(COOLING)), now),
+        "still cooling, no waiver"
+    );
+    passkey.cool_off_waiver = Some(CoolOffWaiver::Staging);
+    assert!(
+        passkey.past_cool_off(Some(at(COOLING)), now),
+        "a waiver with no expiry"
+    );
+    assert_eq!(passkey.waiving_at(now), Some(CoolOffWaiver::Staging));
+    for (until, holds) in [
+        (ISSUED + 31, true),
+        (ISSUED + 30, false),
+        (ISSUED + 29, false),
+    ] {
+        passkey.cool_off_waiver_until = Some(at(until));
+        assert_eq!(
+            passkey.past_cool_off(Some(at(COOLING)), now),
+            holds,
+            "expiry {until}"
+        );
+        assert_eq!(passkey.waiving_at(now).is_some(), holds, "expiry {until}");
     }
 }
 

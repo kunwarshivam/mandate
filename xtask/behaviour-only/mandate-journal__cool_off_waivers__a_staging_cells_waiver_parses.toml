@@ -1,8 +1,0 @@
-file = "crates/mandate-journal/tests/cool_off_waivers.rs"
-test = "a_staging_cells_waiver_parses"
-reason = """
-Journal spec v0.116 (DEC-2150) admits `staging` as `StepUpCoolOffWaived`'s `tier`. The journal's
-type check has no stub: until the DEC-2150 implementation extends it, it refuses the tier
-`non_canonical`, and that refusal is the failure. The implementation deletes this file with the
-test's `#[ignore]` line.
-"""

@@ -51,8 +51,6 @@ pub enum StartRefusal {
     /// [`INTERNAL_PAPER_WORKSPACE`] is on, and the hosted control stream is not shown to be paper
     /// (DEC-1143 item 2).
     InternalWorkspaceNotPaper,
-    /// A check its story has not implemented yet (DEC-77).
-    Unimplemented { story: &'static str },
 }
 
 impl fmt::Display for StartRefusal {
@@ -75,7 +73,6 @@ impl fmt::Display for StartRefusal {
                 f,
                 "{AUTHORIZE_URL} is set outside a dev or ci debug build, or names no cell page"
             ),
-            Self::Unimplemented { story } => write!(f, "{story} has not been implemented yet"),
             Self::InternalWorkspaceNotPaper => write!(
                 f,
                 "{INTERNAL_PAPER_WORKSPACE} is on, and the control stream is not shown to be paper"
@@ -202,10 +199,13 @@ pub fn cool_off_waiver(
     value: Option<&OsStr>,
     until: Option<&OsStr>,
 ) -> Result<Option<(CoolOffWaiver, Option<UtcNanos>)>, StartRefusal> {
+    let expiry = StartRefusal::Setting {
+        name: COOL_OFF_WAIVER_UNTIL,
+    };
     let Some(value) = value else {
         return match until {
             None => Ok(None),
-            Some(_) => Err(StartRefusal::Unimplemented { story: "E9-4" }),
+            Some(_) => Err(expiry),
         };
     };
     let refused = StartRefusal::Setting {
@@ -217,13 +217,37 @@ pub fn cool_off_waiver(
     let waiver = match tier {
         Tier::Dev => CoolOffWaiver::Dev,
         Tier::Ci => CoolOffWaiver::Ci,
-        Tier::Staging => return Err(StartRefusal::Unimplemented { story: "E9-4" }),
+        Tier::Staging => CoolOffWaiver::Staging,
         Tier::Production => return Err(refused),
     };
-    match until {
-        None => Ok(Some((waiver, None))),
-        Some(_) => Err(StartRefusal::Unimplemented { story: "E9-4" }),
+    let until = match until {
+        None => None,
+        Some(text) => Some(expiry_instant(text).ok_or_else(|| expiry.clone())?),
+    };
+    if waiver == CoolOffWaiver::Staging {
+        let ceiling =
+            UtcNanos::parse_rfc3339(STAGING_WAIVER_CEILING).map_err(|_| expiry.clone())?;
+        if until.is_none_or(|until| until > ceiling) {
+            return Err(expiry);
+        }
     }
+    Ok(Some((waiver, until)))
+}
+
+/// The expiry `text` names when it is exactly `YYYY-MM-DDTHH:MM:SSZ`, a real UTC instant; `None`
+/// for any other form (DEC-2150 item 2).
+fn expiry_instant(text: &OsStr) -> Option<UtcNanos> {
+    let text = text.to_str()?;
+    let template = b"dddd-dd-ddTdd:dd:ddZ";
+    let shaped = text.len() == template.len()
+        && text.bytes().zip(template).all(|(byte, want)| match want {
+            b'd' => byte.is_ascii_digit(),
+            _ => byte == *want,
+        });
+    if !shaped {
+        return None;
+    }
+    UtcNanos::parse_rfc3339(text).ok()
 }
 
 /// Refuses a key set fetched over anything but `https` outside dev and CI (E21-53, DEC-2100 item

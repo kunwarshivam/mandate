@@ -577,7 +577,6 @@ fn the_staging_ceiling_is_the_fifth_of_november() {
 /// ceiling, the ceiling itself included, and waives as `staging` until it. An expiry already past
 /// still starts: the verifier then counts no waiver (item 4), which fails closed.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_staging_waiver_starts_with_an_expiry_no_later_than_the_ceiling() {
     for until in [
         STAGING_WAIVER_CEILING,
@@ -594,7 +593,6 @@ fn a_staging_waiver_starts_with_an_expiry_no_later_than_the_ceiling() {
 
 /// DEC-2150 item 2: a staging waiver without an expiry refuses the start, naming the expiry.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_staging_waiver_without_an_expiry_refuses_the_start() {
     assert_eq!(
         cool_off_waiver(Tier::Staging, on(), None),
@@ -607,7 +605,6 @@ fn a_staging_waiver_without_an_expiry_refuses_the_start() {
 /// DEC-2150 item 3: a staging expiry later than the ceiling, by a second or by more, refuses the
 /// start, so a values edit alone cannot extend the waiver.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_staging_expiry_past_the_ceiling_refuses_the_start() {
     for until in [
         "2026-11-05T00:00:01Z",
@@ -627,7 +624,6 @@ fn a_staging_expiry_past_the_ceiling_refuses_the_start() {
 /// DEC-2150 item 2: an expiry in any form but `YYYY-MM-DDTHH:MM:SSZ` refuses the start, naming the
 /// expiry, in staging and in a test tier alike.
 #[test]
-#[ignore = "pending E9-4"]
 fn an_expiry_in_any_other_form_refuses_the_start() {
     let forms = [
         OsStr::new(""),
@@ -657,7 +653,6 @@ fn an_expiry_in_any_other_form_refuses_the_start() {
 /// DEC-2150 item 2: an expiry without the waiver refuses the start in every tier, naming the
 /// expiry, so a stray expiry is never silently ignored.
 #[test]
-#[ignore = "pending E9-4"]
 fn an_expiry_without_the_waiver_refuses_the_start() {
     for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
         assert_eq!(
@@ -673,7 +668,6 @@ fn an_expiry_without_the_waiver_refuses_the_start() {
 /// DEC-2150 item 2: a `dev` or `ci` cell honours an expiry it is given, which can only end its
 /// waiver, and the staging ceiling does not apply to it.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_test_cell_honours_an_expiry_past_the_ceiling() {
     for (tier, waiver) in [
         (Tier::Dev, CoolOffWaiver::Dev),

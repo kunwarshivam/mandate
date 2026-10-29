@@ -4191,7 +4191,6 @@ fn a_ci_cells_waived_deploy_with_a_fresh_passkey_commits_and_journals_the_waiver
 /// judged before the waiver's expiry, with a passkey still in its cool-off, commits and journals
 /// the waiver naming `staging`.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_staging_cells_waived_confirm_before_its_expiry_commits_and_journals_the_waiver() {
     let w = passkeyed_in(
         Port::WaivedUntil(CoolOffWaiver::Staging, T0 + 60),
@@ -4223,7 +4222,6 @@ fn a_staging_cells_waived_confirm_before_its_expiry_commits_and_journals_the_wai
 /// passkey's confirmation is `step_up_missing`, nothing is appended, and the challenge is kept, in
 /// a staging cell and in a test cell given an expiry alike: the clock only ends the waiver.
 #[test]
-#[ignore = "pending E9-4"]
 fn at_or_after_its_expiry_the_waiver_counts_nothing() {
     for (waiver, until) in [
         (CoolOffWaiver::Staging, T0),

@@ -8,7 +8,6 @@ and in the chart, as the API refuses it at its start. What is expected is writte
 from the chart, so a chart that drifts fails.
 """
 
-import pytest
 from test_cell import CHART, containers, helm, render_all, workloads
 from test_oauth_fixture import BASE
 
@@ -17,9 +16,6 @@ UNTIL_NAME = "MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL"
 ON = ("--set", "api.stepUpCoolOffWaiver=true")
 EXPIRY = "2026-11-01T12:00:00Z"
 UNTIL = ("--set-string", f"api.stepUpCoolOffWaiverUntil={EXPIRY}")
-
-#: DEC-2150's chart render, which the implementation lands; until then these fail as expected.
-PENDING = pytest.mark.xfail(strict=True, reason="pending E9-4: DEC-2150's render of the staging waiver")
 
 
 def named(docs: list[dict], name: str = NAME) -> list[tuple[str, str, str]]:
@@ -65,7 +61,6 @@ def test_the_value_is_a_boolean_in_the_schema():
         assert done.returncode != 0, value
 
 
-@PENDING
 def test_in_staging_with_an_expiry_only_the_api_container_carries_both():
     """DEC-2150 item 6: a staging cell renders the waiver and its expiry on the API alone."""
     docs = render_all(*ON, *UNTIL, "--set", "deploymentTier=staging")
@@ -92,7 +87,6 @@ def test_production_refuses_it_with_an_expiry_in_the_schema_and_in_the_chart():
         assert UNTIL_NAME not in done.stdout, skip
 
 
-@PENDING
 def test_an_expiry_without_the_waiver_is_refused_in_the_schema_and_in_the_chart():
     """DEC-2150 item 6: a stray expiry is refused, never rendered alone."""
     for tier in ("dev", "ci", "staging"):
@@ -103,7 +97,6 @@ def test_an_expiry_without_the_waiver_is_refused_in_the_schema_and_in_the_chart(
             assert UNTIL_NAME not in done.stdout, f"{tier} {skip}"
 
 
-@PENDING
 def test_a_test_cell_renders_an_expiry_it_is_given():
     """DEC-2150 item 2: dev and ci need no expiry, and render one they are given."""
     for tier in ("dev", "ci"):
