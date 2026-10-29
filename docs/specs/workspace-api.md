@@ -988,7 +988,9 @@ per workspace deployment (item 6).
       `request_ack` for a request), `agent`, `control_head` (the control stream's head `seq` as a
       decimal string), `instrument`, `bid`, `bid_size`, and `floor` all `null`, and `event` the
       hold's `event_id`; then two members DEC-279's object does not have, `subject`, and, only for
-      an acknowledgment naming one, `request`. The CLI confirms by its typed code, not this
+      an acknowledgment naming one, `request`. A request's challenge is issued for the action kind
+      `acknowledge`, as an acknowledgment's is: `confirms` `request_ack` in the digest is what tells
+      the two apart (DEC-2144). The CLI confirms by its typed code, not this
       digest, so the members added here are the API's own. A control stream
       that moves between the client's read and the call changes `control_head`, so the port answers
       `step_up_mismatch` and nothing is recorded; the client reads again and asks again. Worked
@@ -1041,10 +1043,15 @@ per workspace deployment (item 6).
       order, with the payload's `reason`, or `null`. The phase is `refused` for an
       `OwnerCommandRefused`, an `ApprovalResponded` `refused`, or a `MandateVersionApplied`
       `rejected`; else `applied` for an `AgentModeChanged`, an `AgentModeApplied`, a
-      `KillSwitchActivated`, a `MandateVersionApplied` `applied`, or an `ApprovalRevalidated`
-      `act`; else `ended` for an `ApprovalRevalidated` `skip`, an `ApprovalTimedOut`, or an
-      `ApprovalCanceled`; else `taken` for any step; and `recorded` with none. Only direct
-      causation counts: an order a kill switch canceled names its own cause. The read takes the
+      `KillSwitchActivated`, a `RiskLimitLifted`, a `MandateVersionApplied` `applied`, or an
+      `ApprovalRevalidated` `act`; else `ended` for an `ApprovalRevalidated` `skip`, an
+      `ApprovalTimedOut`, or an `ApprovalCanceled`; else `taken` for any step; and `recorded` with
+      none. Only direct causation counts, with one hop for an acknowledgment: the executor's lift
+      of a hold names the acknowledgment's account-stream copy (`OwnerAcknowledged` on the account
+      stream, journal spec §9.28) as its cause, not the command, so the steps also hold the events
+      whose `causation_id` is that copy, sorted with the rest, and a lifted limit's acknowledgment
+      reads `applied` (DEC-2144). An order a kill switch canceled still names its own cause. The
+      read takes the
       "View agents, positions, decisions" row, users only until client tokens land (E10-14).
     - The hold and its lift wait for the runtime, as item 10 says.
 
