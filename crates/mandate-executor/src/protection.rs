@@ -6779,6 +6779,66 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2849 item 8b: a leg no holder owns lends no holder its prices, but a sequence beside no
+    /// other holder's leg keeps the instrument's protection prices, as before item 8. Agent-a holds
+    /// alone under a `*` leg at 170 over 140; its exit's start records that stop of 140.
+    #[test]
+    fn a_sole_holders_sequence_keeps_the_protection_prices() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        leg_at(&mut executor, ("md-star-p1", "*", "10"), "140")?;
+        executor.run(quote("139")?, &ports)?;
+        let started = executor.run(sell(EXIT, "4", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), vec!["md-star-p1"]);
+        assert_eq!(start_stop(&started)?, Some("140".to_owned()));
+        Ok(())
+    }
+
+    /// DEC-2849 item 8b: an agent with no leg of its own beside another holder's records no prices,
+    /// never that holder's. Agent-a's ten rest unprotected; the owner sold one outside Mandate, so
+    /// agent-b's leg at 170 over 130 does not fit beside agent-a's exit of ten within N = 14 and
+    /// goes, and the start records no stop.
+    #[test]
+    fn an_agent_without_a_leg_borrows_no_holders_prices() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "130")?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-owner-sale")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("1")),
+                ("price", text("150")),
+            ],
+        )?;
+        executor.run(quote("139")?, &ports)?;
+        let started = executor.run(sell(EXIT, "10", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), vec!["md-held-2-p1"]);
+        assert_eq!(start_stop(&started)?, None, "never agent-b's 130");
+        Ok(())
+    }
+
+    /// The stop the `unprotected_start` among `effects` records, if any.
+    fn start_stop(effects: &[Effect]) -> Result<Option<String>, ExecutorError> {
+        let start = protection_drafts(effects)
+            .into_iter()
+            .find(|draft| {
+                draft.payload.get("action").and_then(Value::as_str) == Some("unprotected_start")
+            })
+            .ok_or_else(|| missing("the sequence's start"))?;
+        Ok(start
+            .payload
+            .get("stop")
+            .and_then(Value::as_str)
+            .map(str::to_owned))
+    }
+
     /// DEC-2849 item 8b: a passive exit still cancels every leg, another holder's included. It is
     /// placed as its own OCO's take-profit and re-protects the rest of the position around it
     /// (§5.4), so a leg it kept would cover those shares twice.

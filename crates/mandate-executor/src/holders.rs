@@ -202,17 +202,12 @@ pub(crate) fn coverages(
 }
 
 /// Each agent's coverage from its `lots` with `deficit` charged once, largest lots first, ties
-/// by agent id, each taking as much of what is left as its lots allow. An agent with no lots
-/// covers nothing.
+/// by agent id, each taking as much of what is left as its lots allow.
 fn charge(
     lots: &BTreeMap<AgentId, Qty>,
     deficit: Qty,
 ) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
-    let mut order: Vec<(&AgentId, Qty)> = lots
-        .iter()
-        .filter(|(_, lots)| **lots > Qty::ZERO)
-        .map(|(agent, lots)| (agent, *lots))
-        .collect();
+    let mut order: Vec<(&AgentId, Qty)> = lots.iter().map(|(agent, lots)| (agent, *lots)).collect();
     order.sort_by(|(a, x), (b, y)| y.cmp(x).then_with(|| a.cmp(b)));
     let mut left = deficit;
     let mut covered = BTreeMap::new();
