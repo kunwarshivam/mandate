@@ -63,8 +63,8 @@ pub use ports::{
 pub use research::{
     ActiveThesis, AgenticConfig, DispatchRequest, DispatchedResult, EventTriggers, ItemFacts,
     JournalCatalog, Preconditions, RecordCatalog, ResearchConfig, ResearchContext, ResearchInput,
-    ResearchRecord, ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, TurnRef,
-    TurnRequest, abandon_refused_research, handle_research,
+    ResearchRecord, ResearchRequest, ResearchState, ResearchStep, RetrievedObservation,
+    StoredRefusal, TurnRef, TurnRequest, abandon_refused_research, handle_research,
 };
 pub use state::{FOLD_VERSION, HeldPeriod, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;

@@ -1,0 +1,21 @@
+{{- /* The news reader's allowlist (DEC-2084 item 6), once images.news-reader is named: the ConfigMap
+`news-reader-allowlist`, config/sources/allowlist-v3.toml byte for byte through the chart's
+files/ link, which its Deployment mounts read-only at /etc/mandate/news. The reader fetches only
+what the version in effect allows, at its pace; the file holds no secret. */ -}}
+{{- define "mandate.newsReaderAllowlist" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: news-reader-allowlist
+  labels:
+    app.kubernetes.io/name: mandate-workspace
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/component: news-reader
+    mandate.dev/workspace: {{ .Values.workspace | quote }}
+data:
+  allowlist.toml: {{ .Files.Get "files/allowlist-v3.toml" | required "files/allowlist-v3.toml, the news reader's allowlist, is missing from the chart" | quote }}
+{{- end -}}
+{{- if index .Values.images "news-reader" }}
+---
+{{ include "mandate.emit" (include "mandate.newsReaderAllowlist" .) }}
+{{- end }}

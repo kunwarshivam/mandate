@@ -5,7 +5,7 @@
 mock_provider "digitalocean" {
   mock_data "digitalocean_kubernetes_versions" {
     defaults = {
-      valid_versions = ["1.35.9-do.1"]
+      valid_versions = ["1.35.9-do.2"]
     }
   }
 

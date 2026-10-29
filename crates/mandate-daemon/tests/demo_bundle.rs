@@ -91,6 +91,7 @@ fn parts(bundle: &Bundle) -> ResearchParts {
         data_symbols: BTreeSet::from([Symbol::new("SPY").unwrap()]),
         event_triggers: None,
         events: Vec::new(),
+        stored: mandate_daemon::StoredNews::default(),
     }
 }
 

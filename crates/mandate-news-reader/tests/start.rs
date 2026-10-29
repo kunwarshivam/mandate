@@ -29,7 +29,7 @@ use common::*;
 /// A reader that cannot run: not ready with `code`, alive, and doing nothing in five steps.
 fn holds_still(mut reader: Reader, journal: &Journal, transport: &Recorded, code: &str) {
     for second in 0..5 {
-        block_on(reader.step(plus(t0(), second)));
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
     }
     assert_eq!(reader.not_ready(), Some(code));
     assert_eq!(
@@ -140,7 +140,7 @@ fn only_a_paper_workspace_s_reader_starts() {
     let mut config = config();
     config.environment = Environment::Live;
     let mut reader = started_with(&journal, &shelf, &transport, &config, t0());
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(exit(&reader), Some(Exit::Refused));
     assert!(transport.sent().is_empty());
     assert!(journal.news().is_empty());
@@ -289,7 +289,7 @@ fn a_stored_item_it_cannot_read_at_start_stops_it_with_nothing_fetched_or_journa
         let before = journal.news();
         let mut reader = started(&journal, &shelf, &transport, plus(t0(), 1));
         for second in 2..7 {
-            block_on(reader.step(plus(t0(), second)));
+            block_on(reader.step(Clock::agreed(plus(t0(), second))));
         }
         assert_eq!(reader.not_ready(), Some("news_stream_unreadable"), "{case}");
         assert_ne!(reader.lifecycle().state(), State::Ready, "{case}");
@@ -298,4 +298,130 @@ fn a_stored_item_it_cannot_read_at_start_stops_it_with_nothing_fetched_or_journa
         reader.drain(plus(t0(), 8));
         assert_eq!(exit(&reader), Some(Exit::Drained), "{case}: it drains");
     }
+}
+
+/// E2-10d: a reader that finds a stored item it cannot read fences nothing. It reads and folds
+/// its stream before it takes the writer epoch, so it refuses `news_stream_unreadable` holding no
+/// epoch, and the earlier writer's next append still commits at its own epoch.
+#[test]
+fn a_reader_that_cannot_read_its_stream_fences_no_earlier_writer() {
+    let (journal, shelf, transport) = workspace_with_one_item();
+    let stream = StreamId::parse(&format!("news:{WS}")).unwrap();
+    let mut earlier = journal.clone();
+    let epoch = earlier.take_ownership(&stream).unwrap();
+    let writer = Writer {
+        workspace: WS.to_owned(),
+        environment: Environment::Paper,
+        epoch,
+    };
+    journal
+        .news_bodies
+        .borrow_mut()
+        .insert(2, b"{not canonical".to_vec());
+    let refused = started(&journal, &shelf, &transport, plus(t0(), 1));
+    assert_eq!(refused.not_ready(), Some("news_stream_unreadable"));
+    assert_eq!(
+        refused.lifecycle().state(),
+        State::Replaying,
+        "started, holding no epoch"
+    );
+    let next = Record::Stored(Stored {
+        source: "alpaca.news".to_owned(),
+        allowlist_version: 3,
+        item_id: "2:2026-10-26T12:30:00.000000000Z".to_owned(),
+        symbols: BTreeSet::from(["SPY".to_owned()]),
+        published_at: at("2026-10-26T12:30:00Z"),
+        knowledge_at: at("2026-10-26T14:45:00Z"),
+        item_ref: ArtifactRef::of(&2_u64.to_be_bytes()),
+        licensed: true,
+    });
+    let drafts = writer.drafts(2, t0(), &[next]).unwrap();
+    let appended = earlier.append(&stream, 2, epoch, t0(), &drafts);
+    assert!(
+        matches!(appended, mandate_journal::AppendOutcome::Committed(_)),
+        "the earlier writer still writes: {appended:?}"
+    );
+}
+
+/// Has another writer store `item_id` at seq 3 as the reader's next `take_ownership` begins, after
+/// its first read of the stream; with `unreadable`, the row reads back as a body that does not
+/// parse.
+fn stored_between_the_reads(journal: &Journal, item_id: &str, unreadable: bool) {
+    let item_id = item_id.to_owned();
+    let bodies = journal.news_bodies.clone();
+    *journal.before_ownership.borrow_mut() = Some(Box::new(move |memory| {
+        let stream = StreamId::parse(&format!("news:{WS}")).unwrap();
+        let epoch = memory.take_ownership(&stream).unwrap();
+        let writer = Writer {
+            workspace: WS.to_owned(),
+            environment: Environment::Paper,
+            epoch,
+        };
+        let between = Record::Stored(Stored {
+            source: "alpaca.news".to_owned(),
+            allowlist_version: 3,
+            item_id,
+            symbols: BTreeSet::from(["SPY".to_owned()]),
+            published_at: at("2026-10-26T14:00:00Z"),
+            knowledge_at: at("2026-10-26T14:50:00Z"),
+            item_ref: ArtifactRef::of(&3_u64.to_be_bytes()),
+            licensed: true,
+        });
+        let drafts = writer.drafts(2, t0(), &[between]).unwrap();
+        let appended = memory.append(&stream, 2, epoch, t0(), &drafts);
+        assert!(
+            matches!(appended, mandate_journal::AppendOutcome::Committed(_)),
+            "{appended:?}"
+        );
+        if unreadable {
+            bodies.borrow_mut().insert(3, b"{not canonical".to_vec());
+        }
+    }));
+}
+
+/// DEC-2287 item 2: the reader folds the rows it reads after it takes the epoch, not those of its
+/// first read. An item another writer stored between the two reads is held, so the reader, offered
+/// it again, stores nothing and stays ready.
+#[test]
+fn an_item_stored_between_the_reads_is_held_and_never_stored_again() {
+    let (journal, shelf, transport) = workspace_with_one_item();
+    let offered = "1:2026-10-26T14:00:00.000000000Z";
+    stored_between_the_reads(&journal, offered, false);
+    let mut reader = started(&journal, &shelf, &transport, plus(t0(), 1));
+    assert_eq!(reader.not_ready(), None);
+    assert_eq!(reader.lifecycle().state(), State::Ready);
+    let before = journal.news();
+    assert_eq!(before.len(), 3, "the item stored between the reads");
+    for second in 2..7 {
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
+    }
+    assert!(
+        !transport.sent().is_empty(),
+        "the page offering it was asked"
+    );
+    assert_eq!(journal.news(), before, "the held item is not stored again");
+    assert_eq!(exit(&reader), None, "no refused append stopped it");
+    assert_eq!(reader.lifecycle().state(), State::Ready);
+}
+
+/// DEC-2287 item 2: a row unreadable at the read after the epoch refuses the start as one at the
+/// first read does: not ready with `news_stream_unreadable`, never replayed, nothing fetched and
+/// nothing journaled.
+#[test]
+fn a_row_unreadable_at_the_read_after_the_epoch_stops_the_start() {
+    let (journal, shelf, transport) = workspace_with_one_item();
+    stored_between_the_reads(&journal, "1:2026-10-26T14:00:00.000000000Z", true);
+    let mut reader = started(&journal, &shelf, &transport, plus(t0(), 1));
+    let before = journal.news();
+    for second in 2..7 {
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
+    }
+    assert_eq!(reader.not_ready(), Some("news_stream_unreadable"));
+    assert_eq!(
+        reader.lifecycle().state(),
+        State::Replaying,
+        "it took the epoch and never replayed"
+    );
+    assert!(transport.sent().is_empty(), "nothing fetched");
+    assert_eq!(journal.news(), before, "nothing journaled");
 }

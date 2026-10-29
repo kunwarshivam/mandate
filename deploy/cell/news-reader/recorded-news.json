@@ -1,0 +1,7 @@
+{
+  "news": [
+    {"id": 9001, "headline": "Recorded: index fund flows steady", "author": "Recorded", "created_at": "2026-10-20T14:00:00Z", "updated_at": "2026-10-20T14:00:00Z", "summary": "A recorded item about SPY, for the cell alone.", "content": "", "url": "https://news.example/recorded/9001", "symbols": ["SPY"], "source": "benzinga", "images": []},
+    {"id": 9002, "headline": "Recorded: broad market closes higher", "author": "Recorded", "created_at": "2026-10-21T20:05:00Z", "updated_at": "2026-10-21T20:05:00Z", "summary": "A second recorded item about SPY.", "content": "", "url": "https://news.example/recorded/9002", "symbols": ["SPY", "QQQ"], "source": "benzinga", "images": []},
+    {"id": 9003, "headline": "Recorded: technology shares mixed", "author": "Recorded", "created_at": "2026-10-22T15:30:00Z", "updated_at": "2026-10-22T15:30:00Z", "summary": "A recorded item about QQQ alone.", "content": "", "url": "https://news.example/recorded/9003", "symbols": ["QQQ"], "source": "benzinga", "images": []}
+  ]
+}
