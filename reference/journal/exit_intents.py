@@ -1,10 +1,10 @@
 """Journal spec v0.108's reference vectors (DEC-2845): §9.1's `intent` type on every account-stream
-record the executor's own exits write.
+record the executor's own exits write, with v0.114's remainder (DEC-2857).
 
-Trading spec §2.3 names a kill switch's flatten `k-{switch}-{n}` and the triggered-stop watchdog's
-exit `w-{event}`. `IntentReceived` and `GateDecided` at versions 1 and 2, `OrderRequestRecorded`, and
+Trading spec §2.3 names a kill switch's flatten `k-{switch}-{n}`, its remainder `k-{switch}-{n}r`
+(§5.5, DEC-2857), and the triggered-stop watchdog's exit `w-{event}`. `IntentReceived` and `GateDecided` at versions 1 and 2, `OrderRequestRecorded`, and
 `ProtectionChanged` at versions 1 and 2 type their `intent_id` as `intent`: a ULID, or exactly one of
-those two forms, `n` a decimal from 0 to 999 with no leading zero. The schemas live in `control.py`,
+those forms, `n` a decimal from 0 to 999 with no leading zero. The schemas live in `control.py`,
 so one validator judges every closed schema. This module builds the `exit_intents` section: a base
 draft of each of the seven record versions, the `account_stream` chain's own payloads, a valid draft
 of each with each form, and an invalid draft of each with every near miss. Its oracle reads the form
@@ -23,7 +23,7 @@ from control import check_of, draft_for, reported, violations
 from control import invalid as control_invalid
 from control import valid as control_valid
 
-SPEC = "docs/specs/journal.md v0.108 §9.1's `intent` type (DEC-2845)"
+SPEC = "docs/specs/journal.md v0.114 §9.1's `intent` type (DEC-2845, DEC-2857)"
 SWITCH = "01JAE3A0A000000000000000K1"
 EVENT = "01JAE3A0A000000000000000W1"
 INTENT = "intent_id"
@@ -45,6 +45,9 @@ OWN = {
     "flatten_first": f"k-{SWITCH}-0",
     "flatten_third": f"k-{SWITCH}-2",
     "flatten_last": f"k-{SWITCH}-999",
+    "remainder_first": f"k-{SWITCH}-0r",
+    "remainder_third": f"k-{SWITCH}-2r",
+    "remainder_last": f"k-{SWITCH}-999r",
 }
 NEAR_MISSES = {
     "flatten_without_n": f"k-{SWITCH}",
@@ -71,6 +74,14 @@ NEAR_MISSES = {
     "flatten_switch_after_7": f"k-8{SWITCH[1:]}-1",
     "flatten_trailing_newline": f"k-{SWITCH}-1\n",
     "watchdog_leading_space": f" w-{EVENT}",
+    "remainder_without_n": f"k-{SWITCH}-r",
+    "remainder_upper_case": f"k-{SWITCH}-2R",
+    "remainder_twice": f"k-{SWITCH}-2rr",
+    "remainder_leading_zero": f"k-{SWITCH}-02r",
+    "remainder_n_1000": f"k-{SWITCH}-1000r",
+    "remainder_before_n": f"k-{SWITCH}-r2",
+    "remainder_dash": f"k-{SWITCH}-2-r",
+    "remainder_of_a_watchdog": f"w-{EVENT}r",
 }
 
 
@@ -128,7 +139,7 @@ def invalid_drafts() -> list[dict]:
     out = [
         control_invalid(
             f"{base}_{miss}",
-            "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+            "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
             base,
             [change(PATH, value)],
             "non_canonical",
@@ -147,7 +158,7 @@ def invalid_drafts() -> list[dict]:
 # --------------------------------------------------------------------------- independent oracle
 
 ULID_FORM = "[0-7][0-9A-HJKMNP-TV-Z]{25}"
-INTENT_FORM = re.compile(rf"(?:{ULID_FORM}|w-{ULID_FORM}|k-{ULID_FORM}-(?:0|[1-9][0-9]{{0,2}}))")
+INTENT_FORM = re.compile(rf"(?:{ULID_FORM}|w-{ULID_FORM}|k-{ULID_FORM}-(?:0|[1-9][0-9]{{0,2}})r?)")
 ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "forms.oracle")
 
 
@@ -162,6 +173,7 @@ def candidates() -> list[str]:
     out = [EVENT, SWITCH, *OWN.values(), *NEAR_MISSES.values()]
     for n in (*range(0, 12), 99, 100, 101, 998, 999, 1000, 1001, 9999):
         out += [f"k-{SWITCH}-{n}", f"k-{SWITCH}-0{n}", f"w-{EVENT}-{n}", f"{SWITCH}-{n}"]
+        out += [f"k-{SWITCH}-{n}r", f"k-{SWITCH}-0{n}r", f"k-{SWITCH}-{n}rr", f"{SWITCH}-{n}r"]
     for prefix in ("w", "k", "W", "K", "m", "md-w", "md-k", "ww", "kk"):
         out += [f"{prefix}-{EVENT}", f"{prefix}-{EVENT}-1"]
     return out
@@ -201,6 +213,7 @@ VALIDATOR_MUTANTS = (
     "types.intent_bound",
     "types.intent_zero",
     "types.intent_ascii",
+    "types.intent_remainder",
 )
 
 

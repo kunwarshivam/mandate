@@ -39,7 +39,7 @@ variable "kubernetes_version" {
 
   validation {
     condition     = can(regex("^1[.][0-9]+[.][0-9]+-do[.][0-9]+$", var.kubernetes_version))
-    error_message = "The version must be an exact DOKS slug such as 1.35.9-do.1, never a prefix or latest."
+    error_message = "The version must be an exact DOKS slug such as 1.35.9-do.2, never a prefix or latest."
   }
 }
 

@@ -141,6 +141,7 @@ export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
   hold_openings: "/agents/{agent}/hold",
   stop: "/agents/{agent}/stop",
   owner_exit: "/agents/{agent}/exits",
+  ask_agent: "/agents/{agent}/requests",
   acknowledge: "/agents/{agent}/acknowledgments",
   kill_switch: "/kill-switch",
   approval_response: "/approvals/{approval}/responses",

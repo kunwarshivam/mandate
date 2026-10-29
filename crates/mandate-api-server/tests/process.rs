@@ -673,6 +673,36 @@ fn the_real_money_mode_refuses_what_dec_2134_refuses() {
     assert!(!text.contains(canary), "{text}");
 }
 
+/// DEC-2150 item 2: `main` reads the expiry. A `ci` cell with the waiver and an expiry in another
+/// form exits 2 naming `MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL`, and an expiry without the
+/// waiver is refused the same way. Staging is refused before any setting is read in this build,
+/// as the waiver's own test says, so its expiry and ceiling are `tests/config.rs`'s cases.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_test_cell_reads_the_waivers_expiry_at_start() {
+    for env in [
+        vec![
+            ("MANDATE_DEPLOYMENT_TIER", "ci"),
+            ("MANDATE_API_STEP_UP_COOL_OFF_WAIVER", "true"),
+            ("MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL", "2026-11-01"),
+        ],
+        vec![
+            ("MANDATE_DEPLOYMENT_TIER", "ci"),
+            (
+                "MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL",
+                "2026-11-01T12:00:00Z",
+            ),
+        ],
+    ] {
+        let (code, out) = refused(command(&LOCAL, &env));
+        assert_eq!(code, Some(2), "{env:?}: {out}");
+        assert!(
+            out.contains("MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL"),
+            "{env:?}: the refusal names the expiry: {out}"
+        );
+    }
+}
+
 /// DEC-2146 item 2: a `ci` or `dev` cell starts with the waiver `true`, and refuses at start a
 /// waiver of any other value, naming the setting. Staging, production and an unset tier are
 /// refused before any setting is read, as an unsigned build is (E21-35), so their refusal of the

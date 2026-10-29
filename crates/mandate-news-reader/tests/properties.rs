@@ -101,7 +101,7 @@ fn holds(steps: &[Step]) -> Result<(), TestCaseError> {
             })
             .collect();
         transport.answer(page(&page_items, None));
-        block_on(reader.step(now));
+        block_on(reader.step(Clock::agreed(now)));
         for served in &step.items {
             first_receipt.entry(item_id(*served)).or_insert(now);
             times.insert(item_id(*served), (created(served.id), updated(*served)));

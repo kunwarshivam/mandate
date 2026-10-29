@@ -1,0 +1,190 @@
+[
+  {
+    "label": "a reported close with a reason",
+    "set": {
+      "/reason": "untrusted"
+    }
+  },
+  {
+    "label": "a reported price without its close",
+    "remove": [
+      "/close"
+    ]
+  },
+  {
+    "label": "a reported price without its bar start",
+    "remove": [
+      "/bar_start"
+    ]
+  },
+  {
+    "label": "a reported price without its timeframe",
+    "remove": [
+      "/timeframe"
+    ]
+  },
+  {
+    "label": "a reported price without its source",
+    "remove": [
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported, but a stub close sent",
+    "set": {
+      "/reported": false,
+      "/reason": "untrusted"
+    },
+    "remove": [
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported, but a bar start sent",
+    "set": {
+      "/reported": false,
+      "/reason": "untrusted"
+    },
+    "remove": [
+      "/close",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported, but a timeframe sent",
+    "set": {
+      "/reported": false,
+      "/reason": "untrusted"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported, but a source sent",
+    "set": {
+      "/reported": false,
+      "/reason": "untrusted"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe"
+    ]
+  },
+  {
+    "label": "not reported with no reason",
+    "set": {
+      "/reported": false
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "an unknown reason",
+    "set": {
+      "/reported": false,
+      "/reason": "stale"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "a minute timeframe, not served in v1",
+    "set": {
+      "/timeframe": "1Min"
+    }
+  },
+  {
+    "label": "an unknown source",
+    "set": {
+      "/source": "fixture"
+    }
+  },
+  {
+    "label": "a float close",
+    "set": {
+      "/close": 512.34
+    }
+  },
+  {
+    "label": "a bid member",
+    "set": {
+      "/bid": "512.30"
+    }
+  },
+  {
+    "label": "no symbol",
+    "remove": [
+      "/symbol"
+    ]
+  },
+  {
+    "label": "no reported flag",
+    "remove": [
+      "/reported"
+    ]
+  },
+  {
+    "label": "no control-stream watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "an instrument id that is not an asset id",
+    "set": {
+      "/instrument_id": "QQQ"
+    }
+  },
+  {
+    "label": "no instrument id",
+    "remove": [
+      "/instrument_id"
+    ]
+  },
+  {
+    "label": "an empty symbol",
+    "set": {
+      "/symbol": ""
+    }
+  },
+  {
+    "label": "a timeframe outside the enum",
+    "set": {
+      "/timeframe": "mutant_value"
+    }
+  },
+  {
+    "label": "a source outside the enum",
+    "set": {
+      "/source": "mutant_value"
+    }
+  },
+  {
+    "label": "a reason outside the enum",
+    "set": {
+      "/reported": false,
+      "/reason": "mutant_value"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  }
+]

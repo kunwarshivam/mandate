@@ -2,13 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.25 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent; v0.25 amendment [DEC-2855](../project/decisions/DEC-2855.md), the hold codes registered); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.27 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent; v0.25 amendment [DEC-2855](../project/decisions/DEC-2855.md), the hold codes registered; v0.27 amendment [DEC-2857](../project/decisions/DEC-2857.md), an agent's flatten never waits on an `Unknown` order); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.27 ([DEC-2857](../project/decisions/DEC-2857.md), the founder's ruling):** an agent-scoped
+  kill switch's flatten never waits on an `Unknown` order in the instrument (§1 principle 4, §5.3
+  rule 9, §5.5, §5.7). Its certain part sells at once what no `Unknown` order could still sell,
+  capped so that it never sells short. Its remainder is held by §5.3 rule 9 as before, then sells
+  what is left once nothing in the instrument is `Unknown`, with no new approval. A remainder with
+  nothing left is abandoned `flatten_covered`. Every other exit, every opening, and the account
+  and workspace kill switch are unchanged. Every reference case is unchanged.
 - **v0.25 ([DEC-2855](../project/decisions/DEC-2855.md)):** §9.1 step 4's `protection_unattributed`
   and `attribution_deficit` are registered (the founder's ruling), and the owner is alerted once
   per episode of openings held for either. No hold, check order or exit changes.
@@ -172,8 +179,10 @@
    so nothing is left for it to sell; then it is refused `sell_exceeds_available` as DEC-410 item 3
    says. Exits and protective
    orders may be held only by agent mode `paused` or `stopped` (state integrity), by an `Unknown`
-   order in the same instrument, or by the broker. **The kill switch is always available** and
-   does not depend on model state (§5.5).
+   order in the same instrument, or by the broker. An agent-scoped kill switch's flatten never
+   waits on an `Unknown` order: it sells at once what no `Unknown` order could still sell, and the
+   rest once the `Unknown` resolves (§5.5, [DEC-2857](../project/decisions/DEC-2857.md)). **The
+   kill switch is always available** and does not depend on model state (§5.5).
 5. **The owner sets the envelope; the platform brings the ideas**
    ([DEC-97](../project/04-decision-log.md#decisions),
    [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), superseding
@@ -490,7 +499,9 @@ the one stop-limit (DEC-529 item 2).
    **equities**, a risk-increasing order never cancels a protective order (§5.4); crypto adds follow
    the DEC-36 sequence.
 9. An `Unknown` order reserves its maximum cost and counts as filled for exposure and
-   concentration; no new orders in that instrument (`unknown_order_in_flight`) until resolved.
+   concentration; no new orders in that instrument (`unknown_order_in_flight`) until resolved,
+   except the certain part of an agent-scoped kill switch's flatten (§5.5,
+   [DEC-2857](../project/decisions/DEC-2857.md)).
 
 **Risk-reducing orders at the first gate decision:** rules 4–6 exclude the agent's own protective
 orders, any unattributed protective leg (§5.4), and resting opening orders in the instrument, because the executor cancels them first
@@ -609,7 +620,7 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity, min(Lᵢ, N) (§8.1), never held by a deficit; never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity, min(Lᵢ, N) (§8.1); the certain part is never held by a deficit or by an `Unknown` order (below); never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -626,6 +637,38 @@ windows with current status data; otherwise the exit price ladder in §5.6) → 
 - Kill-switch orders are exempt from the agent's mode, never wait for approval, and do not depend on
   model state. `risk_exit` orders are exempt from §9.6; `owner_exit` orders are paced only by the
   participation caps.
+- **An agent's close never waits on an `Unknown` order** ([DEC-2857](../project/decisions/DEC-2857.md)).
+  What an `Unknown` order in the instrument could still sell is its quantity less its recorded
+  fills, for every `Unknown` sell, protective ones included; an `Unknown` buy could sell nothing.
+  - **The certain part,** `k-<switch>-<n>`, has the sub-ledger as its quantity. Each send of it
+    sells at most the lower of two quantities:
+    - the sub-ledger, less every live non-protective sell the switch reaches and every `Unknown`
+      sell the switch reaches, protective or not;
+    - the long position, less every live non-protective sell in the instrument and every
+      `Unknown` sell there, protective or not.
+
+    "Live" here excludes `Unknown`, so each `Unknown` sell is counted once. The other part of the
+    close counts like any other sell. Neither quantity counts the order being sized, but an
+    earlier order of the same part that is still `Unknown` is counted. The gate judges the send so
+    capped (§5.3 rule 4). While that cap is positive, the part is raised, gated and sent without
+    waiting on any `Unknown` order: not for the close (DEC-485 item 2), not at §5.3 rule 9, not for
+    an `Unknown` opening (§5.3 rule 5), and not for an `Unknown` protective order in §5.4's
+    sequence. It still waits for a `Submitting` order and for the cancels of confirmed orders.
+  - **The remainder,** `k-<switch>-<n>r`, is raised with the certain part whenever an `Unknown`
+    order is in the instrument. Its quantity is the sub-ledger plus the agent's `Unknown` buys'
+    unfilled quantity, and each send carries the same cap. §5.3 rule 9 holds it until no order in
+    the instrument is `Unknown`, then §5.7's re-gating releases it at the next tick, with no new
+    approval. Held past `max_intent_age_s`, it is journaled `held_long` and the owner alerted once.
+  - **A send capped to zero** sends nothing, and waits only on an `Unknown` order.
+    - While one is in the instrument, the part is held `unknown_order_in_flight`, and `held_long`
+      covers it.
+    - Once none is, the part ends: the remainder is abandoned `flatten_covered` without an alert,
+      and the certain part `released_to_owner` with one (DEC-2360).
+    - A certain part that ends unfilled (not a ladder step) after its remainder ended
+      `flatten_covered` leaves the rest to the owner, alerted once, `ExitStalled`, while the agent
+      still holds lots there.
+  - When the cap is zero where the close would be raised, only the remainder is raised. A close
+    has at most these two parts, and the account and workspace switch is unchanged.
 
 ### 5.6 Exit pricing
 
@@ -775,6 +818,10 @@ PartiallyFilled); fills during either pending state update filled quantity witho
   `Unknown → Intent` never fires and nothing is resubmitted. The order leaves `Unknown` only by the
   list-and-match adoption of [connections spec §6.2](connections.md#62-how-mcp-maps-to-the-connector-interface),
   or by the owner reconciling it by hand ([DEC-529](../project/decisions/DEC-529.md) item 4).
+- While an order is `Unknown`, every new order in its instrument is held (§5.3 rule 9), except the
+  certain part of an agent-scoped kill switch's flatten, which sells what no `Unknown` order could
+  still sell; the remainder is sold once none is `Unknown` (§5.5,
+  [DEC-2857](../project/decisions/DEC-2857.md)).
 - Per-event fill quantity and price are authoritative; cumulative quantity mismatches trigger
   reconciliation.
 - Every transition is journaled before it takes effect in state.

@@ -192,7 +192,7 @@ pub fn facts() -> AdmissionFacts {
     AdmissionFacts {
         allowlist: SourceAllowlist {
             version: AllowlistVersion(3),
-            sources: ["src.newswire", "src.wire_two"]
+            sources: ["src.newswire", "src.wire_two", "alpaca.news"]
                 .into_iter()
                 .map(|source| SourceId::new(source).unwrap())
                 .collect(),
@@ -228,6 +228,8 @@ pub struct Evented {
     pub triggers: Option<EventTriggers>,
     pub events: Vec<RetrievedItem>,
     pub active: Vec<ActiveThesis>,
+    /// The news stream's items the pass gives (DEC-2288).
+    pub stored: mandate_daemon::StoredNews,
 }
 
 impl ResearchSource for Open {
@@ -257,6 +259,10 @@ impl ResearchSource for Open {
                 Symbol::new("MSFT").unwrap(),
             ]),
             event_triggers: evented.as_ref().and_then(|e| e.triggers.clone()),
+            stored: evented
+                .as_ref()
+                .map(|e| e.stored.clone())
+                .unwrap_or_default(),
             events: evented.map(|e| e.events).unwrap_or_default(),
         })
     }

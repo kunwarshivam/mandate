@@ -565,7 +565,10 @@ locals {
     echo "${var.sysbox_sha256}  /root/sysbox.deb" | sha256sum --check
     apt-get -o DPkg::Lock::Timeout=600 install -y /root/sysbox.deb
     rm /root/sysbox.deb
-    jq '. + {"bip": "10.213.0.1/24", "default-address-pools": [{"base": "10.214.0.0/16", "size": 24}]}' /etc/docker/daemon.json > /etc/docker/daemon.json.new
+    # The droplet's own resolver is DigitalOcean's private 10.111.15.254, which the fence keeps
+    # every job off, so jobs and the image build resolve through public resolvers instead; the
+    # firewall already lets port 53 out.
+    jq '. + {"bip": "10.213.0.1/24", "default-address-pools": [{"base": "10.214.0.0/16", "size": 24}], "dns": ["1.1.1.1", "8.8.8.8"]}' /etc/docker/daemon.json > /etc/docker/daemon.json.new
     mv /etc/docker/daemon.json.new /etc/docker/daemon.json
     systemctl restart docker
     docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc

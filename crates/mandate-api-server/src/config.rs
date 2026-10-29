@@ -12,6 +12,7 @@ use std::path::Path;
 
 use mandate_connections::start::AuthorizePage;
 use mandate_release::startup::Tier;
+use mandate_time::UtcNanos;
 
 use crate::methods::CoolOffWaiver;
 
@@ -50,6 +51,8 @@ pub enum StartRefusal {
     /// [`INTERNAL_PAPER_WORKSPACE`] is on, and the hosted control stream is not shown to be paper
     /// (DEC-1143 item 2).
     InternalWorkspaceNotPaper,
+    /// A check its story has not implemented yet (DEC-77).
+    Unimplemented { story: &'static str },
 }
 
 impl fmt::Display for StartRefusal {
@@ -72,6 +75,7 @@ impl fmt::Display for StartRefusal {
                 f,
                 "{AUTHORIZE_URL} is set outside a dev or ci debug build, or names no cell page"
             ),
+            Self::Unimplemented { story } => write!(f, "{story} has not been implemented yet"),
             Self::InternalWorkspaceNotPaper => write!(
                 f,
                 "{INTERNAL_PAPER_WORKSPACE} is on, and the control stream is not shown to be paper"
@@ -174,18 +178,35 @@ pub fn authorize_page(tier: Tier, value: Option<&OsStr>) -> Result<AuthorizePage
 /// renders from `api.stepUpCoolOffWaiver` and refuses outside those tiers.
 pub const COOL_OFF_WAIVER: &str = "MANDATE_API_STEP_UP_COOL_OFF_WAIVER";
 
-/// The waiver [`COOL_OFF_WAIVER`]'s `value` sets in `tier`: none when unset; the tier's own when it
-/// is exactly `true` in `dev` or `ci`. Any other value, and `true` in any other tier, refuses the
-/// start, so a staging or production cell never waives (DEC-2146 item 2).
+/// The waiver's expiry ([DEC-2150](../../../docs/project/decisions/DEC-2150.md) item 2), exactly
+/// `YYYY-MM-DDTHH:MM:SSZ` in UTC: required with the waiver in `staging`, honoured in `dev` and
+/// `ci`, and refused without the waiver. The chart renders it from `api.stepUpCoolOffWaiverUntil`.
+pub const COOL_OFF_WAIVER_UNTIL: &str = "MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL";
+
+/// The latest expiry a staging cell may start with (DEC-2150 item 3). It is compiled in, so a
+/// values edit alone cannot extend the waiver: a later expiry needs a code change and a new
+/// founder decision.
+pub const STAGING_WAIVER_CEILING: &str = "2026-11-05T00:00:00Z";
+
+/// The waiver [`COOL_OFF_WAIVER`]'s `value` and its expiry [`COOL_OFF_WAIVER_UNTIL`]'s `until` set
+/// in `tier`: none when both are unset; the tier's own, with its expiry, when `value` is exactly
+/// `true` in `dev` or `ci`, or in `staging` with an expiry no later than
+/// [`STAGING_WAIVER_CEILING`] (DEC-2146 item 2, DEC-2150 items 2 and 3). Any other value, `true` in
+/// `production`, a staging waiver without an expiry or past the ceiling, an expiry in another
+/// form, and an expiry without the waiver each refuse the start.
 ///
 /// # Errors
-/// [`StartRefusal::Setting`] naming [`COOL_OFF_WAIVER`].
+/// [`StartRefusal::Setting`] naming [`COOL_OFF_WAIVER`] or [`COOL_OFF_WAIVER_UNTIL`].
 pub fn cool_off_waiver(
     tier: Tier,
     value: Option<&OsStr>,
-) -> Result<Option<CoolOffWaiver>, StartRefusal> {
+    until: Option<&OsStr>,
+) -> Result<Option<(CoolOffWaiver, Option<UtcNanos>)>, StartRefusal> {
     let Some(value) = value else {
-        return Ok(None);
+        return match until {
+            None => Ok(None),
+            Some(_) => Err(StartRefusal::Unimplemented { story: "E9-4" }),
+        };
     };
     let refused = StartRefusal::Setting {
         name: COOL_OFF_WAIVER,
@@ -193,10 +214,15 @@ pub fn cool_off_waiver(
     if value != OsStr::new("true") {
         return Err(refused);
     }
-    match tier {
-        Tier::Dev => Ok(Some(CoolOffWaiver::Dev)),
-        Tier::Ci => Ok(Some(CoolOffWaiver::Ci)),
-        Tier::Staging | Tier::Production => Err(refused),
+    let waiver = match tier {
+        Tier::Dev => CoolOffWaiver::Dev,
+        Tier::Ci => CoolOffWaiver::Ci,
+        Tier::Staging => return Err(StartRefusal::Unimplemented { story: "E9-4" }),
+        Tier::Production => return Err(refused),
+    };
+    match until {
+        None => Ok(Some((waiver, None))),
+        Some(_) => Err(StartRefusal::Unimplemented { story: "E9-4" }),
     }
 }
 

@@ -680,7 +680,15 @@
         },
         "stepUpCoolOffWaiver": {
           "type": "boolean",
-          "description": "MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true: a dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up, each waiver journaled as StepUpCoolOffWaived (DEC-2146); any other tier refuses it"
+          "description": "MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true: a dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up, each waiver journaled as StepUpCoolOffWaived (DEC-2146), and a staging cell's until stepUpCoolOffWaiverUntil (DEC-2150); production refuses it"
+        },
+        "stepUpCoolOffWaiverUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "description": "MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL: the waiver's expiry, YYYY-MM-DDTHH:MM:SSZ in UTC, required with the waiver in staging and only with the waiver. The API refuses at start a staging expiry later than the ceiling it is built with, 2026-11-05T00:00:00Z, and counts no waiver at or after it (DEC-2150)"
         }
       }
     },
@@ -871,13 +879,84 @@
           "deploymentTier": {
             "enum": [
               "dev",
-              "ci"
+              "ci",
+              "staging"
             ]
           }
         },
         "required": [
           "deploymentTier"
         ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "deploymentTier": {
+            "const": "staging"
+          },
+          "api": {
+            "properties": {
+              "stepUpCoolOffWaiver": {
+                "const": true
+              }
+            },
+            "required": [
+              "stepUpCoolOffWaiver"
+            ]
+          }
+        },
+        "required": [
+          "deploymentTier",
+          "api"
+        ]
+      },
+      "then": {
+        "properties": {
+          "api": {
+            "properties": {
+              "stepUpCoolOffWaiverUntil": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "stepUpCoolOffWaiverUntil"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "api": {
+            "properties": {
+              "stepUpCoolOffWaiverUntil": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "stepUpCoolOffWaiverUntil"
+            ]
+          }
+        },
+        "required": [
+          "api"
+        ]
+      },
+      "then": {
+        "properties": {
+          "api": {
+            "properties": {
+              "stepUpCoolOffWaiver": {
+                "const": true
+              }
+            },
+            "required": [
+              "stepUpCoolOffWaiver"
+            ]
+          }
+        }
       }
     }
   ]

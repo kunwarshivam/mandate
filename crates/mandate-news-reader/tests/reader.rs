@@ -43,7 +43,7 @@ fn each_new_item_is_stored_as_its_typed_record_and_journaled_before_anything_rea
     let transport = Recorded::answering(&[page(&[first.clone(), second.clone()], None)]);
     let mut reader = started(&journal, &shelf, &transport, t0());
     assert_eq!(reader.lifecycle().state(), State::Ready);
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
 
     assert_eq!(
         transport.sent(),
@@ -138,7 +138,7 @@ fn known_time_is_the_latest_of_receipt_publication_update_and_the_stream_s_last(
     );
     let transport = Recorded::answering(&[page(&[updated_after_receipt], None)]);
     let mut reader = started(&journal, &shelf, &transport, receipt);
-    block_on(reader.step(receipt));
+    block_on(reader.step(Clock::agreed(receipt)));
     assert_eq!(
         member(&stored(&journal)[0], "knowledge_at"),
         Value::Str("2026-10-26T15:00:00.750000000Z".into()),
@@ -156,11 +156,11 @@ fn known_time_is_the_latest_of_receipt_publication_update_and_the_stream_s_last(
         None,
     )]);
     let mut restarted = started(&journal, &shelf, &transport, earlier_clock);
-    block_on(restarted.step(earlier_clock));
+    block_on(restarted.step(Clock::agreed(earlier_clock)));
     assert_eq!(
         transport.sent()[0],
-        "https://data.alpaca.markets/v1beta1/news?symbols=SPY&start=2026-10-26T15:00:00.750000000Z&limit=50&sort=desc",
-        "a stream with items asks from its last known time"
+        "https://data.alpaca.markets/v1beta1/news?symbols=SPY&start=2026-10-26T14:45:00.750000000Z&limit=50&sort=desc",
+        "a stream with items asks from its last known time, less the overlap"
     );
     assert_eq!(
         member(&stored(&journal)[1], "knowledge_at"),
@@ -180,8 +180,8 @@ fn an_item_is_stored_once_across_fetches_restarts_and_failovers() {
         page(&[two.clone(), one.clone()], None),
     ]);
     let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
-    block_on(reader.step(plus(t0(), 1)));
+    block_on(reader.step(Clock::agreed(t0())));
+    block_on(reader.step(Clock::agreed(plus(t0(), 1))));
     assert_eq!(
         ids(&journal),
         [
@@ -192,7 +192,7 @@ fn an_item_is_stored_once_across_fetches_restarts_and_failovers() {
 
     let again = Recorded::answering(&[page(&[two.clone(), one.clone()], None)]);
     let mut restarted = started(&journal, &shelf, &again, plus(t0(), 2));
-    block_on(restarted.step(plus(t0(), 2)));
+    block_on(restarted.step(Clock::agreed(plus(t0(), 2))));
     assert_eq!(again.sent().len(), 1, "the restarted reader asked");
     assert_eq!(stored(&journal).len(), 2, "and stored nothing it held");
 
@@ -208,14 +208,14 @@ fn an_item_is_stored_once_across_fetches_restarts_and_failovers() {
         )],
         None,
     ));
-    block_on(restarted.step(plus(t0(), 3)));
+    block_on(restarted.step(Clock::agreed(plus(t0(), 3))));
     assert_eq!(
         restarted.lifecycle().state(),
         State::Exited(Exit::Fenced),
         "the standby's start fenced the earlier reader, which then exits on its next append"
     );
     assert_eq!(stored(&journal).len(), 2, "the fenced reader wrote nothing");
-    block_on(standby.step(plus(t0(), 3)));
+    block_on(standby.step(Clock::agreed(plus(t0(), 3))));
     assert_eq!(
         ids(&journal),
         [
@@ -245,7 +245,7 @@ fn an_item_with_no_ticker_or_one_the_parser_refuses_is_counted_and_never_journal
         None,
     )]);
     let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(ids(&journal), ["4:2026-10-26T12:00:00.000000000Z"]);
     let counts = reader.counts();
     assert_eq!(
@@ -274,11 +274,11 @@ fn an_unanswered_append_is_retried_and_a_refused_one_stops_the_reader() {
     )]);
     let mut reader = started(&journal, &shelf, &transport, t0());
     journal.appends_down.set(true);
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     assert!(journal.news().is_empty());
     assert_eq!(reader.lifecycle().state(), State::Ready);
     journal.appends_down.set(false);
-    block_on(reader.step(plus(t0(), 1)));
+    block_on(reader.step(Clock::agreed(plus(t0(), 1))));
     assert_eq!(
         ids(&journal),
         ["1:2026-10-26T12:00:00.000000000Z"],
@@ -300,14 +300,14 @@ fn an_unanswered_append_is_retried_and_a_refused_one_stops_the_reader() {
         None,
     ));
     journal.appends_refused.set(true);
-    block_on(reader.step(plus(t0(), 31)));
+    block_on(reader.step(Clock::agreed(plus(t0(), 31))));
     assert_eq!(
         reader.lifecycle().state(),
         State::Exited(Exit::CycleFailed),
         "a refused append stops the reader; the next process folds again"
     );
     transport.answer(page(&[], None));
-    block_on(reader.step(plus(t0(), 32)));
+    block_on(reader.step(Clock::agreed(plus(t0(), 32))));
     assert_eq!(transport.sent().len(), 3, "an exited reader asks nothing");
 }
 
@@ -326,7 +326,7 @@ fn an_artifact_store_that_cannot_take_a_record_stops_the_reader_before_it_journa
     )]);
     let mut reader = started(&journal, &shelf, &transport, t0());
     shelf.down.set(true);
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(reader.lifecycle().state(), State::Exited(Exit::CycleFailed));
     assert!(
         journal.news().is_empty(),
@@ -359,14 +359,14 @@ fn it_follows_the_vendor_s_pages_one_request_a_step_at_the_allowlist_s_pace() {
         ),
     ]);
     let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
+    block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(
         transport.sent().len(),
         1,
         "a second request inside the allowlist's interval is not sent"
     );
-    block_on(reader.step(plus(t0(), 1)));
+    block_on(reader.step(Clock::agreed(plus(t0(), 1))));
     let sent = transport.sent();
     assert_eq!(
         sent[1],
@@ -392,7 +392,7 @@ fn the_reader_reports_its_exit_and_its_stream_s_last_known_time() {
     let mut reader = started(&journal, &shelf, &transport, t0());
     assert_eq!(reader.last_known(), None);
     assert_eq!(exit(&reader), None);
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(reader.last_known(), Some(t0()));
     assert_eq!(reader.counts().unreadable_snapshots, 0);
     let restarted = started(&journal, &shelf, &transport, plus(t0(), 1));
@@ -407,7 +407,7 @@ fn a_started_reader_never_shows_its_key() {
     spy(&journal, &shelf);
     transport.answer(page(&[], None));
     let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     let shown = format!("{:?} {:?}", reader.counts(), reader.lifecycle());
     for part in ["PKTESTKEYID0001", "topsecret0001"] {
         assert!(!shown.contains(part));
@@ -418,4 +418,44 @@ fn a_started_reader_never_shows_its_key() {
             );
         }
     }
+}
+
+/// DEC-2290: a round asks from the stream's last `knowledge_at` less the overlap, so an item the
+/// vendor indexed late, published within the overlap, is fetched and stored, known at its receipt,
+/// never before what the stream already knew; and an item the stream already holds, fetched again
+/// in the overlap, is counted held and never stored twice.
+#[test]
+fn a_late_indexed_item_within_the_overlap_is_stored_and_a_held_one_is_not_stored_again() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let held = item(61, "2026-10-26T14:55:00Z", "2026-10-26T14:55:00Z", &["SPY"]);
+    let transport = Recorded::answering(&[page(std::slice::from_ref(&held), None)]);
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    block_on(reader.step(Clock::agreed(t0())));
+    assert_eq!(ids(&journal), ["61:2026-10-26T14:55:00.000000000Z"]);
+
+    let later = plus(t0(), 600);
+    let late = item(62, "2026-10-26T14:50:00Z", "2026-10-26T14:50:00Z", &["SPY"]);
+    let transport = Recorded::answering(&[page(&[late, held], None)]);
+    let mut restarted = started(&journal, &shelf, &transport, later);
+    block_on(restarted.step(Clock::agreed(later)));
+    assert!(
+        transport.sent()[0].contains("start=2026-10-26T14:45:00Z"),
+        "15 minutes before the last known 15:00: {:?}",
+        transport.sent()
+    );
+    assert_eq!(
+        ids(&journal),
+        [
+            "61:2026-10-26T14:55:00.000000000Z",
+            "62:2026-10-26T14:50:00.000000000Z"
+        ],
+        "the late item stored once, the held one not again"
+    );
+    assert_eq!(restarted.counts().held, 1);
+    assert_eq!(
+        member(&stored(&journal)[1], "knowledge_at"),
+        Value::Str("2026-10-26T15:10:00.000000000Z".into()),
+        "known at its receipt, after everything the stream knew"
+    );
 }

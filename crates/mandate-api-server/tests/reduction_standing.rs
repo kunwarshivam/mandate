@@ -89,6 +89,7 @@ fn the_hosted_streams_passkey_records_are_read_in_order_and_every_other_row_pass
                 credential: CREDENTIAL.to_owned(),
                 challenge: CHALLENGE.to_owned(),
                 sign_count: 4,
+                event_time: at(T0 - 70),
             }),
             CredentialRecord::Removed(Removal {
                 seq: 6,

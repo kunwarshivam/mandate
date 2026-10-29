@@ -17,7 +17,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
-use crate::founding::without_step_secrets;
+use crate::founding::{SUBJECT_VAR, without_step_secrets};
 use crate::mask;
 
 pub(crate) const DO_API: &str = "https://api.digitalocean.com/v2";
@@ -228,8 +228,9 @@ pub(crate) fn no_cidrs(value: Option<&str>) -> bool {
     crate::names_nothing(value)
 }
 
-/// The checks that read only the step's environment: each secret by name, and production's
-/// CIDRs (DEC-2030 items 3 and 5).
+/// The checks that read only the step's environment: each secret by name, production's CIDRs
+/// (DEC-2030 items 3 and 5), and staging's founder subject by presence alone (DEC-2114 item 2),
+/// pending rather than missing, since without it the apply links no founder and still succeeds.
 pub(crate) fn environment_items(
     environment: &str,
     read: &dyn Fn(&str) -> Option<String>,
@@ -251,6 +252,14 @@ pub(crate) fn environment_items(
         present(read, CF_TOKEN_ENV).is_some(),
         "secret CF_INFRA_API_TOKEN is set",
     );
+    if environment == "staging" {
+        list.check_or_pending(
+            present(read, SUBJECT_VAR).is_some(),
+            "the founder's subject",
+            "secret FOUNDER_OIDC_SUBJECT is set (staging only: without it the apply links no \
+             founder, DEC-2114)",
+        );
+    }
     if environment == "production" {
         list.check(
             !no_cidrs(read(KUBE_CIDRS_ENV).as_deref()),
@@ -1065,6 +1074,60 @@ mod tests {
             assert!(!printed.contains(value), "the checklist printed {value}");
         }
         assert!(!partial.complete());
+    }
+
+    /// DEC-2114 item 2: staging's preflight names the founder's subject by presence alone. An unset
+    /// or blank subject is pending, not missing, since the apply then links no founder rather than
+    /// failing; production holds no subject, so it has no such line.
+    #[test]
+    fn staging_names_the_founders_subject_by_presence_alone() {
+        let line = "secret FOUNDER_OIDC_SUBJECT is set (staging only: without it the apply links \
+                    no founder, DEC-2114)";
+        let base = [
+            (PASSPHRASE_ENV, "a-passphrase-of-at-least-thirty-two-chars"),
+            (DO_TOKEN_ENV, "t"),
+            (CF_TOKEN_ENV, "t"),
+            (KUBE_CIDRS_ENV, "[\"203.0.113.7/32\"]"),
+            (EMAILS_ENV, "[\"founder@example.com\"]"),
+        ];
+        let with = |subject: Option<&str>| {
+            let mut pairs = base.to_vec();
+            if let Some(subject) = subject {
+                pairs.push((SUBJECT_VAR, subject));
+            }
+            reader(&pairs)
+        };
+        let subject_lines = |list: &Checklist| -> Vec<Item> {
+            list.items
+                .iter()
+                .filter(|item| match item {
+                    Item::Ready(what) | Item::Missing(what) | Item::Reminder(what) => {
+                        what.contains("FOUNDER_OIDC_SUBJECT")
+                    }
+                    Item::Pending { what, .. } => what.contains("FOUNDER_OIDC_SUBJECT"),
+                })
+                .cloned()
+                .collect()
+        };
+        for unset in [None, Some(""), Some("  ")] {
+            let list = environment_items("staging", &with(unset));
+            assert_eq!(
+                subject_lines(&list),
+                [Item::Pending {
+                    until: "the founder's subject",
+                    what: line.to_owned(),
+                }],
+                "{unset:?}"
+            );
+            assert!(list.complete(), "{unset:?}");
+        }
+        let subject = "a-supabase-subject-value";
+        let set = environment_items("staging", &with(Some(subject)));
+        assert_eq!(subject_lines(&set), [Item::Ready(line.to_owned())]);
+        assert!(!set.render("staging").contains(subject));
+        for subject in [None, Some(subject)] {
+            assert!(subject_lines(&environment_items("production", &with(subject))).is_empty());
+        }
     }
 
     /// DEC-2030 item 3: staging may leave KUBE_API_ALLOWED_CIDRS empty; production may not.

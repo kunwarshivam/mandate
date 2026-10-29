@@ -17,7 +17,7 @@ use mandate_research_run::{RetrievedItem, Symbol};
 use mandate_runtime::{
     ActiveThesis, Effect, EventDraft, EventTriggers, FoldedEvent, Preconditions, ResearchConfig,
     ResearchContext, ResearchInput, ResearchRequest, ResearchState, RetrievedObservation,
-    RiskClock, RuntimeState, tailed,
+    RiskClock, RuntimeState, StoredRefusal, tailed,
 };
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes};
@@ -43,6 +43,52 @@ pub struct ResearchParts {
     /// The items that have arrived by the pass, each at its arrival, which the pass offers the
     /// core as event triggers (agent harness spec §5.3).
     pub events: Vec<RetrievedItem>,
+    /// The news items the news reader stored, known by the pass, and those it could not offer
+    /// (DEC-2288).
+    pub stored: StoredNews,
+}
+
+/// The news stream's items as a pass reads them (journal spec §9.37, DEC-2288): each one known by
+/// the pass's risk clock, offered as the core receives it, its record already in the artifact store,
+/// and every one it could not offer, by its row's event id and why.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredNews {
+    pub offers: Vec<RetrievedObservation>,
+    pub refused: Vec<RefusedNews>,
+}
+
+/// A stored news item a pass could not offer: its `NewsItemStored` row's event id, an opaque id
+/// that names nothing of the item, and why (DEC-2288 item 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedNews {
+    pub event_id: String,
+    pub refusal: StoredRefusal,
+}
+
+/// Every offer of a pass once, in arrival order (DEC-2288 item 2): the feed's captured items and
+/// the news stream's together, an item both hold (the same `data_ref`) offered once, whichever
+/// order either lists it in, sorted by knowledge time, then item id, then `data_ref`.
+#[must_use]
+pub fn merge_offers(
+    feed: Vec<RetrievedObservation>,
+    stored: Vec<RetrievedObservation>,
+) -> Vec<RetrievedObservation> {
+    let mut offers: Vec<RetrievedObservation> = feed.into_iter().chain(stored).collect();
+    offers.sort_by(|a, b| {
+        (
+            a.item.knowledge_at,
+            a.item.item_id.as_str(),
+            a.observation.data_ref,
+        )
+            .cmp(&(
+                b.item.knowledge_at,
+                b.item.item_id.as_str(),
+                b.observation.data_ref,
+            ))
+    });
+    let mut offered = BTreeSet::new();
+    offers.retain(|offer| offered.insert(offer.observation.data_ref));
+    offers
 }
 
 /// The research context of one pass, or the first input it could not read, which runs no research
@@ -92,6 +138,8 @@ pub enum ContextUnread {
     Halted,
     /// The items that have arrived, which the pass offers as event triggers.
     Arrivals,
+    /// The workspace's news stream, which the pass offers as event triggers (DEC-2288).
+    News,
 }
 
 impl ContextUnread {
@@ -116,6 +164,7 @@ impl ContextUnread {
             Self::InstrumentFacts => "instrument_facts",
             Self::Halted => "halted",
             Self::Arrivals => "arrivals",
+            Self::News => "news",
         }
     }
 }
@@ -169,6 +218,12 @@ pub(super) struct Research {
     /// The input the source last could not read, already alerted: a pass that reads its context
     /// clears it, so the next one it cannot read alerts again (DEC-2825).
     unread: Option<ContextUnread>,
+    /// The event ids of the stored news items whose records were a mismatch, each alerted once
+    /// (DEC-2288 item 3).
+    mismatched: BTreeSet<String>,
+    /// Whether the last pass found a stored news record it could not read, already alerted: a
+    /// pass that finds none clears it, so the next that finds one alerts again.
+    unreadable: bool,
 }
 
 impl Research {
@@ -182,7 +237,37 @@ impl Research {
             doubted_parts: None,
             stored: BTreeSet::new(),
             unread: None,
+            mismatched: BTreeSet::new(),
+            unreadable: false,
         }
+    }
+
+    /// Alerts the stored news items a pass could not offer (DEC-2288 item 3): a mismatch, an
+    /// integrity failure, once per item with its row's event id; unreadable records once, with no
+    /// subject, until a pass finds none. Each alert names a fixed code and at most an opaque id
+    /// (`AGENTS.md` rule 6).
+    fn refused(&mut self, refused: &[RefusedNews], alerts: &mut Vec<Alert>) {
+        let mut unreadable = false;
+        for item in refused {
+            match item.refusal {
+                StoredRefusal::Mismatch => {
+                    if self.mismatched.insert(item.event_id.clone()) {
+                        alerts.push(Alert {
+                            key: item.refusal.code(),
+                            subject: Some(item.event_id.clone()),
+                        });
+                    }
+                }
+                StoredRefusal::Unreadable => unreadable = true,
+            }
+        }
+        if unreadable && !self.unreadable {
+            alerts.push(Alert {
+                key: StoredRefusal::Unreadable.code(),
+                subject: None,
+            });
+        }
+        self.unreadable = unreadable;
     }
 
     /// The pass's research context from the source, or `None` when it could not read one: then the
@@ -439,7 +524,8 @@ impl<S: Store> RuntimeProcess<S> {
             }
             offers.push(observation);
         }
-        for item in offers {
+        research.refused(&parts.stored.refused, alerts);
+        for item in merge_offers(offers, parts.stored.offers) {
             if !matches!(
                 self.research_hand(now, now, ResearchInput::Event { at, item }, alerts),
                 Outcome::Done
