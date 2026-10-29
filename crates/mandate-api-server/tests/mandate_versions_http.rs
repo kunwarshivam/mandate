@@ -1475,3 +1475,36 @@ fn the_same_agent_id_in_another_workspace_is_never_read_or_reflected() {
     assert_eq!(foreign.status, 404, "B's agent is not A's caller's to read");
     assert_eq!(foreign.body, absent.body);
 }
+
+#[test]
+#[ignore = "pending E10-27"]
+fn a_second_application_of_one_confirmation_is_journal_unavailable() {
+    let mut world = seeded();
+    let [b, s, l, r] = all_documents();
+    let [first, _, _] = world.confirmations.clone();
+    world.account.applied(
+        AGENT,
+        (&b.version, &s.version),
+        &first,
+        None,
+        "risk_reducing",
+    );
+    world.account.applied(
+        AGENT,
+        (&b.version, &l.version),
+        &first,
+        None,
+        "risk_increasing",
+    );
+    let f = fixture(&[&b, &s, &l, &r]);
+    install(&f, &[&world.control, &world.account]);
+    let cookie = operator(&f);
+    let reply = get(&f, &path(AGENT), &cookie);
+    assert_eq!(
+        reply.status,
+        503,
+        "one confirmation answered twice cannot tell which version is in effect: {}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert_eq!(code(&reply), "journal_unavailable");
+}
