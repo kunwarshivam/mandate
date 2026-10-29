@@ -156,6 +156,9 @@ fn main() -> anyhow::Result<()> {
         Command::Agent(AgentCommand::Status(args)) => {
             owner::run_status(&args, &mut io::stdout().lock())
         }
+        Command::Agent(AgentCommand::Holds(args)) => {
+            owner::run_holds(&args, &mut io::stdout().lock())
+        }
         Command::Agent(AgentCommand::Resume(args)) => {
             owner::run_resume(&args, now()?, &mut io::stdout().lock())
         }

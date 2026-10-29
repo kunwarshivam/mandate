@@ -373,7 +373,7 @@ impl CredentialFold {
     /// holds none.
     ///
     /// # Errors
-    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for `member`.
+    /// [`CredentialError::Broken`] when a record breaks rule 251, 254 or 318 for `member`.
     pub fn passkeys(&self, member: PrincipalId) -> Result<Vec<&Enrolment>, CredentialError> {
         let folded = self.fold();
         if let Some(seq) = folded.broken.get(&member) {
@@ -390,7 +390,7 @@ impl CredentialFold {
     /// 254 carried, else the enrolment's; `None` when it is not held.
     ///
     /// # Errors
-    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for its holder.
+    /// [`CredentialError::Broken`] when a record breaks rule 251, 254 or 318 for its holder.
     pub fn last_count(&self, credential: &str) -> Result<Option<u32>, CredentialError> {
         let folded = self.fold();
         let Some(holder) = folded.holder(credential) else {
@@ -591,13 +591,12 @@ impl<'a> Folded<'a> {
 
     /// Folds one assertion: a kept one raises its credential's last counter and uses its
     /// challenge; a breaking one disables step-up for its member and the credential's holder. An
-    /// assertion of the member's own credential inside its cool-off is owed a waiver by the next
-    /// record (rule 318's converse).
+    /// assertion of a held credential inside its cool-off, whichever member made it, is owed a
+    /// waiver by the next record (rule 318's converse).
     fn assert(&mut self, assertion: &'a Assertion) {
         if self.enrolment(&assertion.credential).is_some_and(|e| {
-            e.member == assertion.member
-                && e.cool_off_ends
-                    .is_some_and(|ends| ends > assertion.event_time)
+            e.cool_off_ends
+                .is_some_and(|ends| ends > assertion.event_time)
         }) {
             self.owed = Some(assertion);
         }

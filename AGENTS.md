@@ -75,7 +75,9 @@ reading that loosens the spec toward the code still goes to the founder.
     position, so nothing is left for it to sell; then it is refused `sell_exceeds_available` as
     DEC-410 item 3 says. Exits and protective orders
     may be held only by agent mode `paused` or `stopped`, by an `Unknown` order in the same
-    instrument, or by the broker. Owner exits may sell equities outside the regular session once the
+    instrument, or by the broker. An agent-scoped kill switch's flatten never waits on an `Unknown`
+    order: it sells at once what no `Unknown` order could still sell, and the rest once the
+    `Unknown` resolves (DEC-2857). Owner exits may sell equities outside the regular session once the
     owner confirms the displayed bid. The kill switch is always available, touches only its scope
     (an agent-scoped kill switch never uses cancel-all or close-position), and does not depend on
     model state.

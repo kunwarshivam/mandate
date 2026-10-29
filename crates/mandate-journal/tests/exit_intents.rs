@@ -71,6 +71,7 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
 fn the_section_holds_each_record_version_and_every_part() {
     let section = section();
     assert!(text(&section, "spec").contains("DEC-2845"));
+    assert!(text(&section, "spec").contains("DEC-2857"));
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
     let mut versions: Vec<(String, u64)> = drafts
         .values()
@@ -103,10 +104,46 @@ fn each_base_and_every_executor_exit_intent_parses() {
         }
     }
     for case in list(&section, "valid_drafts") {
+        if remainder(case) {
+            continue;
+        }
         if let Err(e) = Draft::parse(&draft(&section, case)) {
             failed.push(format!("valid {}: {e:?}", text(case, "name")));
         }
     }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// Whether a valid draft names a flatten's remainder, `k-{ulid}-{n}r`, the form journal spec
+/// v0.114 adds (DEC-2857): [`a_flattens_remainder_parses_on_every_record_version`] reads those.
+fn remainder(case: &Value) -> bool {
+    text(case, "name").contains("_remainder_")
+}
+
+/// v0.114 (DEC-2857): an agent-scoped kill switch's flatten remainder, `k-{ulid}-{n}r`, on each
+/// record version, as the first, a middle and the last ordinal. Before it the journal refuses the
+/// remainder's `IntentReceived` as `non_canonical`, so the batch that raises it never commits.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_flattens_remainder_parses_on_every_record_version() {
+    let section = section();
+    let cases: Vec<&Value> = list(&section, "valid_drafts")
+        .iter()
+        .filter(|case| remainder(case))
+        .collect();
+    assert_eq!(
+        cases.len(),
+        3 * RECORDS.len(),
+        "three ordinals on each version"
+    );
+    let failed: Vec<String> = cases
+        .into_iter()
+        .filter_map(|case| {
+            Draft::parse(&draft(&section, case))
+                .err()
+                .map(|e| format!("valid {}: {e:?}", text(case, "name")))
+        })
+        .collect();
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 

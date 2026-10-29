@@ -155675,6 +155675,20 @@
     }
    },
    {
+    "name": "abandoned_flatten_covered",
+    "clause": "§9.5: each reason",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "flatten_covered"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "abandoned_w_intent",
     "clause": "§9.5: the executor's own exit's intent is an `id`",
     "base_draft": "abandoned",
@@ -160308,7 +160322,7 @@
   "fuzz_seed": 2278
  },
  "exit_intents": {
-  "spec": "docs/specs/journal.md v0.108 §9.1's `intent` type (DEC-2845)",
+  "spec": "docs/specs/journal.md v0.114 §9.1's `intent` type (DEC-2845, DEC-2857)",
   "drafts": {
    "received_v1": {
     "envelope_version": 1,
@@ -160643,7 +160657,7 @@
   "invalid_drafts": [
    {
     "name": "received_v1_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160659,7 +160673,7 @@
    },
    {
     "name": "received_v1_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160675,7 +160689,7 @@
    },
    {
     "name": "received_v1_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160691,7 +160705,7 @@
    },
    {
     "name": "received_v1_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160707,7 +160721,7 @@
    },
    {
     "name": "received_v1_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160723,7 +160737,7 @@
    },
    {
     "name": "received_v1_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160739,7 +160753,7 @@
    },
    {
     "name": "received_v1_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160755,7 +160769,7 @@
    },
    {
     "name": "received_v1_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160771,7 +160785,7 @@
    },
    {
     "name": "received_v1_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160787,7 +160801,7 @@
    },
    {
     "name": "received_v1_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160803,7 +160817,7 @@
    },
    {
     "name": "received_v1_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160819,7 +160833,7 @@
    },
    {
     "name": "received_v1_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160835,7 +160849,7 @@
    },
    {
     "name": "received_v1_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160851,7 +160865,7 @@
    },
    {
     "name": "received_v1_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160867,7 +160881,7 @@
    },
    {
     "name": "received_v1_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160883,7 +160897,7 @@
    },
    {
     "name": "received_v1_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160899,7 +160913,7 @@
    },
    {
     "name": "received_v1_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160915,7 +160929,7 @@
    },
    {
     "name": "received_v1_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160931,7 +160945,7 @@
    },
    {
     "name": "received_v1_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160947,7 +160961,7 @@
    },
    {
     "name": "received_v1_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160963,7 +160977,7 @@
    },
    {
     "name": "received_v1_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160979,7 +160993,7 @@
    },
    {
     "name": "received_v1_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -160995,7 +161009,7 @@
    },
    {
     "name": "received_v1_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -161011,7 +161025,7 @@
    },
    {
     "name": "received_v1_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v1",
     "changes": [
      {
@@ -161026,8 +161040,136 @@
     }
    },
    {
+    "name": "received_v1_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
     "name": "received_v2_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161043,7 +161185,7 @@
    },
    {
     "name": "received_v2_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161059,7 +161201,7 @@
    },
    {
     "name": "received_v2_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161075,7 +161217,7 @@
    },
    {
     "name": "received_v2_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161091,7 +161233,7 @@
    },
    {
     "name": "received_v2_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161107,7 +161249,7 @@
    },
    {
     "name": "received_v2_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161123,7 +161265,7 @@
    },
    {
     "name": "received_v2_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161139,7 +161281,7 @@
    },
    {
     "name": "received_v2_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161155,7 +161297,7 @@
    },
    {
     "name": "received_v2_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161171,7 +161313,7 @@
    },
    {
     "name": "received_v2_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161187,7 +161329,7 @@
    },
    {
     "name": "received_v2_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161203,7 +161345,7 @@
    },
    {
     "name": "received_v2_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161219,7 +161361,7 @@
    },
    {
     "name": "received_v2_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161235,7 +161377,7 @@
    },
    {
     "name": "received_v2_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161251,7 +161393,7 @@
    },
    {
     "name": "received_v2_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161267,7 +161409,7 @@
    },
    {
     "name": "received_v2_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161283,7 +161425,7 @@
    },
    {
     "name": "received_v2_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161299,7 +161441,7 @@
    },
    {
     "name": "received_v2_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161315,7 +161457,7 @@
    },
    {
     "name": "received_v2_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161331,7 +161473,7 @@
    },
    {
     "name": "received_v2_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161347,7 +161489,7 @@
    },
    {
     "name": "received_v2_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161363,7 +161505,7 @@
    },
    {
     "name": "received_v2_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161379,7 +161521,7 @@
    },
    {
     "name": "received_v2_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161395,7 +161537,7 @@
    },
    {
     "name": "received_v2_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "received_v2",
     "changes": [
      {
@@ -161410,8 +161552,136 @@
     }
    },
    {
+    "name": "received_v2_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
     "name": "gate_v1_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161427,7 +161697,7 @@
    },
    {
     "name": "gate_v1_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161443,7 +161713,7 @@
    },
    {
     "name": "gate_v1_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161459,7 +161729,7 @@
    },
    {
     "name": "gate_v1_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161475,7 +161745,7 @@
    },
    {
     "name": "gate_v1_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161491,7 +161761,7 @@
    },
    {
     "name": "gate_v1_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161507,7 +161777,7 @@
    },
    {
     "name": "gate_v1_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161523,7 +161793,7 @@
    },
    {
     "name": "gate_v1_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161539,7 +161809,7 @@
    },
    {
     "name": "gate_v1_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161555,7 +161825,7 @@
    },
    {
     "name": "gate_v1_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161571,7 +161841,7 @@
    },
    {
     "name": "gate_v1_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161587,7 +161857,7 @@
    },
    {
     "name": "gate_v1_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161603,7 +161873,7 @@
    },
    {
     "name": "gate_v1_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161619,7 +161889,7 @@
    },
    {
     "name": "gate_v1_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161635,7 +161905,7 @@
    },
    {
     "name": "gate_v1_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161651,7 +161921,7 @@
    },
    {
     "name": "gate_v1_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161667,7 +161937,7 @@
    },
    {
     "name": "gate_v1_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161683,7 +161953,7 @@
    },
    {
     "name": "gate_v1_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161699,7 +161969,7 @@
    },
    {
     "name": "gate_v1_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161715,7 +161985,7 @@
    },
    {
     "name": "gate_v1_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161731,7 +162001,7 @@
    },
    {
     "name": "gate_v1_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161747,7 +162017,7 @@
    },
    {
     "name": "gate_v1_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161763,7 +162033,7 @@
    },
    {
     "name": "gate_v1_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161779,7 +162049,7 @@
    },
    {
     "name": "gate_v1_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v1",
     "changes": [
      {
@@ -161794,8 +162064,136 @@
     }
    },
    {
+    "name": "gate_v1_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
     "name": "gate_v2_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161811,7 +162209,7 @@
    },
    {
     "name": "gate_v2_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161827,7 +162225,7 @@
    },
    {
     "name": "gate_v2_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161843,7 +162241,7 @@
    },
    {
     "name": "gate_v2_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161859,7 +162257,7 @@
    },
    {
     "name": "gate_v2_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161875,7 +162273,7 @@
    },
    {
     "name": "gate_v2_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161891,7 +162289,7 @@
    },
    {
     "name": "gate_v2_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161907,7 +162305,7 @@
    },
    {
     "name": "gate_v2_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161923,7 +162321,7 @@
    },
    {
     "name": "gate_v2_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161939,7 +162337,7 @@
    },
    {
     "name": "gate_v2_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161955,7 +162353,7 @@
    },
    {
     "name": "gate_v2_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161971,7 +162369,7 @@
    },
    {
     "name": "gate_v2_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -161987,7 +162385,7 @@
    },
    {
     "name": "gate_v2_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162003,7 +162401,7 @@
    },
    {
     "name": "gate_v2_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162019,7 +162417,7 @@
    },
    {
     "name": "gate_v2_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162035,7 +162433,7 @@
    },
    {
     "name": "gate_v2_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162051,7 +162449,7 @@
    },
    {
     "name": "gate_v2_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162067,7 +162465,7 @@
    },
    {
     "name": "gate_v2_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162083,7 +162481,7 @@
    },
    {
     "name": "gate_v2_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162099,7 +162497,7 @@
    },
    {
     "name": "gate_v2_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162115,7 +162513,7 @@
    },
    {
     "name": "gate_v2_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162131,7 +162529,7 @@
    },
    {
     "name": "gate_v2_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162147,7 +162545,7 @@
    },
    {
     "name": "gate_v2_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162163,7 +162561,7 @@
    },
    {
     "name": "gate_v2_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "gate_v2",
     "changes": [
      {
@@ -162178,8 +162576,136 @@
     }
    },
    {
+    "name": "gate_v2_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
     "name": "request_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162195,7 +162721,7 @@
    },
    {
     "name": "request_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162211,7 +162737,7 @@
    },
    {
     "name": "request_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162227,7 +162753,7 @@
    },
    {
     "name": "request_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162243,7 +162769,7 @@
    },
    {
     "name": "request_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162259,7 +162785,7 @@
    },
    {
     "name": "request_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162275,7 +162801,7 @@
    },
    {
     "name": "request_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162291,7 +162817,7 @@
    },
    {
     "name": "request_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162307,7 +162833,7 @@
    },
    {
     "name": "request_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162323,7 +162849,7 @@
    },
    {
     "name": "request_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162339,7 +162865,7 @@
    },
    {
     "name": "request_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162355,7 +162881,7 @@
    },
    {
     "name": "request_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162371,7 +162897,7 @@
    },
    {
     "name": "request_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162387,7 +162913,7 @@
    },
    {
     "name": "request_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162403,7 +162929,7 @@
    },
    {
     "name": "request_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162419,7 +162945,7 @@
    },
    {
     "name": "request_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162435,7 +162961,7 @@
    },
    {
     "name": "request_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162451,7 +162977,7 @@
    },
    {
     "name": "request_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162467,7 +162993,7 @@
    },
    {
     "name": "request_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162483,7 +163009,7 @@
    },
    {
     "name": "request_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162499,7 +163025,7 @@
    },
    {
     "name": "request_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162515,7 +163041,7 @@
    },
    {
     "name": "request_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162531,7 +163057,7 @@
    },
    {
     "name": "request_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162547,7 +163073,7 @@
    },
    {
     "name": "request_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "request",
     "changes": [
      {
@@ -162562,8 +163088,136 @@
     }
    },
    {
+    "name": "request_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
     "name": "protection_v1_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162579,7 +163233,7 @@
    },
    {
     "name": "protection_v1_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162595,7 +163249,7 @@
    },
    {
     "name": "protection_v1_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162611,7 +163265,7 @@
    },
    {
     "name": "protection_v1_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162627,7 +163281,7 @@
    },
    {
     "name": "protection_v1_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162643,7 +163297,7 @@
    },
    {
     "name": "protection_v1_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162659,7 +163313,7 @@
    },
    {
     "name": "protection_v1_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162675,7 +163329,7 @@
    },
    {
     "name": "protection_v1_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162691,7 +163345,7 @@
    },
    {
     "name": "protection_v1_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162707,7 +163361,7 @@
    },
    {
     "name": "protection_v1_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162723,7 +163377,7 @@
    },
    {
     "name": "protection_v1_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162739,7 +163393,7 @@
    },
    {
     "name": "protection_v1_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162755,7 +163409,7 @@
    },
    {
     "name": "protection_v1_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162771,7 +163425,7 @@
    },
    {
     "name": "protection_v1_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162787,7 +163441,7 @@
    },
    {
     "name": "protection_v1_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162803,7 +163457,7 @@
    },
    {
     "name": "protection_v1_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162819,7 +163473,7 @@
    },
    {
     "name": "protection_v1_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162835,7 +163489,7 @@
    },
    {
     "name": "protection_v1_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162851,7 +163505,7 @@
    },
    {
     "name": "protection_v1_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162867,7 +163521,7 @@
    },
    {
     "name": "protection_v1_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162883,7 +163537,7 @@
    },
    {
     "name": "protection_v1_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162899,7 +163553,7 @@
    },
    {
     "name": "protection_v1_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162915,7 +163569,7 @@
    },
    {
     "name": "protection_v1_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162931,7 +163585,7 @@
    },
    {
     "name": "protection_v1_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v1",
     "changes": [
      {
@@ -162946,8 +163600,136 @@
     }
    },
    {
+    "name": "protection_v1_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
     "name": "protection_v2_flatten_without_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -162963,7 +163745,7 @@
    },
    {
     "name": "protection_v2_flatten_without_dash",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -162979,7 +163761,7 @@
    },
    {
     "name": "protection_v2_flatten_empty_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -162995,7 +163777,7 @@
    },
    {
     "name": "protection_v2_flatten_leading_zero",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163011,7 +163793,7 @@
    },
    {
     "name": "protection_v2_flatten_n_1000",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163027,7 +163809,7 @@
    },
    {
     "name": "protection_v2_flatten_negative_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163043,7 +163825,7 @@
    },
    {
     "name": "protection_v2_flatten_n_letter",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163059,7 +163841,7 @@
    },
    {
     "name": "protection_v2_flatten_n_not_ascii",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163075,7 +163857,7 @@
    },
    {
     "name": "protection_v2_flatten_two_ns",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163091,7 +163873,7 @@
    },
    {
     "name": "protection_v2_flatten_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163107,7 +163889,7 @@
    },
    {
     "name": "protection_v2_flatten_lower_case_switch",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163123,7 +163905,7 @@
    },
    {
     "name": "protection_v2_flatten_switch_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163139,7 +163921,7 @@
    },
    {
     "name": "protection_v2_watchdog_upper_case_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163155,7 +163937,7 @@
    },
    {
     "name": "protection_v2_watchdog_with_n",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163171,7 +163953,7 @@
    },
    {
     "name": "protection_v2_watchdog_event_not_a_ulid",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163187,7 +163969,7 @@
    },
    {
     "name": "protection_v2_another_prefix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163203,7 +163985,7 @@
    },
    {
     "name": "protection_v2_ulid_with_suffix",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163219,7 +164001,7 @@
    },
    {
     "name": "protection_v2_the_order_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163235,7 +164017,7 @@
    },
    {
     "name": "protection_v2_a_random_id",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163251,7 +164033,7 @@
    },
    {
     "name": "protection_v2_empty",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163267,7 +164049,7 @@
    },
    {
     "name": "protection_v2_watchdog_event_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163283,7 +164065,7 @@
    },
    {
     "name": "protection_v2_flatten_switch_after_7",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163299,7 +164081,7 @@
    },
    {
     "name": "protection_v2_flatten_trailing_newline",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
@@ -163315,12 +164097,140 @@
    },
    {
     "name": "protection_v2_watchdog_leading_space",
-    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
     "base_draft": "protection_v2",
     "changes": [
      {
       "path": "payload.intent_id",
       "value": " w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_without_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_upper_case",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2R"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_twice",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2rr"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-02r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_before_n",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-r2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_dash",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2-r"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_of_a_watchdog",
+    "clause": "§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1r"
      }
     ],
     "expect": {
@@ -163500,6 +164410,48 @@
     }
    },
    {
+    "name": "received_v1_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v1_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v1_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "received_v2_watchdog",
     "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
     "base_draft": "received_v2",
@@ -163549,6 +164501,48 @@
      {
       "path": "payload.intent_id",
       "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
      }
     ],
     "expect": {
@@ -163612,6 +164606,48 @@
     }
    },
    {
+    "name": "gate_v1_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v1_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "gate_v2_watchdog",
     "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
     "base_draft": "gate_v2",
@@ -163661,6 +164697,48 @@
      {
       "path": "payload.intent_id",
       "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
      }
     ],
     "expect": {
@@ -163724,6 +164802,48 @@
     }
    },
    {
+    "name": "request_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "request_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "request_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "protection_v1_watchdog",
     "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
     "base_draft": "protection_v1",
@@ -163780,6 +164900,48 @@
     }
    },
    {
+    "name": "protection_v1_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v1_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "protection_v2_watchdog",
     "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
     "base_draft": "protection_v2",
@@ -163829,6 +164991,48 @@
      {
       "path": "payload.intent_id",
       "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2r"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_remainder_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999r"
      }
     ],
     "expect": {

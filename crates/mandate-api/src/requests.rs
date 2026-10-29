@@ -69,11 +69,10 @@ pub struct StepUpChallengeRequest {
     pub action: StepUpAction,
 }
 
-/// `POST /agents/{agent_id}/acknowledgments` (§4.2): the event acknowledged, declared after the
-/// nullable members so serde names a missing one of them first. `subject`, `request`, and
-/// `step_up_assertion` are optional, an absent one read as `null`, ahead of the schema that names
-/// them (journal spec §9.28 version 2, DEC-2523; the struct first, as DEC-2126 and DEC-2128 order
-/// it). An assertion is carried only beside `passkey` evidence (DEC-2128 item 1).
+/// `POST /agents/{agent_id}/acknowledgments` (§3.11 item 12, DEC-2144): the hold acknowledged and
+/// its subject, declared after the nullable members so serde names a missing one of them first.
+/// `request` and `step_up_assertion` are optional, an absent one read as `null`; an assertion is
+/// carried only beside `passkey` evidence (DEC-2128 item 1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct AcknowledgeRequest {
@@ -82,11 +81,25 @@ pub struct AcknowledgeRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
     #[serde(default)]
-    pub subject: Option<AcknowledgeSubject>,
-    #[serde(default)]
     pub request: Option<EventId>,
     #[serde(default)]
     pub step_up_assertion: Option<StepUpAssertion>,
+    pub subject: AcknowledgeSubject,
+    pub acknowledged: EventId,
+}
+
+/// `POST /agents/{agent_id}/acknowledgment-requests` (§3.11 item 12, DEC-2144): an acknowledgment's
+/// members but `request`, for a workspace where another user must acknowledge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
+pub struct AcknowledgmentRequestRequest {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub record: Option<Record>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
+    pub subject: AcknowledgeSubject,
     pub acknowledged: EventId,
 }
 
@@ -467,7 +480,19 @@ impl Rules for AcknowledgeRequest {
     }
 }
 
-crate::wire::rules!(checked: StopRequest, ResumeRequest, OauthStartRequest, AcknowledgeRequest);
+impl Rules for AcknowledgmentRequestRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+crate::wire::rules!(checked: StopRequest, ResumeRequest, OauthStartRequest);
+crate::wire::rules!(checked: AcknowledgeRequest, AcknowledgmentRequestRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
 
 crate::wire::object_only!(
@@ -477,6 +502,7 @@ crate::wire::object_only!(
     LiftHoldRequest,
     ResumeRequest,
     AcknowledgeRequest,
+    AcknowledgmentRequestRequest,
     OwnerRequest,
     ConfirmRequest,
     ApprovalResponseRequest,

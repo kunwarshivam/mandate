@@ -116,6 +116,7 @@ fn parts() -> ResearchParts {
         data_symbols: BTreeSet::from([Symbol::new("AAPL").unwrap(), Symbol::new("MSFT").unwrap()]),
         event_triggers: None,
         events: Vec::new(),
+        stored: mandate_daemon::StoredNews::default(),
     }
 }
 

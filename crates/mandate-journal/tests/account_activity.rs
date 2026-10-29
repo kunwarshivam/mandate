@@ -89,11 +89,33 @@ fn each_base_and_every_valid_activity_record_parses() {
         }
     }
     for case in list(&section, "valid_drafts") {
+        if text(case, "name") == FLATTEN_COVERED {
+            continue;
+        }
         if let Err(e) = Draft::parse(&draft(&section, case)) {
             failed.push(format!("valid {}: {e:?}", text(case, "name")));
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// The valid draft journal spec v0.114 adds (DEC-2857), read by
+/// [`a_flattens_remainder_is_abandoned_flatten_covered`].
+const FLATTEN_COVERED: &str = "abandoned_flatten_covered";
+
+/// v0.114 (DEC-2857): a flatten's remainder that finds nothing of the agent's left to sell is
+/// abandoned `flatten_covered`. Before it the journal refuses the reason as `non_canonical`, so the
+/// batch that abandons the remainder never commits.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_flattens_remainder_is_abandoned_flatten_covered() {
+    let section = section();
+    let case = list(&section, "valid_drafts")
+        .iter()
+        .find(|case| text(case, "name") == FLATTEN_COVERED)
+        .unwrap();
+    let parsed = Draft::parse(&draft(&section, case));
+    assert!(parsed.is_ok(), "{FLATTEN_COVERED}: {:?}", parsed.err());
 }
 
 /// Rules 297 and 298 and every member type, each refused at its reason and path.
