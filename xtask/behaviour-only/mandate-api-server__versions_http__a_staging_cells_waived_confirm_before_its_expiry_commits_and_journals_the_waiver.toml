@@ -1,0 +1,8 @@
+file = "crates/mandate-api-server/tests/versions_http.rs"
+test = "a_staging_cells_waived_confirm_before_its_expiry_commits_and_journals_the_waiver"
+reason = """
+The verifier already waives under `CoolOffWaiver::Staging`, but `mandate-journal` refuses
+`StepUpCoolOffWaived`'s `tier` `staging` (journal spec v0.116, pending in `cool_off_waivers`), so
+the batch is `journal_unavailable` and that answer is the failure. The implementation deletes this
+file with the test's `#[ignore]` line (DEC-2150).
+"""

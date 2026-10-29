@@ -123,6 +123,8 @@ enum Port {
     Methods,
     /// [`Port::Methods`] in a test cell started with the cool-off waiver (DEC-2146 item 2).
     Waived(CoolOffWaiver),
+    /// [`Port::Waived`] with the waiver's expiry, in seconds (DEC-2150 item 2).
+    WaivedUntil(CoolOffWaiver, i64),
 }
 
 fn fixture() -> Fixture {
@@ -171,13 +173,17 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
     let step_up: Arc<dyn StepUp> = match port {
         Port::Accepting => Arc::clone(&asked) as Arc<dyn StepUp>,
         Port::Unbound => Arc::new(Unbound),
-        Port::Methods | Port::Waived(_) => Arc::new(Methods {
+        Port::Methods | Port::Waived(_) | Port::WaivedUntil(..) => Arc::new(Methods {
             passkey: Passkey {
                 challenges: Arc::clone(&challenges),
                 rp: support_passkey::rp(),
                 keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
                 cool_off_waiver: match port {
-                    Port::Waived(waiver) => Some(waiver),
+                    Port::Waived(waiver) | Port::WaivedUntil(waiver, _) => Some(waiver),
+                    _ => None,
+                },
+                cool_off_waiver_until: match port {
+                    Port::WaivedUntil(_, until) => Some(at(until)),
                     _ => None,
                 },
             },
@@ -4082,6 +4088,68 @@ fn a_ci_cells_waived_deploy_with_a_fresh_passkey_commits_and_journals_the_waiver
         2,
         "the confirmation's waiver, then the deployment's: one per step-up"
     );
+}
+
+/// DEC-2150 items 1 and 5: in a staging cell started with the waiver, a version's confirmation
+/// judged before the waiver's expiry, with a passkey still in its cool-off, commits and journals
+/// the waiver naming `staging`.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_staging_cells_waived_confirm_before_its_expiry_commits_and_journals_the_waiver() {
+    let w = passkeyed_in(
+        Port::WaivedUntil(CoolOffWaiver::Staging, T0 + 60),
+        false,
+        COOLING,
+    );
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    journals_the_waiver(
+        &w.f,
+        "MandateConfirmed",
+        "confirm_version",
+        "confirm_version_step_up_asserted",
+        KEY,
+        &issued,
+        "staging",
+    );
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// DEC-2150 item 4: a step-up judged at or after the waiver's expiry is not waived. The cooling
+/// passkey's confirmation is `step_up_missing`, nothing is appended, and the challenge is kept, in
+/// a staging cell and in a test cell given an expiry alike: the clock only ends the waiver.
+#[test]
+#[ignore = "pending E9-4"]
+fn at_or_after_its_expiry_the_waiver_counts_nothing() {
+    for (waiver, until) in [
+        (CoolOffWaiver::Staging, T0),
+        (CoolOffWaiver::Staging, T0 - 1),
+        (CoolOffWaiver::Ci, T0),
+        (CoolOffWaiver::Dev, T0 - 3_600),
+    ] {
+        let w = passkeyed_in(Port::WaivedUntil(waiver, until), false, COOLING);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            401,
+            "{waiver:?} until {until}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        refused(&reply, 401, ProblemCode::StepUpMissing);
+        assert!(events(&w.f, "MandateConfirmed").is_empty(), "{waiver:?}");
+        assert!(events(&w.f, "StepUpAsserted").is_empty(), "{waiver:?}");
+        assert!(events(&w.f, "StepUpCoolOffWaived").is_empty(), "{waiver:?}");
+        assert!(w.held(&issued), "{waiver:?}: nothing is taken");
+    }
 }
 
 /// DEC-2146 items 1 and 2: without the waiver the same cell keeps the cool-off. A passkey still
