@@ -11,7 +11,7 @@ import * as auditScreen from "@/app/(app)/audit/[screen]/page";
 import * as backtest from "@/app/(app)/backtests/[backtestId]/page";
 import * as audit from "@/app/(app)/audit/page";
 import * as connections from "@/app/(app)/connections/page";
-import * as design from "@/app/(app)/design/page";
+import * as design from "@/app/(app)/design/page.dev";
 import * as dashboard from "@/app/(app)/page";
 import * as positions from "@/app/(app)/positions/page";
 import * as settingsScreen from "@/app/(app)/settings/[screen]/page";
