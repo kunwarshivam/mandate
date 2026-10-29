@@ -141,8 +141,8 @@ function NotFound() {
         No request with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
-      <LinkButton href="/approvals" variant="secondary" size="lg" className={cn("w-fit", KEY)}>
-        See all approvals
+      <LinkButton href="/" variant="secondary" size="lg" className={cn("w-fit", KEY)}>
+        Back to your agents
       </LinkButton>
     </section>
   );
@@ -243,9 +243,9 @@ function Request({ approvalId }: { approvalId: string }) {
    */
   return (
     <article className={cn("mx-auto grid w-full max-w-3xl grid-cols-1 gap-4", (open || response) && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
-      <Link href="/approvals" className={BACK}>
+      <Link href="/" className={BACK}>
         <ArrowLeft className="size-6" aria-hidden />
-        Approvals
+        Your agents
       </Link>
 
       <div data-slot="record" className="grid grid-cols-1 gap-4">

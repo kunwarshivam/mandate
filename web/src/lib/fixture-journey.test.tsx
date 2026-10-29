@@ -1,9 +1,9 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Strategy, compile, mandateFrom, readAnswers, readStrategy } from "@/components/new-agent/draft";
+import { newAgentRequest } from "@/test/new-agent";
 import { Providers } from "@/components/providers";
 import { lastPrice } from "@/fixtures/market";
-import type { Mandate, Workspace } from "@/fixtures/types";
+import type { InstrumentRef, Mandate, Workspace } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { confirmStepUpDigest } from "@/api/confirm";
 import { BACKTEST_IDS } from "@/fixtures/backtests";
@@ -12,7 +12,9 @@ import { RECORD_AFTER_MS } from "@/test/harness";
 import { RuntimeProbe, probed } from "@/test/runtime-probe";
 import { CONFIRM_RECORD, DEPLOY_RECORD, setUpThrough } from "@/test/set-up";
 import type { SetUp } from "./mock-runtime";
-import { dec } from "./decimal";
+import { dec, mul, toDecimalString } from "./decimal";
+import { INSTRUMENTS } from "@/fixtures/mandates";
+import { fixtureAssetId } from "./fixture-ids";
 import {
   type NewAgent,
   addMs,
@@ -29,16 +31,26 @@ import {
   unallocatedUsd,
 } from "./fixture-journey";
 
-const MOMENTUM: Strategy = { model: "quant.momentum", params: { lookback_bars: "20" } };
+/** The fixtures' own instruments by symbol; any other symbol gets its fixture asset id, as the old set-up gave it. */
+const KNOWN: Record<string, InstrumentRef> = Object.fromEntries(Object.values(INSTRUMENTS).map((i) => [i.symbol, i]));
 
-function newAgent(ws: Workspace, { money = "$3,000", loss = "$300", symbols = ["MSFT"], strategy = MOMENTUM } = {}): NewAgent {
-  const r = readAnswers(money, "Grow it", loss);
-  if (!r.ok) throw new Error(r.error);
-  const s = readStrategy(strategy);
-  if (!s.ok) throw new Error(s.error);
-  const request = mandateFrom(compile(r.value, symbols, s.value), ws.connection.connection_id);
-  if (!request) throw new Error("no mandate");
-  return request;
+/**
+ * The fixture request with its money and instruments changed: a position and an order sized as the
+ * old set-up sized them, a quarter and a tenth of the money, and the whole of it in total holdings.
+ * `loss` is the owner's answer the old set-up read; the request keeps a tenth of the money.
+ */
+function newAgent(ws: Workspace, { money = "$3,000", symbols = ["MSFT"] }: { money?: string; loss?: string; symbols?: string[] } = {}): NewAgent {
+  const request = newAgentRequest(ws.connection.connection_id);
+  const usd = dec(money.replace(/[$,]/g, ""));
+  const mandate = structuredClone(request.mandate);
+  mandate.name = `${symbols.join("-").toLowerCase()}-agent`;
+  mandate.capital.allocation_usd = toDecimalString(usd);
+  mandate.risk.max_gross_exposure_usd = toDecimalString(usd);
+  mandate.risk.max_position_usd = toDecimalString(mul(usd, dec("0.25")));
+  mandate.risk.max_order_usd = toDecimalString(mul(usd, dec("0.1")));
+  mandate.universe.pinned_instruments = symbols.map((s) => KNOWN[s] ?? { asset_id: fixtureAssetId(s), symbol: s, asset_class: "us_equity" });
+  mandate.universe.max_instruments = symbols.length;
+  return { ...request, mandate };
 }
 
 /** Whole cents from a decimal string, computed apart from `lib/decimal`, so the checks below are an independent oracle. */

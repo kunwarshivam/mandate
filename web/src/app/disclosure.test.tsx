@@ -1,10 +1,7 @@
-import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AppShell } from "@/components/shell/app-shell";
-import { BACKTESTS_BY_AGENT } from "@/fixtures/backtests";
-import { AGENT_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
+import { SCENARIOS } from "@/fixtures/workspace";
 import { isRecordRoute } from "@/lib/frozen";
-import { agentHref, positionHref } from "@/lib/screens";
 import { pageFor, pathsFor } from "@/test/app-routes";
 import { renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
@@ -86,27 +83,11 @@ async function renderPath(path: string, scenario: (typeof SCENARIOS)[number]["id
   return renderWithRuntime(<AppShell>{page}</AppShell>, scenario);
 }
 
-const WS = buildWorkspace("normal");
-const SWING = WS.agents.find((a) => a.agent_id === AGENT_IDS.swing)!;
 
 describe("[[DISCLOSURE-PERFORMANCE]] beside every P&L figure", () => {
-  it.each([
-    ["the dashboard's positions", "/"],
-    ["the positions list", "/positions"],
-    ["an agent's overview", agentHref(AGENT_IDS.swing, "overview")],
-    ["an agent's positions tab", agentHref(AGENT_IDS.swing, "positions")],
-    ["a position record", positionHref(AGENT_IDS.swing, SWING.positions[0].instrument.asset_id)],
-  ])("finds P&L on %s, so the route scan below has something to check", async (_, path) => {
-    await renderPath(path, "normal");
+  it("finds P&L on the design reference, so the checks below have something to check", async () => {
+    await renderPath("/design", "normal");
     expect(pnlFigures().length).toBeGreaterThan(0);
-  });
-
-  it.each(Object.values(BACKTESTS_BY_AGENT).flat())("finds net P&L on the backtest report /backtests/%s once it is read, each beside its disclosure", async (id) => {
-    await renderPath(`/backtests/${id}`, "normal");
-    await screen.findByRole("region", { name: "The run" });
-    const completed = screen.getByRole("region", { name: "The run" }).textContent?.includes("Completed");
-    expect(pnlFigures().length > 0).toBe(Boolean(completed));
-    expect(undisclosed()).toEqual([]);
   });
 
   it.each(SCENARIOS.flatMap((s) => pathsFor(s.id).map((path) => [path, s.id] as const)))("%s in %s shows no P&L without its disclosure in its region", async (path, scenario) => {
@@ -122,23 +103,15 @@ describe("[[DISCLOSURE-PERFORMANCE]] beside every P&L figure", () => {
     ["the symbol is missing", (t: Element) => t.remove()],
     ["the symbol is not described by the text", (t: Element) => t.removeAttribute("aria-describedby")],
     ["the text is gone", (t: Element) => document.getElementById(t.getAttribute("aria-describedby")!)!.remove()],
-  ])("fails every P&L on Home when %s", async (_, seed) => {
-    await renderPath("/", "normal");
+  ])("fails every P&L on the design reference when %s", async (_, seed) => {
+    await renderPath("/design", "normal");
     expect(undisclosed()).toEqual([]);
     document.querySelectorAll(TRIGGER).forEach(seed);
     expect(undisclosed()).toHaveLength(pnlFigures().length);
   });
 
   it("fails a P&L on a record screen shown behind a symbol", async () => {
-    await renderPath("/", "normal");
+    await renderPath("/design", "normal");
     expect(undisclosed(true)).toHaveLength(pnlFigures().length);
-  });
-
-  it("puts a symbol beside every P&L on Home, one per disclosure", async () => {
-    await renderPath("/", "normal");
-    const triggers = document.querySelectorAll(TRIGGER);
-    const texts = document.querySelectorAll(PLACEHOLDER);
-    expect(triggers.length).toBeGreaterThanOrEqual(5);
-    expect(texts).toHaveLength(triggers.length);
   });
 });

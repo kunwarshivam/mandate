@@ -65,7 +65,7 @@ export function TabNav({ approvals, sheetLayer }: { approvals: number; sheetLaye
               label={label}
               icon={<Glyph className="relative size-6" aria-hidden />}
               badge={
-                href === "/messages" && approvals > 0 ? (
+                href === "/" && approvals > 0 ? (
                   <span
                     data-slot="approvals-count"
                     className="absolute -top-1 right-1 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-sm bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"

@@ -3,7 +3,7 @@ import type { Agent, OrderState, Scenario, Workspace } from "@/fixtures/types";
 import { AGENT_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { IN_FLIGHT, alertLines, attentionText, needsYouLines, stopAttention } from "./attention";
 import { agentLimits, nearLossLimits } from "./limits";
-import { agentHref, orderHref } from "./screens";
+import { agentHref } from "./screens";
 
 function agentIn(ws: Workspace, id: string): Agent {
   const agent = ws.agents.find((a) => a.agent_id === id);
@@ -175,9 +175,8 @@ describe("a loud Stop has its reason in Needs you", () => {
     const ws = buildWorkspace("unknown-order");
     expect(stopAttention(ws), "Stop is loud for the order").toEqual(["1 order the broker has not confirmed"]);
     expect(unknownOrders(ws).map((a) => [a.agentId, a.label, a.ids.length])).toEqual([[AGENT_IDS.swing, "Agent 2", 1]]);
-    const [held] = unknownOrders(ws);
     expect(needsYouLines(ws).map(({ text, href }) => ({ text, href }))).toEqual([
-      { text: "Agent 2: an order's state is unknown", href: orderHref(AGENT_IDS.swing, held.ids[0]) },
+      { text: "Agent 2: an order's state is unknown", href: agentHref(AGENT_IDS.swing) },
     ]);
   });
 
@@ -203,7 +202,7 @@ describe("a loud Stop has its reason in Needs you", () => {
         order.state = "Unknown";
         expect(stopAttention(ws), `${agent.label} order ${i}`).not.toEqual([]);
         expect(needsYouLines(ws).map((l) => [l.text, l.href]), `${agent.label} order ${i}`).toEqual([
-          [`${agent.label}: an order's state is unknown`, orderHref(agent.agent_id, order.client_order_id)],
+          [`${agent.label}: an order's state is unknown`, agentHref(agent.agent_id)],
         ]);
       }
     }
@@ -215,7 +214,7 @@ describe("a loud Stop has its reason in Needs you", () => {
     expect(btc.orders.length).toBeGreaterThan(1);
     for (const o of btc.orders) o.state = "Unknown";
     expect(needsYouLines(ws).map(({ text, href }) => ({ text, href }))).toEqual([
-      { text: `Agent 1: ${btc.orders.length} orders' states are unknown`, href: agentHref(AGENT_IDS.btc, "orders") },
+      { text: `Agent 1: ${btc.orders.length} orders' states are unknown`, href: agentHref(AGENT_IDS.btc) },
     ]);
   });
 
@@ -270,7 +269,7 @@ describe("a loud Stop says why for every order in flight", () => {
           const lines = needsYouLines(ws);
           expect(lines, at).toHaveLength(1);
           const [line] = lines;
-          expect(line.href, at).toBe(orderHref(agent.agent_id, order.client_order_id));
+          expect(line.href, at).toBe(agentHref(agent.agent_id));
           expect(line.text.startsWith(`${agent.label}: `), at).toBe(true);
           const condition = line.text.slice(`${agent.label}: `.length);
           for (const detail of [order.instrument.symbol, order.side, order.qty, order.limit_price, order.stop_price]) {
@@ -301,7 +300,7 @@ describe("a loud Stop says why for every order in flight", () => {
         btc.orders[1].state = second;
         const text = first === "Unknown" && second === "Unknown" ? "Agent 1: 2 orders' states are unknown" : "Agent 1: 2 orders are in flight";
         expect(stopAttention(ws), `${first} ${second}`).toEqual(["2 orders the broker has not confirmed"]);
-        expect(needsYouLines(ws).map(({ text, href }) => ({ text, href })), `${first} ${second}`).toEqual([{ text, href: agentHref(AGENT_IDS.btc, "orders") }]);
+        expect(needsYouLines(ws).map(({ text, href }) => ({ text, href })), `${first} ${second}`).toEqual([{ text, href: agentHref(AGENT_IDS.btc) }]);
       }
     }
   });
@@ -314,7 +313,7 @@ describe("a loud Stop says why for every order in flight", () => {
         btc.orders[0].state = other;
         btc.orders[1].state = state;
         expect(needsYouLines(ws).map(({ text, href }) => ({ text, href })), `${state} beside ${other}`).toEqual([
-          { text: `Agent 1: ${WORDING[state]}`, href: orderHref(AGENT_IDS.btc, btc.orders[1].client_order_id) },
+          { text: `Agent 1: ${WORDING[state]}`, href: agentHref(AGENT_IDS.btc) },
         ]);
       }
     }

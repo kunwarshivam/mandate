@@ -8,17 +8,14 @@ import { AvatarCircle } from "pixelarticons/react/AvatarCircle.js";
 import { BuildingCommunity } from "pixelarticons/react/BuildingCommunity.js";
 import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
 import { Close } from "pixelarticons/react/Close.js";
-import { Gear } from "pixelarticons/react/Gear.js";
 import { Home } from "pixelarticons/react/Home.js";
 import { Logout } from "pixelarticons/react/Logout.js";
-import { Script } from "pixelarticons/react/Script.js";
 import { Search } from "pixelarticons/react/Search.js";
 import type { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
-import { homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
-import { GROUP_LABEL, GROUP_NEEDS, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup, listedScreens } from "@/lib/screens";
+import { SCREENS, type Screen, listedScreens } from "@/lib/screens";
 import { signOut, useSession } from "@/lib/session";
 import { WorkspaceSwitcher } from "./app-header";
 import { OPEN_COMMAND_EVENT } from "./command-menu";
@@ -27,8 +24,8 @@ import { SCREEN_ICON } from "./screen-icons";
 import { healthItems } from "./status-strip";
 import { ThemeMenu } from "./theme-menu";
 
-/** The phone's own tabs for a role that sees agents; the rest of the app is under More. */
-export const PHONE_TAB_LINKS = ["home", "messages", "agents"] as const;
+/** The phone's own tabs for a role that sees agents; Settings and the rest are under More. */
+export const PHONE_TAB_LINKS = ["home", "new"] as const;
 
 export interface PhoneTab {
   key: string;
@@ -37,9 +34,9 @@ export interface PhoneTab {
   icon: Icon;
 }
 
-const TAB_LABEL: Record<(typeof PHONE_TAB_LINKS)[number], string> = { home: "Home", messages: "Messages", agents: "Agents" };
+const TAB_LABEL: Record<(typeof PHONE_TAB_LINKS)[number], string> = { home: "Home", new: "New agent" };
 
-/** A role that cannot see agents gets its own home as the one tab beside More. */
+/** A role that cannot see agents gets Settings as the one tab beside More. */
 export function phoneTabs(role: Role): PhoneTab[] {
   if (can(role, "agents.view")) {
     return PHONE_TAB_LINKS.map((key) => {
@@ -47,9 +44,7 @@ export function phoneTabs(role: Role): PhoneTab[] {
       return { key, href: screen.href, label: TAB_LABEL[key], icon: SCREEN_ICON[key] ?? Home };
     });
   }
-  const home = homeFor(role);
-  const index = home.href === SECTION_INDEX.audit.href ? SECTION_INDEX.audit : SECTION_INDEX.workspace;
-  return [{ key: "home", href: index.href, label: index.label, icon: index === SECTION_INDEX.audit ? Script : Gear }];
+  return [{ key: "settings", href: "/settings", label: "Settings", icon: SCREEN_ICON.settings ?? Home }];
 }
 
 interface MoreLink {
@@ -63,43 +58,17 @@ export interface MoreGroup {
   links: MoreLink[];
 }
 
-/** Under More the workspace screens read as Settings, the word a phone owner looks for. */
-const MORE_LABEL: Record<ScreenGroup, string | null> = { ...GROUP_LABEL, workspace: "Settings" };
-
-const INDEX_LINK: Partial<Record<ScreenGroup, MoreLink>> = {
-  audit: { href: SECTION_INDEX.audit.href, label: "Audit overview", icon: Script },
-  workspace: { href: SECTION_INDEX.workspace.href, label: "All settings", icon: Gear },
-};
-
 function linkOf(s: Screen): MoreLink {
   return { href: s.href, label: s.label, icon: SCREEN_ICON[s.key] ?? Home };
 }
 
-/**
- * Every listed screen a role may open that is not on its tabs, in the order of `SCREENS`, under the
- * group labels the dock uses; Audit and Settings open with their overview, which stays even while
- * every screen under it is still to come, since the overview names what is coming (DEC-513).
- */
+/** Every listed screen a role may open that is not on its tabs, in the order of `SCREENS`. */
 export function moreGroups(role: Role): MoreGroup[] {
   const onTabs = new Set(phoneTabs(role).map((t) => t.href));
-  const groups: MoreGroup[] = [];
-  const byGroup = new Map<ScreenGroup, MoreGroup>();
-  const groupFor = (g: ScreenGroup): MoreGroup => {
-    let group = byGroup.get(g);
-    if (!group) {
-      const index = INDEX_LINK[g];
-      group = { label: MORE_LABEL[g], links: index && !onTabs.has(index.href) ? [index] : [] };
-      byGroup.set(g, group);
-      groups.push(group);
-    }
-    return group;
-  };
-  for (const s of listedScreens()) {
-    if (onTabs.has(s.href) || !can(role, s.needs)) continue;
-    groupFor(s.group).links.push(linkOf(s));
-  }
-  for (const g of ["audit", "workspace"] as const) if (can(role, GROUP_NEEDS[g])) groupFor(g);
-  return groups;
+  const links = listedScreens()
+    .filter((s) => !onTabs.has(s.href) && can(role, s.needs))
+    .map(linkOf);
+  return links.length > 0 ? [{ label: null, links }] : [];
 }
 
 const ROW =

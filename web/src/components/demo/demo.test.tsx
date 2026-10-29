@@ -10,7 +10,7 @@ import { pageFor, pathsFor } from "@/test/app-routes";
 import { BySource } from "@/components/api-screens/api-screens";
 import { DemoApp } from "./demo-app";
 import { DEMO_PATH, DEMO_SOURCE, addressPath, isDemoCommand, isDemoReport } from "./demo-messages";
-import { demoPath, demoScreen, inMessages } from "./demo-routes";
+import { demoPath, demoScreen } from "./demo-routes";
 
 /**
  * The example app in the landing page's browser tab (DEC-906): the app's own screens over the fixture
@@ -55,8 +55,11 @@ describe("the example app's routes", () => {
       "/demo",
       "/welcome",
       "/login",
+      "/agents",
       "/agents/nope",
       "/agents/new/x",
+      "/positions",
+      "/messages",
       "/approvals/apr_bad",
       "/positions/x",
       "/alerts/x",
@@ -66,11 +69,6 @@ describe("the example app's routes", () => {
       "/nowhere",
     ])
       expect(demoScreen(path), path).toBeNull();
-  });
-
-  it("knows the paths inside Messages, which keep what the owner asked while they stay there", () => {
-    for (const path of ["/messages", "/messages/", "/messages/agt_01JB3K8Y4N7QW2M6R9T5V0XZAC/desk"]) expect(inMessages(path), path).toBe(true);
-    for (const path of ["/", "/messagesx", "/agents/messages"]) expect(inMessages(path), path).toBe(false);
   });
 
   it("reads the path alone, without its query, fragment or trailing slash", () => {
@@ -130,25 +128,25 @@ describe("the example app", () => {
     const address = window.location.href;
     render(<DemoApp workspace={buildWorkspace("approvals")} />);
     expect(at()).toBe("/");
-    const link = document.querySelector<HTMLAnchorElement>('a[href="/agents"]')!;
+    const link = document.querySelector<HTMLAnchorElement>('main a[href="/new"]')!;
     await act(async () => fireEvent.click(link));
-    expect(at()).toBe("/agents");
-    expect(screen.getByRole("heading", { level: 1, name: "Agents" })).toBeInTheDocument();
+    expect(at()).toBe("/new");
+    expect(screen.getByRole("heading", { level: 1, name: "New agent" })).toBeInTheDocument();
     expect(window.location.href).toBe(address);
   });
 
   it("goes back, forward, to an address, and starts over when the browser asks, and says where it is", async () => {
     const said = vi.spyOn(window.parent, "postMessage");
     render(<DemoApp workspace={buildWorkspace("approvals")} />);
-    await ask({ source: DEMO_SOURCE, type: "open", path: "/approvals" });
-    await ask({ source: DEMO_SOURCE, type: "open", path: "/positions" });
-    expect(at()).toBe("/positions");
+    await ask({ source: DEMO_SOURCE, type: "open", path: "/settings" });
+    await ask({ source: DEMO_SOURCE, type: "open", path: "/new" });
+    expect(at()).toBe("/new");
     await ask({ source: DEMO_SOURCE, type: "go", to: "back" });
-    expect(at()).toBe("/approvals");
+    expect(at()).toBe("/settings");
     await ask({ source: DEMO_SOURCE, type: "go", to: "forward" });
-    expect(at()).toBe("/positions");
+    expect(at()).toBe("/new");
     await ask({ source: DEMO_SOURCE, type: "where" });
-    expect(said).toHaveBeenLastCalledWith({ source: DEMO_SOURCE, type: "at", path: "/positions", back: true, forward: false }, window.location.origin);
+    expect(said).toHaveBeenLastCalledWith({ source: DEMO_SOURCE, type: "at", path: "/new", back: true, forward: false }, window.location.origin);
     await ask({ source: DEMO_SOURCE, type: "go", to: "restart" });
     expect(at()).toBe("/");
     await ask({ source: DEMO_SOURCE, type: "where" });
@@ -173,12 +171,12 @@ describe("the example app", () => {
     vi.useRealTimers();
   });
 
-  it("says so at an address with no screen, with a way back to the dashboard and nothing more", async () => {
+  it("says so at an address with no screen, with a way back to your agents and nothing more", async () => {
     render(<DemoApp workspace={buildWorkspace("approvals")} />);
     await ask({ source: DEMO_SOURCE, type: "open", path: "/nowhere" });
     const missing = screen.getByRole("heading", { level: 1, name: "No such page" });
-    expect(missing.parentElement!.textContent).toBe("No such pageGo to the dashboard");
-    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Go to the dashboard" })));
+    expect(missing.parentElement!.textContent).toBe("No such pageGo to your agents");
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Go to your agents" })));
     expect(at()).toBe("/");
   });
 });

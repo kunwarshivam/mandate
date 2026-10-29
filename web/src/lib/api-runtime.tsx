@@ -2,6 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
+import { apiChat } from "@/api/chat";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit, prepareAskAgent } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
@@ -776,6 +777,41 @@ export function ApiRuntimeProvider({
     [client, deliver, patchSetUp, passkeyStepUp, refresh],
   );
 
+  /**
+   * A version a setup chat created (DEC-2293): set up from its served confirmation, which says its
+   * classification and the paths a confirm names; a confirmation that cannot be read leaves it
+   * unknown, and nothing is confirmed from it.
+   */
+  const adoptVersion = useCallback<Runtime["adoptVersion"]>(
+    (version) => {
+      counter.current += 1;
+      const setUp: SetUp = {
+        id: `set-${counter.current}`,
+        agentId: "",
+        version,
+        created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+        confirmed: null,
+        deployed: null,
+      };
+      setUpsRef.current = [...setUpsRef.current, setUp];
+      setSetUps(setUpsRef.current);
+      void (async () => {
+        const screen = await readConfirmation(client, version);
+        if (!mounted.current) return;
+        patchSetUp(setUp.id, (s) => ({
+          ...s,
+          created: screen.ok
+            ? { ...s.created, phase: "recorded", recordedAt: nowRef.current, validated: true, classification: screen.value.classification, requiredPaths: screen.value.required_paths }
+            : { ...s.created, phase: "unknown" },
+        }));
+      })();
+      return setUp;
+    },
+    [client, patchSetUp],
+  );
+
+  const chat = useMemo(() => apiChat(client, fetch ?? ((input, init) => window.fetch(input, init)), source.origin), [client, fetch, source.origin]);
+
   /** No route lists a version's backtests (DEC-2400), so the deploy step shows none over the API. */
   const backtestFor = useCallback<Runtime["backtestFor"]>(() => null, []);
 
@@ -783,8 +819,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

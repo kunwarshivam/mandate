@@ -1390,9 +1390,9 @@ every browser command does (§3.3).
 | Read the thread | `GET /agents/{id}/messages?after={seq}` | — | The member's own messages after `seq`, oldest first, each `{id, seq, at, from, text, card, sources, proactive}`, with `running`, `run_id` and the `cursor` to pass next |
 | Stop | `POST /agents/{id}/runs/{run}/stop` | `ChatRunStopRequested` | The member's own run in flight, else `not_found`. The run ends before its next model call |
 | Goals | `GET /agents/{id}/goals` | — | The latest `AgentGoalsUpdated`: `goals`, `plan` and `watching`, empty when none |
-| Settings | `GET`, `PUT /agents/{id}/settings` | `ChatSettingsChanged` | `{"chat_model", "daily_cap_usd"}`. The model must be one `GET /models` lists and the cap a positive decimal, else `invalid` |
+| Settings | `GET /agents/{id}/settings`, `PUT .../settings` | `ChatSettingsChanged` | `{"chat_model", "daily_cap_usd"}`. The model must be one `GET /models` lists and the cap a positive decimal, else `invalid` |
 | Models | `GET /models` | — | The chat entries the gateway offers, each with its label and prices per million tokens; the first is the default |
-| Set up an agent | `POST /setup/messages[?setup_id=…]`, `GET /setup/{setup}/messages` | `ChatMessagePosted` (owner) | The thread with no agent yet. Without `setup_id` a new setup starts and the `202` names it. Its run drafts a mandate version through §4.2's create and never confirms or deploys it |
+| Set up an agent | `POST /setup/messages?setup_id={setup}`, `GET /setup/{setup}/messages?after={seq}` | `ChatMessagePosted` (owner) | The thread with no agent yet. Without `setup_id` a new setup starts and the `202` names it; `setup_id` is optional. Its run drafts a mandate version through §4.2's create and never confirms or deploys it |
 | Home | `GET /home` | — | Every agent the member may see: `agent_id`, `name`, `mode`, `needs_you` (an approval waits), `unread` (agent messages after the member's last) and `last_message` |
 
 - **What a run may do.** A run is the chat's (agent harness spec §15.13). It reads only its own

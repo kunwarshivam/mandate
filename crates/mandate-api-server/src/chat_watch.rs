@@ -221,6 +221,7 @@ impl Pass<'_> {
                 let card = object(vec![
                     ("kind", string("approval")),
                     ("approval_id", string(&view.approval_id)),
+                    ("symbol", string(&symbol)),
                     ("order", view.order.clone()),
                 ]);
                 (view.approval_id.clone(), message, card)

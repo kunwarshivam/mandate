@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { SectionIndexScreen } from "@/components/screens/account-screens";
-import { SECTION_INDEX } from "@/lib/screens";
+import { SettingsScreen } from "@/components/agent-chat/settings-screen";
 
-export const metadata: Metadata = { title: "Workspace" };
+export const metadata: Metadata = { title: "Settings" };
 
 export default function SettingsPage() {
-  return <SectionIndexScreen title={SECTION_INDEX.workspace.label} purpose={SECTION_INDEX.workspace.purpose} prefix="/settings" />;
+  return <SettingsScreen />;
 }

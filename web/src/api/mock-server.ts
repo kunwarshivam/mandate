@@ -31,6 +31,7 @@ import { buildWorkspace } from "@/fixtures/workspace";
 import { INSTRUMENTS } from "@/fixtures/mandates";
 import type { Agent, Approval, ApprovalStatus, Health, Mandate, Scenario } from "@/fixtures/types";
 import { dec, mul, toDecimalString } from "@/lib/decimal";
+import { fixtureChat } from "@/lib/fixture-chat";
 import { mandateVersion } from "@/lib/fixture-journey";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -325,6 +326,69 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const orders = workspace.agents.flatMap((a) => [...a.past_orders, ...a.orders]).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
     const told = orders.flatMap((o) => [{ type: "OrderRequestRecorded", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]);
     return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
+  /** The chat (§4.6.2) over the fixture chat: its reads and writes, shaped as the server serves them. */
+  const chat = fixtureChat(workspace);
+  const CHAT_THREAD = /^\/(agents|setup)\/([^/]+)\/messages$/;
+
+  async function chatRead(route: string, query: URLSearchParams): Promise<Response | null> {
+    const thread = route.match(CHAT_THREAD);
+    if (thread) {
+      if ([...query.keys()].some((k) => k !== "after")) return problem(404, "not_found", "none");
+      const id = decodeURIComponent(thread[2]);
+      if (thread[1] === "agents" && !agentOf(id)) return problem(404, "not_found", "none");
+      const answer = await chat.thread(thread[1] === "agents" ? { agent: id } : { setup: id }, Number(query.get("after") ?? "0"));
+      return answer.ok ? read({ agent_id: thread[1] === "agents" ? id : null, setup_id: thread[1] === "setup" ? id : null, ...answer.value }) : problem(503, answer.reason, "none");
+    }
+    if ([...query.keys()].length > 0) return null;
+    if (route === "/home") {
+      const answer = await chat.home();
+      return answer.ok ? read({ agents: answer.value }) : null;
+    }
+    if (route === "/models") {
+      const answer = await chat.models();
+      return answer.ok ? read({ models: answer.value }) : null;
+    }
+    const per = route.match(/^\/agents\/([^/]+)\/(goals|settings)$/);
+    if (per) {
+      const id = decodeURIComponent(per[1]);
+      if (!agentOf(id)) return problem(404, "not_found", "none");
+      const answer = per[2] === "goals" ? await chat.goals(id) : await chat.settings(id);
+      return answer.ok ? read({ agent_id: id, ...answer.value }) : null;
+    }
+    return null;
+  }
+
+  async function chatWrite(method: string, route: string, query: URLSearchParams, headers: Headers, body: string): Promise<Response | null> {
+    const send = method === "POST" && (/^\/agents\/[^/]+\/messages$/.test(route) || route === "/setup/messages");
+    const stop = method === "POST" && /^\/agents\/[^/]+\/runs\/[^/]+\/stop$/.test(route);
+    const save = method === "PUT" && /^\/agents\/[^/]+\/settings$/.test(route);
+    if (!send && !stop && !save) return null;
+    if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
+    if (!isIdempotencyKey(headers.get("Idempotency-Key") ?? "")) return problem(422, "invalid", "none");
+    let members: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) members = parsed as Record<string, unknown>;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    const agent = route.startsWith("/agents/") ? decodeURIComponent(route.split("/")[2] ?? "") : null;
+    if (agent !== null && !agentOf(agent)) return problem(404, "not_found", "none");
+    if (stop) return respond(202, { run_id: decodeURIComponent(route.split("/")[4] ?? "") });
+    if (save) {
+      const cap = typeof members.daily_cap_usd === "string" ? members.daily_cap_usd : "";
+      const model = typeof members.chat_model === "string" ? members.chat_model : "";
+      if (!/^\d+(\.\d+)?$/.test(cap) || !/[1-9]/.test(cap) || model === "") return problem(422, "invalid", "none");
+      const answer = await chat.saveSettings(agent ?? "", { chat_model: model, daily_cap_usd: cap });
+      return answer.ok ? respond(200, { agent_id: agent, ...answer.value }) : problem(503, "journal_unavailable", "none");
+    }
+    const text = typeof members.text === "string" ? members.text.trim() : "";
+    if (text === "" || text.length > 4000) return problem(422, "invalid", "none");
+    const setup = query.get("setup_id");
+    const answer = await chat.send(agent !== null ? { agent } : { setup }, text);
+    return answer.ok ? respond(202, { agent_id: agent, ...answer.value }) : problem(503, "journal_unavailable", "none");
   }
 
   function get(route: string, query: URLSearchParams): Response {
@@ -711,6 +775,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
     }
     if (!url.pathname.startsWith(`${prefix}/`)) return problem(404, "not_found", "none");
     const route = url.pathname.slice(prefix.length);
+    const chatted = method === "GET" ? await chatRead(route, url.searchParams) : await chatWrite(method, route, url.searchParams, new Headers(init.headers), typeof init.body === "string" ? init.body : "");
+    if (chatted) return chatted;
     if (method === "GET") return get(route, url.searchParams);
     if (method === "POST") {
       const answer = post(route, new Headers(init.headers), typeof init.body === "string" ? init.body : "");

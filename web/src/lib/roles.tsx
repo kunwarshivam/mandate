@@ -45,7 +45,7 @@ export function can(role: Role, capability: Capability): boolean {
     case "viewer":
       return capability === "agents.view" || capability === "workspace.view";
     case "auditor":
-      return capability === "audit.view";
+      return capability === "audit.view" || capability === "workspace.view";
     default: {
       const unhandled: never = role;
       throw new Error(`unhandled role ${String(unhandled)}`);

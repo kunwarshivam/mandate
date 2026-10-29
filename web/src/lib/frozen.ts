@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-const RECORD_ROUTE = /^\/(approvals\/[^/]+|agents\/[^/]+\/(kill-switch|release|positions\/[^/]+\/close)|connections\/[^/]+\/(stop-all|close-all))\/?$/;
+const RECORD_ROUTE = /^\/(approvals\/[^/]+|agents\/[^/]+\/(kill-switch|release)|connections\/[^/]+\/(stop-all|close-all))\/?$/;
 
 /**
- * The record screens: an approval request, a kill switch and its release, stopping or closing a
- * connection, and closing a position. What the owner reads there is fixed (`useFrozen`), so the
+ * The record screens: an approval request, a kill switch and its release, and stopping or closing a
+ * connection. What the owner reads there is fixed (`useFrozen`), so the
  * frame beside it always shows the status strip, with every feed's age.
  */
 export function isRecordRoute(pathname: string): boolean {

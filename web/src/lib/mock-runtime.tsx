@@ -18,6 +18,8 @@ import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-u
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 import type { ConnectionDetail } from "@/api/connect";
 import type { Alerts } from "@/api/alerts";
+import type { ChatPort } from "@/api/chat";
+import { fixtureChat } from "./fixture-chat";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -112,6 +114,8 @@ export interface VersionStep extends SetUpStep {
   classification: Classification | null;
   /** True once recorded: a version is created only from a passing validation. */
   validated: boolean;
+  /** The paths the served confirmation says a confirm names, for a version a setup chat created. */
+  requiredPaths?: string[];
 }
 
 /**
@@ -236,6 +240,10 @@ export interface Runtime {
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
+  /** Step 1 already taken elsewhere: a version a setup chat created (DEC-2293), set up from its served confirmation. */
+  adoptVersion: (version: ContentRef) => SetUp;
+  /** The agent's chat (workspace API §4.6.2): Home, threads, Stop, goals and settings. */
+  chat: ChatPort;
   /** Step 2: `POST /mandate-versions/{hash}/confirm`, with the digest the passkey check was bound to. */
   confirmVersion: (setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => void;
   /** Step 3: `POST /agents`, to paper only. */
@@ -711,6 +719,30 @@ export function RuntimeProvider({
     [reachable, silent, recordAfterMs, patchSetUp, change],
   );
 
+  /**
+   * A version a setup chat created. The fixtures run no model, so none reaches here from a chat;
+   * it is recorded as a first version, and its deployment is refused, since no draft is held.
+   */
+  const adoptVersion = useCallback(
+    (version: ContentRef): SetUp => {
+      counter.current += 1;
+      const setUp: SetUp = {
+        id: `set-${counter.current}`,
+        agentId: "",
+        version,
+        created: { phase: "recorded", sentAt: nowRef.current, recordedAt: nowRef.current, base: null, classification: FIRST_VERSION_CLASSIFICATION, validated: true, requiredPaths: [] },
+        confirmed: null,
+        deployed: null,
+      };
+      setUpsRef.current = [...setUpsRef.current, setUp];
+      setSetUps(setUpsRef.current);
+      return setUp;
+    },
+    [],
+  );
+
+  const chat = useMemo(() => fixtureChat(initial), [initial]);
+
   /** The fixtures' completed run of exactly this version, if they hold one. */
   const backtestFor = useCallback((version: ContentRef): string | null => backtestOfVersion(version), []);
 
@@ -721,8 +753,8 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, price: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, price: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

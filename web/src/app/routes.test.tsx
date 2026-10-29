@@ -1,29 +1,18 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import * as agentSection from "@/app/(app)/agents/[agentId]/[...section]/page";
 import * as agent from "@/app/(app)/agents/[agentId]/page";
-import * as agentsNew from "@/app/(app)/agents/new/page";
-import * as agents from "@/app/(app)/agents/page";
-import * as alerts from "@/app/(app)/alerts/page";
 import * as approval from "@/app/(app)/approvals/[approvalId]/page";
-import * as approvals from "@/app/(app)/approvals/page";
-import * as auditScreen from "@/app/(app)/audit/[screen]/page";
-import * as backtest from "@/app/(app)/backtests/[backtestId]/page";
-import * as audit from "@/app/(app)/audit/page";
-import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page.dev";
-import * as dashboard from "@/app/(app)/page";
-import * as positions from "@/app/(app)/positions/page";
-import * as settingsScreen from "@/app/(app)/settings/[screen]/page";
+import * as setup from "@/app/(app)/new/page";
+import * as home from "@/app/(app)/page";
 import * as settings from "@/app/(app)/settings/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { StopControl } from "@/components/shell/stop-control";
 import { recordHref } from "@/components/stop/commands";
-import { BACKTEST_IDS } from "@/fixtures/backtests";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { canOpen, homeFor, routeNeeds } from "@/lib/access";
 import { ROLES, type Role, can } from "@/lib/roles";
-import { AGENT_SECTIONS, RECORD_TITLE, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref, screensIn } from "@/lib/screens";
+import { SCREENS, agentHref } from "@/lib/screens";
 import { dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { pageFor } from "@/test/app-routes";
 import { setPathname } from "@/test/navigation";
@@ -34,33 +23,7 @@ const CONNECTION = buildWorkspace("normal").connection.connection_id;
 /** The kill-switch and release record screens (D10, D11). */
 const STOP_RECORDS = [recordHref("kill", AGENT_IDS.btc), recordHref("release", AGENT_IDS.btc), recordHref("stop_all", CONNECTION), recordHref("close_all", CONNECTION)];
 
-const WS = buildWorkspace("normal");
-const SWING = WS.agents.find((a) => a.agent_id === AGENT)!;
-const BTC = WS.agents.find((a) => a.agent_id === AGENT_IDS.btc)!;
-const XYZ = SWING.positions.find((p) => p.instrument.symbol === "XYZ")!;
-
-/** One of each record: a stock and a crypto position, the close page, a working and a finished order, and a decision. */
-const RECORDS = [
-  positionHref(AGENT, XYZ.instrument.asset_id),
-  `${positionHref(AGENT, XYZ.instrument.asset_id)}/close`,
-  positionHref(AGENT_IDS.btc, BTC.positions[0].instrument.asset_id),
-  orderHref(AGENT, SWING.orders[0].client_order_id),
-  orderHref(AGENT, SWING.past_orders[0].client_order_id),
-  decisionHref(AGENT, WS.decisions.find((d) => d.agent_id === AGENT)!.event_id),
-];
-
-const PATHS = [
-  ...SCREENS.map((s) => s.href),
-  SECTION_INDEX.audit.href,
-  SECTION_INDEX.workspace.href,
-  ...AGENT_SECTIONS.map((s) => agentHref(AGENT, s.key)),
-  `/approvals/${APPROVAL_IDS.swingXyz}`,
-  ...RECORDS,
-  `/backtests/${BACKTEST_IDS.lmnCompleted}`,
-  agentHref(AGENT_IDS.lmn, "prove/backtests"),
-  "/design",
-  ...STOP_RECORDS,
-];
+const PATHS = [...SCREENS.map((s) => s.href), agentHref(AGENT), `/approvals/${APPROVAL_IDS.swingXyz}`, "/design", ...STOP_RECORDS];
 
 async function renderPath(path: string) {
   setPathname(path);
@@ -81,99 +44,41 @@ describe("route coverage", () => {
 
   it.each(PATHS)("%s renders no link to a path without a page", async (path) => {
     await renderPath(path);
-    const hrefs = new Set(
-      Array.from(document.querySelectorAll("a[href]"))
-        .map((a) => a.getAttribute("href") ?? "")
-        .filter((h) => h.startsWith("/") && !h.startsWith("//"))
-        .map((h) => h.split("#")[0].split("?")[0]),
-    );
-    for (const href of hrefs) await expect(pageFor(href), href).resolves.toBeDefined();
+    for (const href of internalHrefs()) await expect(pageFor(href), href).resolves.toBeDefined();
   });
 
-  it.each(["More"])("the dock's %s menu links only to paths with a page", async (menu) => {
-    await renderPath("/");
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: menu }));
-    const hrefs = internalHrefs(await screen.findByRole("menu"));
-    expect(hrefs.length).toBeGreaterThan(0);
-    for (const href of hrefs) await expect(pageFor(href), href).resolves.toBeDefined();
-  });
-
-  it("gives every screen that is not built its purpose, never a dead end", async () => {
-    for (const s of SCREENS.filter((x) => !x.built)) {
-      const { unmount } = await renderPath(s.href);
-      const soon = document.querySelector("[data-slot=coming-soon]");
-      expect(soon, s.href).not.toBeNull();
-      expect(soon).toHaveTextContent("Coming in the next slice");
-      expect(soon).toHaveTextContent(s.purpose);
-      unmount();
-    }
-  });
-
-  it("lists every audit and workspace screen as a static param", () => {
-    expect(auditScreen.generateStaticParams().map((p) => `/audit/${p.screen}`)).toEqual(screensIn("/audit").map((s) => s.href));
-    expect(settingsScreen.generateStaticParams().map((p) => `/settings/${p.screen}`)).toEqual(screensIn("/settings").map((s) => s.href));
-  });
-
-  it("sends unknown screens and sections to not found", async () => {
-    await expect(pageFor("/audit/nope")).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor("/settings/nope")).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor(`/agents/${AGENT}/nope`)).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor(`/agents/${AGENT}/overview`)).rejects.toThrow("NEXT_NOT_FOUND");
-  });
-
-  it("sends a record whose ID has the wrong shape to not found", async () => {
-    await expect(pageFor(`/agents/${AGENT}/positions/XYZ`)).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor(`/agents/${AGENT}/positions/${XYZ.instrument.asset_id}/sell`)).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor(`/agents/${AGENT}/orders/${SWING.orders[0].client_order_id.slice(4)}`)).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor(`/agents/${AGENT}/decisions/cid_01JB5GQ`)).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor(`/agents/${AGENT}/approvals/${APPROVAL_IDS.swingXyz}`)).rejects.toThrow("NEXT_NOT_FOUND");
-    await expect(pageFor("/backtests/bt.1")).rejects.toThrow("NEXT_NOT_FOUND");
+  it("sends an agent id of the wrong shape, and the old tabs, to not found", async () => {
+    await expect(pageFor("/agents/nope")).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/orders`)).rejects.toThrow("no page");
+    await expect(pageFor("/messages")).rejects.toThrow("no page");
   });
 });
 
 describe("titles", () => {
   const generic = /^[A-Z][a-z]+( [a-z]+)*$/;
 
-  it("keeps static titles generic", () => {
-    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design, positions, backtest]) {
+  it("keeps static titles generic: no agent, instrument or amount", () => {
+    for (const mod of [home, setup, agent, approval, settings, design]) {
       const title = mod.metadata.title;
       const text = typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
       expect(text).toMatch(generic);
-    }
-  });
-
-  it("names agent sections by section, never by agent", async () => {
-    for (const s of AGENT_SECTIONS.filter((x) => x.key !== "overview")) {
-      const meta = await agentSection.generateMetadata({ params: Promise.resolve({ agentId: AGENT, section: s.key.split("/") }) });
-      expect(meta.title).toBe(s.label);
-    }
-  });
-
-  it("names records by kind, never by agent, instrument or ID", async () => {
-    const expected = [RECORD_TITLE.position, RECORD_TITLE["close-position"], RECORD_TITLE.position, RECORD_TITLE.order, RECORD_TITLE.order, RECORD_TITLE.decision];
-    for (const [i, path] of RECORDS.entries()) {
-      const [, , agentId, ...section] = path.split("/");
-      const meta = await agentSection.generateMetadata({ params: Promise.resolve({ agentId, section }) });
-      expect(meta.title, path).toBe(expected[i]);
-      expect(String(meta.title)).toMatch(generic);
     }
   });
 });
 
 /** PX-11, restated here without `routeNeeds`, so the two can disagree and fail. */
 function mayOpen(role: Role, path: string): boolean {
-  const stop = /\/(kill-switch|release|stop-all|close-all)$/.test(path) || /^\/agents\/[^/]+\/positions\/[^/]+\/close$/.test(path);
-  const auditPath = path === "/audit" || path.startsWith("/audit/");
+  const stop = /\/(kill-switch|release|stop-all|close-all)$/.test(path);
+  const workspace = path === "/settings" || path === "/design";
   switch (role) {
     case "owner":
     case "operator":
       return true;
     case "approver":
-      return !stop;
     case "viewer":
-      return !stop && !auditPath;
+      return !stop;
     case "auditor":
-      return auditPath;
+      return workspace;
     default: {
       const unhandled: never = role;
       throw new Error(`unhandled role ${String(unhandled)}`);
@@ -216,18 +121,16 @@ describe("role-based route access (PX-11)", () => {
       }
 
       for (const href of internalHrefs()) expect(canOpen(role, href), `${href} shown at ${path}`).toBe(true);
-      const [home] = screen.getAllByRole("link", { name: /^Owlhead, / });
-      expect(home).toHaveAttribute("href", homeFor(role).href);
+      const [owl] = screen.getAllByRole("link", { name: /^Owlhead, / });
+      expect(owl).toHaveAttribute("href", homeFor(role).href);
     },
   );
 
-  it("tells an auditor the journal and exports are theirs, and sends them there", async () => {
+  it("sends an auditor to Settings, the one screen theirs", async () => {
     setPathname("/");
     renderWithRuntime(<AppShell>{await pageFor("/")}</AppShell>, "normal", { role: "auditor" });
     const denied = screen.getByRole("main").querySelector("[data-slot=access-denied]")!;
-    expect(denied).toHaveTextContent("you see the journal and its exports, and nothing that acts");
-    expect(within(denied as HTMLElement).getByRole("link", { name: "Go to the audit" })).toHaveAttribute("href", "/audit");
-    expect(screen.getByRole("link", { name: "Owlhead, audit" })).toHaveAttribute("href", "/audit");
+    expect(within(denied as HTMLElement).getByRole("link", { name: "Go to the settings" })).toHaveAttribute("href", "/settings");
   });
 
   it.each(ROLE_IDS.filter((role) => can(role, "stop.open")).flatMap((role) => ["/", `/agents/${AGENT_IDS.btc}`].map((path) => [role, path] as const)))(
@@ -242,7 +145,7 @@ describe("role-based route access (PX-11)", () => {
     },
   );
 
-  it.each(ROLE_IDS)("as %s, the sidebar and command palette list exactly the screens the role may open", (role) => {
+  it.each(ROLE_IDS)("as %s, the dock and command palette list exactly the screens the role may open", (role) => {
     for (const s of SCREENS) expect(can(role, s.needs), s.href).toBe(canOpen(role, s.href));
   });
 });

@@ -6,23 +6,21 @@ const STOP_RECORDS = new Set(["kill-switch", "release", "stop-all", "close-all"]
 /**
  * What a role needs to open a path (PX-11). The shell renders an access-denied state in place of a
  * page the role may not open, so hiding a link is never the only guard. Auditors hold only
- * `audit.view`: they see the journal and exports, and nothing that acts. The stop records and the
- * close-position page act on the account, so they need `stop.full`. Paths with no page return
- * null and fall through to not-found.
+ * `audit.view`, which no screen of the app serves now (DEC-2293): they read the journal through
+ * the workspace API. The stop records act on the account, so they need `stop.full`. Paths with no
+ * page return null and fall through to not-found.
  */
 export function routeNeeds(pathname: string): Capability | null {
-  const [head, second, third, fourth, fifth] = pathname.split("/").filter(Boolean);
+  const [head, second, third] = pathname.split("/").filter(Boolean);
   if (head === undefined) return "agents.view";
   if ((head === "agents" || head === "connections") && second && third && STOP_RECORDS.has(third)) return "stop.full";
-  if (head === "agents" && third === "positions" && fourth && fifth === "close") return "stop.full";
   switch (head) {
     case "agents":
     case "approvals":
-    case "backtests":
+    case "new":
       return "agents.view";
-    case "audit":
-      return "audit.view";
     case "settings":
+    case "connections":
     case "design":
       return "workspace.view";
     default:
@@ -35,9 +33,8 @@ export function canOpen(role: Role, pathname: string): boolean {
   return needs === null || can(role, needs);
 }
 
-/** Where a role starts: the dashboard, or for an auditor the journal. */
+/** Where a role starts: Home, or Settings for a role that sees no agents. */
 export function homeFor(role: Role): { href: string; label: string } {
-  if (can(role, "agents.view")) return { href: "/", label: "dashboard" };
-  if (can(role, "audit.view")) return { href: "/audit", label: "audit" };
-  return { href: "/settings", label: "workspace" };
+  if (can(role, "agents.view")) return { href: "/", label: "home" };
+  return { href: "/settings", label: "settings" };
 }

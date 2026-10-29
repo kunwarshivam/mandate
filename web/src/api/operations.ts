@@ -14,7 +14,7 @@ import type { Operation } from "./types";
 export interface DocumentedOperation {
   /** A read's name, or the command's `Operation`. */
   id: string;
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   /** The route under `/v1/workspaces/{ws}`, with `{name}` for each path id; or, when `outside`, the whole path. */
   route: `/${string}`;
   /** A route outside the workspace prefix (§4.10). */
@@ -95,12 +95,27 @@ const OTHERS: readonly DocumentedOperation[] = [
   { id: "passkey_enrol", method: "POST", route: ENROL_ROUTE, query: [], section: "§3.6, DEC-2108" },
 ];
 
-/** The ids of `OTHERS`, which are not commands of `client.ts`'s `OPERATIONS`. */
-export const NOT_COMMANDS: ReadonlySet<string> = new Set(OTHERS.map((op) => op.id));
+/** The agent's chat (§4.6.2, DEC-2293): Home, a thread with an agent or a setup, Stop, goals, and the chat settings. */
+const CHAT: readonly DocumentedOperation[] = [
+  { id: "chat_home", method: "GET", route: "/home", query: [], section: "§4.6.2" },
+  { id: "chat_thread", method: "GET", route: "/agents/{agent}/messages", query: ["after"], section: "§4.6.2" },
+  { id: "chat_send", method: "POST", route: "/agents/{agent}/messages", query: [], section: "§4.6.2" },
+  { id: "chat_stop", method: "POST", route: "/agents/{agent}/runs/{run}/stop", query: [], section: "§4.6.2" },
+  { id: "chat_goals", method: "GET", route: "/agents/{agent}/goals", query: [], section: "§4.6.2" },
+  { id: "chat_models", method: "GET", route: "/models", query: [], section: "§4.6.2" },
+  { id: "chat_settings", method: "GET", route: "/agents/{agent}/settings", query: [], section: "§4.6.2" },
+  { id: "chat_settings_save", method: "PUT", route: "/agents/{agent}/settings", query: [], section: "§4.6.2" },
+  { id: "setup_send", method: "POST", route: "/setup/messages", query: ["setup_id"], section: "§4.6.2" },
+  { id: "setup_thread", method: "GET", route: "/setup/{setup}/messages", query: ["after"], section: "§4.6.2" },
+];
+
+/** The ids of `OTHERS` and `CHAT`, which are not commands of `client.ts`'s `OPERATIONS`. */
+export const NOT_COMMANDS: ReadonlySet<string> = new Set([...OTHERS, ...CHAT].map((op) => op.id));
 
 export const WEB_OPERATIONS: readonly DocumentedOperation[] = [
   ...READS,
   ...OTHERS,
+  ...CHAT,
   ...(Object.keys(OPERATIONS) as Operation[]).map((id) => ({ id, method: "POST" as const, route: OPERATIONS[id], query: [], section: COMMAND_SECTIONS[id] })),
 ];
 

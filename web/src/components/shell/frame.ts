@@ -2,9 +2,10 @@
 export const PAGE_FRAME = "mx-auto w-full max-w-(--content-max) px-(--page-x) pt-(--page-top) pb-10";
 
 /**
- * Messages fills the window edge to edge (DEC-481): no gutter and no content width, its panes each
- * scrolling on their own between the header and the dock or the tab bar, as a chat app does.
+ * A thread fills the window edge to edge (DEC-481, DEC-2293): an agent's and a new agent's setup,
+ * with no gutter and no content width, scrolling on its own between the header and the dock or the
+ * tab bar, as a chat app does. An agent's record screens (its kill switch) keep the page frame.
  */
 export function fullBleed(pathname: string): boolean {
-  return /^\/messages(\/|$)/.test(pathname);
+  return /^\/(new|agents\/[^/]+)\/?$/.test(pathname) && pathname !== "/agents/new";
 }
