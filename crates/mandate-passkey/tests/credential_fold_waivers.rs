@@ -463,16 +463,12 @@ fn oracle(steps: &[Step]) -> Option<u64> {
 }
 
 /// Over random streams of enrolments, removals, assertions and waivers, the fold's first
-/// rule-318 break is the oracle's. The runner keeps no failure file (DEC-381).
+/// rule-318 break is the oracle's. Another member's assertion inside the cool-off is checked
+/// first, so the comparison never rests on the runner happening to draw one. The runner keeps
+/// no failure file (DEC-381).
 #[test]
 fn the_first_rule_318_break_is_the_oracles() {
-    let config = ProptestConfig {
-        cases: 512,
-        failure_persistence: None,
-        ..ProptestConfig::default()
-    };
-    let mut runner = TestRunner::new(config);
-    let outcome = runner.run(&prop::collection::vec(step(), 0..12), |steps| {
+    let matches_the_oracle = |steps: Vec<Step>| -> Result<(), TestCaseError> {
         let records: Vec<CredentialRecord> = steps
             .iter()
             .zip(1_u64..)
@@ -481,7 +477,19 @@ fn the_first_rule_318_break_is_the_oracles() {
         let fold = CredentialFold::new(records);
         prop_assert_eq!(fold.first_waiver_break(), Ok(oracle(&steps)));
         Ok(())
-    });
+    };
+    if let Err(failure) =
+        matches_the_oracle(vec![Step::Enrol(0, 0, true), Step::Assert(1, 0, 0, 0)])
+    {
+        panic!("another member's assertion inside the cool-off: {failure}");
+    }
+    let config = ProptestConfig {
+        cases: 512,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    };
+    let mut runner = TestRunner::new(config);
+    let outcome = runner.run(&prop::collection::vec(step(), 0..12), matches_the_oracle);
     if let Err(failure) = outcome {
         panic!("{failure}");
     }

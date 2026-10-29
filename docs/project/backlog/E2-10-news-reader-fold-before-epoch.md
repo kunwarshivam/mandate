@@ -1,6 +1,6 @@
 # E2-10 follow-up: the news reader folds its stream before it takes the writer epoch
 
-- **E2-10d (Proposed, M5; lane SC)** As the founder, I want a news reader that cannot run to leave
+- **E2-10d (Done, M5; lane SC; DEC-2287)** As the founder, I want a news reader that cannot run to leave
   a healthy earlier reader writing, so that one bad start does not stop the workspace's news.
   Today the reader takes its writer epoch first and folds its stream second (DEC-2286). So a new
   reader that finds a stored item it cannot read has already fenced the earlier writer, and then
