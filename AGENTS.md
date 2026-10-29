@@ -23,7 +23,7 @@ reading that loosens the spec toward the code still goes to the founder.
 | How is the system structured? | [docs/HLD.md](docs/HLD.md) |
 | What must v1 do? | [docs/product/04-prd-v1.md](docs/product/04-prd-v1.md) |
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md) and the rows not yet folded into it under [docs/project/backlog/](docs/project/backlog/README.md) (DEC-2373), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
-| Where does the work stand, and what is next? | [docs/project/08-work-tracker.md](docs/project/08-work-tracker.md), one page, updated at the end of every session; how the work ran, with every PR, is [docs/project/11-work-log.md](docs/project/11-work-log.md) |
+| Where does the work stand, and what is next? | [docs/project/08-work-tracker.md](docs/project/08-work-tracker.md), one page |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) for DEC-01 to DEC-302, and one file per decision under [docs/project/decisions/](docs/project/decisions/README.md) after that (DEC-344) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
 | What is a mandate, which invariants must hold, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
@@ -100,14 +100,18 @@ missed mutants, and green CI (DEC-79):
 
 ## How to work
 
-1. Pick one story from the backlog that no open claim issue holds, and claim it
-   (`.cursor/skills/mandate-mode/playbooks/coordination.md`). One change implements one story.
-2. In the change description, cite the story ID, the PRD requirement, and the HLD section.
-3. Write tests first for safety-critical paths; include property-based tests for invariants.
-4. Keep changes small enough to review in one sitting.
-5. Update docs in the same change when behavior, interfaces, or decisions change.
-6. Emit journal events for every new state change.
-7. Run the full local check before proposing the change (see below).
+The founder's ruling of 2026-10-29: build the product, not the process.
+
+1. **One PR per feature.** Spec changes, tests and code go together in one change. No separate
+   spec, tests and implementation PRs.
+2. **Tests first only on the safety-critical paths** above, with property-based tests for their
+   invariants. Everywhere else, tests ship with the code.
+3. **Don't hand-build what a model does.** Understanding free text (chat, describing an agent,
+   research) goes to the model through the model gateway; deterministic code validates and acts on
+   what it proposes (rule 4). No rule-based language parsers.
+4. **Write a decision only** for a founder ruling or an architecture choice. Ordinary engineering
+   choices go in the PR description.
+5. Emit journal events for every new state change, and run `cargo xtask check` before proposing.
 
 ## Working with agents
 
@@ -146,36 +150,15 @@ Leave the code in a state you would want the next agent to copy: one paved path 
 workarounds, and debt either fixed or recorded in the backlog, as a new row's own file under
 `docs/project/backlog/` (DEC-2373).
 
-## Getting it right the first time (specs and safety-critical design)
+## Getting it right the first time (safety-critical designs)
 
-The mandate spec needed a rewrite after every review round (v0.1 to v0.3). The findings had eight
-causes; each rule below closes one of them. Follow these before sending any spec, schema, or
-safety-critical design for review.
-
-| Cause, with an example from the mandate spec | Rule |
-|---|---|
-| **Local fixes, no global re-check.** v0.2 scaled the high-water mark on allocation changes but left contributed capital additive, so a withdrawal could trip the lifetime floor, contradicting the spec's own sentence two lines earlier | **Invariants first.** Write the properties the design must always hold (for example, "an allocation change never triggers or lifts a limit") before writing rules. After every change, re-check every invariant, not only the finding being fixed |
-| **Claims stated, never tested.** "Can neither lift nor trigger a limit" was asserted, not checked | **Every claim is a test.** Each invariant and each "never" or "always" in the text has a property-based test in the reference implementation. Fuzz random sequences of events (marks, fills, allocation changes, acknowledgments, version changes, clock ticks) and assert the invariants |
-| **Examples that break their own rules.** A base mandate's `target_qty` cost more than its allocation; a case titled "fraction cap binds" did not bind; v0.1's V-021 rejected the spec's own example | **Validate fixtures against the rules.** Every example and base fixture passes every rule it is not meant to fail; every case asserts the condition its title claims, and is recomputed from the rules, not typed |
-| **Cross-spec contracts not traced.** The agent flatten reused the account-wide kill switch (cancel-all, close-position); units differed (basis points vs fraction); two specs gave different outcomes for the same limit | **Trace every reference.** For each rule that relies on another spec, read that section and confirm scope, units, and outcome match; update both sides in the same change |
-| **Lifecycles not finished.** Nothing said what happens after a flatten, after a goal completes, after an acknowledgment, or at a time boundary | **Walk every state to its exit.** For each state and limit: how it is entered, what it blocks, how it ends, who can end it, and what happens at session close, midnight, restart, and version change |
-| **No adversary.** Order splitting, redeploying to reset limits, deposits to lift rungs, one bad tick, and a model outage enlarging orders were all found by reviewers | **Attack it yourself.** Before review, list how a careless user, a bad model, a malicious insider, and a bad market tick could exceed intended risk or imply platform advice; each must be blocked or disclosed |
-| **Decisions hidden inside drafts, and scope creep.** About a third of each round were design choices only the founder can make, and each round added features that became new surface | **Separate decisions from defects.** List open design choices before drafting and record each in the decision log (agents decide all but those DEC-79 reserves for the founder). While fixing findings, add no features; propose them separately |
-| **Tests that pass while checking nothing.** Fuzz checks that reused the implementation's own predicate, or reset their own timer on every bounce, could not catch the regressions they named | **Independent oracles.** A property test computes the expected result its own way (a separate accumulator, state derived from journaled events), and each oracle is shown to fail on a seeded bug before it is trusted |
-
-**Before external review:**
-
-1. Run the invariant fuzz, schema and fixture validation, and a link check. For the mandate spec:
-   `python3 reference/mandate/generate.py`, `python3 reference/mandate/check_cases.py`, and
-   `python3 reference/mandate/fuzz.py <seed>` for several seeds, and
-   `python3 reference/mandate/mutants.py` (every seeded bug must be caught); requirements in
-   `reference/mandate/requirements.txt`.
-2. Self-review against the three role checklists: engineer (determinism, ordering, time base,
-   replay, every input listed), risk (loopholes, gap risk, lifecycle), and compliance (who chooses
-   what, records, wording).
-
-**Freeze rule:** after an external review, fix only blockers and majors. Minors go to the backlog,
-one file each under `docs/project/backlog/`.
+For a spec, schema or design on a safety-critical path: write its invariants first and re-check
+all of them after every change; give every "never" or "always" a property-based test with an
+independent oracle, shown to fail on a seeded bug; make every fixture pass the rules it is not meant
+to fail; trace every cross-spec reference; walk every state to its exit; and attack it yourself (a
+careless user, a bad model, an insider, a bad tick). For the mandate spec, run
+`python3 reference/mandate/generate.py`, `check_cases.py`, `fuzz.py <seed>` for several seeds, and
+`mutants.py` before review.
 
 ## Conventions
 
