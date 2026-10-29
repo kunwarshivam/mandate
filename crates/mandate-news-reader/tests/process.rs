@@ -12,6 +12,7 @@
 )]
 
 use std::io::{BufRead, BufReader, Read};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -308,4 +309,49 @@ fn a_recorded_start_runs_at_dev_and_ci_alone_on_a_readable_recording_over_the_jo
         "news_reader_start_failed: recorded_news_malformed\n"
     );
     std::fs::remove_file(&malformed).ok();
+}
+
+/// R2 on #2917: a recorded start given the vault's flags as well still starts recorded and never
+/// reaches the vault: it goes past the tier and the recording to the journal, and a vault
+/// listening at the address it names, with the news reader's credentials mounted for it, is never
+/// connected to.
+#[test]
+fn a_recorded_start_never_reaches_the_vault_its_flags_name() {
+    let vault = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    vault.set_nonblocking(true).unwrap();
+    let address = format!("https://{}", vault.local_addr().unwrap());
+    let dir = scratch("recorded-vault-dir");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("ca.crt"), include_str!("fixtures/vault-ca.pem")).unwrap();
+    for file in ["news-reader.role-id", "news-reader.secret-id"] {
+        let path = dir.join(file);
+        std::fs::write(&path, "fixture\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let recording = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/cell/news-reader/recorded-news.json"
+    );
+    let socket = scratch("recorded-vault.sock");
+    let mut args = run_args(&socket, &["--follow", "agent_a=acct_1"]);
+    args.extend(
+        [
+            "--recorded",
+            recording,
+            "--vault-address",
+            &address,
+            "--vault-dir",
+            &dir.to_string_lossy(),
+        ]
+        .map(str::to_owned),
+    );
+    let (status, stderr) = refused_at(Some("ci"), &args);
+    assert_eq!(stderr, "news_reader_start_failed: journal_dsn_missing\n");
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(
+        vault.accept().map(|_| ()).map_err(|e| e.kind()),
+        Err(std::io::ErrorKind::WouldBlock),
+        "the recorded start never connected to the vault"
+    );
+    std::fs::remove_dir_all(&dir).ok();
 }
