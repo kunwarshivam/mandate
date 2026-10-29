@@ -23,9 +23,9 @@ use common::{
 use mandate_accounting::{AssetClass, Side};
 use mandate_canon::Value;
 use mandate_runtime::{
-    ActorKind, Autonomy, Classified, DecisionClip, EventDraft, EventId, FoldedEvent, Input,
-    MandateView, OrderExecution, OrderPlan, OwnerRequest, Proposal, Purpose, Requester,
-    SignalInputs, TimeInForce,
+    ActorKind, Autonomy, Classified, DecisionClip, Deferral, DryRunVerdict, EventDraft, EventId,
+    FoldedEvent, Input, MandateView, OrderExecution, OrderPlan, OwnerRequest, Proposal, Purpose,
+    Requester, SignalInputs, TimeInForce,
 };
 use proptest::prelude::{Just, Strategy, any, prop_oneof};
 use proptest::test_runner::{Config as ProptestConfig, TestRunner};
@@ -104,6 +104,19 @@ impl OrderPlan for OwnerPlan {
                 protection: None,
             }),
         })
+    }
+}
+
+/// A dry run that allows with a check left to the binding gate, as the cell's always does
+/// (DEC-2388).
+struct DeferGate;
+
+impl mandate_runtime::GateDryRun for DeferGate {
+    fn check(&self, _proposal: &Proposal) -> DryRunVerdict {
+        DryRunVerdict::AllowDeferring {
+            deferred: BTreeSet::from([Deferral::AgentEquity]),
+            liquidity: None,
+        }
     }
 }
 
@@ -266,9 +279,12 @@ fn an_owners_buy_is_decided_as_the_owners_request_and_proposed() {
     );
 }
 
+/// DEC-2858 item 10, founder-ruled: an owner's own request is its own approval. Under a mandate
+/// that would ask, the owner's Send is the confirmation, so the decision runs `auto`, labelled
+/// `owner_request`, and the intent is handed; no approval is ever requested of the owner.
 #[test]
 #[ignore = "pending E10-30"]
-fn an_owners_request_the_mandate_asks_about_is_asked_with_no_score() {
+fn an_owners_request_the_mandate_would_ask_about_runs_as_the_owners_own() {
     let (ids, gate, plan, view) = (
         TestIds,
         AllowGate,
@@ -279,12 +295,66 @@ fn an_owners_request_the_mandate_asks_about_is_asked_with_no_score() {
     let mut shell = started(&ports);
     let request = Request::owner_buy(1);
     let ran = tail(&mut shell, &request.event(), &ports);
+    assert_eq!(ran.draft_types(), vec!["DecisionMade", "IntentProposed"]);
+    let decision = only(&ran, "DecisionMade");
+    assert_owner_decision(decision, &request.id(), "owner");
+    assert_eq!(member(decision, "autonomy"), &text("auto"));
+    assert_eq!(member(decision, "decided_by"), &text("owner_request"));
+    assert_eq!(ran.handed.len(), 1, "the owner's order is handed at once");
+}
+
+/// A dry run that deferred checks to the binding gate asks about any other opening (mandate spec
+/// §6.2 step 5c); the owner's own request still runs `auto`, the binding gate judging every
+/// deferred check at submission. A client's is asked as ever.
+#[test]
+#[ignore = "pending E10-30"]
+fn an_owners_request_the_dry_run_deferred_runs_and_a_clients_is_asked() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        DeferGate,
+        OwnerPlan::classified(Autonomy::Auto),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&ports);
+    let owners = Request::owner_buy(1);
+    let ran = tail(&mut shell, &owners.event(), &ports);
+    assert_eq!(ran.draft_types(), vec!["DecisionMade", "IntentProposed"]);
+    let decision = only(&ran, "DecisionMade");
+    assert_eq!(member(decision, "dry_run"), &text("allow"));
+    assert_eq!(member(decision, "autonomy"), &text("auto"));
+    assert_eq!(member(decision, "decided_by"), &text("owner_request"));
+    let clients = Request::client_buy(2);
+    let ran = tail(&mut shell, &clients.event(), &ports);
+    let decision = only(&ran, "DecisionMade");
+    assert_eq!(member(decision, "autonomy"), &text("ask"));
+    assert!(
+        ran.handed.is_empty(),
+        "a client's opening runs only once asked"
+    );
+}
+
+/// A client's request the mandate asks about is asked with no score (DEC-2858 item 2): the
+/// approver is shown who asked, never a model figure that decided nothing.
+#[test]
+#[ignore = "pending E10-30"]
+fn a_clients_request_is_asked_with_no_score() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        OwnerPlan::classified(Autonomy::Ask),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&ports);
+    let request = Request::client_buy(1);
+    let ran = tail(&mut shell, &request.event(), &ports);
     assert_eq!(
         ran.draft_types(),
         vec!["DecisionMade", "ApprovalRequested", "ApprovalDelivered"]
     );
     let decision = only(&ran, "DecisionMade");
-    assert_owner_decision(decision, &request.id(), "owner");
+    assert_owner_decision(decision, &request.id(), "client");
     assert_eq!(member(decision, "autonomy"), &text("ask"));
     let asked = only(&ran, "ApprovalRequested");
     assert_eq!(asked.causation_id.as_ref(), Some(&decision.event_id));
@@ -560,11 +630,19 @@ enum Step {
     Restart,
 }
 
-/// A run: how the mandate classifies, whether the dry run allows, and the steps.
+/// What the dry run answers every request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Allows,
+    Defers,
+    Denies,
+}
+
+/// A run: how the mandate classifies, what the dry run answers, and the steps.
 #[derive(Debug, Clone)]
 struct Case {
     autonomy: Autonomy,
-    allows: bool,
+    verdict: Verdict,
     steps: Vec<Step>,
 }
 
@@ -579,16 +657,18 @@ fn cases() -> impl Strategy<Value = Case> {
         2 => (0_usize..8).prop_map(Step::Repeat),
         1 => Just(Step::Restart),
     ];
-    (
-        autonomy,
-        any::<bool>(),
-        proptest::collection::vec(step, 1..12),
-    )
-        .prop_map(|(autonomy, allows, steps)| Case {
+    let verdict = prop_oneof![
+        Just(Verdict::Allows),
+        Just(Verdict::Defers),
+        Just(Verdict::Denies)
+    ];
+    (autonomy, verdict, proptest::collection::vec(step, 1..12)).prop_map(
+        |(autonomy, verdict, steps)| Case {
             autonomy,
-            allows,
+            verdict,
             steps,
-        })
+        },
+    )
 }
 
 /// DEC-2858's invariants over every run, checked against the journal the shell kept rather than
@@ -597,13 +677,19 @@ fn cases() -> impl Strategy<Value = Case> {
 ///   and its decision names it as `causation_id` with its own `requested_by`;
 /// - no owner request's decision is ever `requested_by` `agent`, nor carries a score;
 /// - a client's opening is never `auto`, and an intent follows exactly the `auto` allowed decisions,
-///   one each, caused by it, at the plan's quantity.
+///   one each, caused by it, at the plan's quantity;
+/// - an owner's own request is never asked (DEC-2858 item 10): a deny stays a deny, the dry run's
+///   denial records no autonomy, and every ask, the rules' or the deferral's, runs `auto` as
+///   `owner_request`.
 fn one_run(case: &Case) -> Result<(), String> {
     let (ids, view) = (TestIds, universe(&["AAPL"]));
     let plan = OwnerPlan::classified(case.autonomy);
-    let allow = AllowGate;
-    let deny = DenyGate("max_order_size");
-    let gate: &dyn mandate_runtime::GateDryRun = if case.allows { &allow } else { &deny };
+    let (allow, defer, deny) = (AllowGate, DeferGate, DenyGate("max_order_size"));
+    let gate: &dyn mandate_runtime::GateDryRun = match case.verdict {
+        Verdict::Allows => &allow,
+        Verdict::Defers => &defer,
+        Verdict::Denies => &deny,
+    };
     let ports = ports(&ids, gate, &plan, &view);
     let mut shell = started(&ports);
     let mut sent: Vec<(FoldedEvent, bool)> = Vec::new();
@@ -659,6 +745,29 @@ fn one_run(case: &Case) -> Result<(), String> {
         }
         if *client && decision.payload.get("autonomy") == Some(&text("auto")) {
             return Err("a client's opening ran AUTO".to_owned());
+        }
+        let owners_expected = match (case.verdict, case.autonomy) {
+            (Verdict::Denies, _) => (Value::Null, Value::Null),
+            (_, Autonomy::Deny) => (text("deny"), text("rule:owner-deny")),
+            (Verdict::Allows, Autonomy::Auto) => (text("auto"), text("rule:owner-auto")),
+            _ => (text("auto"), text("owner_request")),
+        };
+        let decided = (
+            decision
+                .payload
+                .get("autonomy")
+                .cloned()
+                .unwrap_or(Value::Null),
+            decision
+                .payload
+                .get("decided_by")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        if !*client && decided != owners_expected {
+            return Err(format!(
+                "the owner's request decided {decided:?}, not {owners_expected:?} (item 10)"
+            ));
         }
         if decision.payload.get("qty") != Some(&text(plan.qty)) {
             return Err(format!(
