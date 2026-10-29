@@ -286,7 +286,6 @@ fn step_up_fails_closed_from_the_first_rule_318_break_and_route_two_reads_no_wai
 /// next `seq`. A waiver of the same challenge after any other row (here one at `seq` 3 that no
 /// credential record maps) does not settle it: the rule breaks at the assertion, for the member.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_after_another_row_does_not_settle_its_assertion() {
     let fold = CredentialFold::new([
         record(1, Step::Enrol(0, 0, true)),
