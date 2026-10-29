@@ -9,6 +9,7 @@ extend-ignore-re = [
     "B[A-Za-z0-9_-]{86}",           # base64url uncompressed P-256 keys in RFC test vectors
     "harware key",                  # the founder's verbatim answer in DEC-2605 row 8, quoted as given
     "go nd fix",                    # the founder's verbatim ruling in DEC-2151, quoted as given
+    "who asked ypou build this",    # the founder's verbatim ruling in DEC-2858 item 10, quoted as given
 ]
 
 [default.extend-words]
