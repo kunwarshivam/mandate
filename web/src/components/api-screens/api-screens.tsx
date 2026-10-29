@@ -17,6 +17,7 @@ import { APPROVE_REFUSED, FINAL_UNDELIVERED, refusedText, undeliveredText } from
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { AgentChat } from "./agent-chat";
 import { AgentTheses } from "./theses";
 
 /**
@@ -261,6 +262,7 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />
           </Section>
+          <AgentChat agent={agent} />
           <AgentTheses agentId={agent.agent_id} />
           <AgentActivity agentId={agent.agent_id} />
           <Section title="Limit usage">
