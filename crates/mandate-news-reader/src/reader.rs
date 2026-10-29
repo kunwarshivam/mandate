@@ -17,6 +17,13 @@
 //! is not polled and is counted. A round with nothing to ask, a stream that cannot be read, or a
 //! failed request pauses the reader for [`crate::poll::COOLDOWN_S`].
 //!
+//! **The receipt lead** (DEC-2289). A round whose receipt, the host clock's reading, runs more
+//! than [`RECEIPT_LEAD_S`] past the step's trusted time asks and journals nothing, so no
+//! `knowledge_at` is set past the trusted time by more than the lead, plus the sources' 1 s future
+//! skew (`mandate_sources::ingest::FUTURE_SKEW_MS`) a vendor time may run past its receipt. It is counted, alerted once
+//! an episode as [`RECEIPT_AHEAD`], and pauses the reader as a failed request does. A round within
+//! the bound ends the episode. Every pause runs by the trusted time.
+//!
 //! **An item** is stored and journaled as [`crate::items`] says.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -45,6 +52,61 @@ use crate::watch::followed;
 
 /// The news source the reader fetches (allowlist version 3, DEC-2276).
 pub const NEWS_SOURCE: &str = "alpaca.news";
+
+/// How far a round's receipt may run ahead of the trusted time before the round is refused
+/// (DEC-2289).
+pub const RECEIPT_LEAD_S: i64 = 60;
+
+/// The alert a reader raises once an episode of receipts past [`RECEIPT_LEAD_S`] begins.
+pub const RECEIPT_AHEAD: &str = "receipt_ahead";
+
+/// A step's two readings of the time (DEC-2289): `now`, the host clock, which stamps a receipt,
+/// and `trusted`, what the caller holds to be the time without that clock's word alone. The binary
+/// takes the host clock at start plus a monotonic clock's elapsed time since.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Clock {
+    pub now: UtcNanos,
+    pub trusted: UtcNanos,
+}
+
+impl Clock {
+    /// The two readings agreeing at `now`.
+    #[must_use]
+    pub fn agreed(now: UtcNanos) -> Self {
+        Self { now, trusted: now }
+    }
+
+    /// The trusted time `elapsed` after `start`, or `start` itself past the representable range,
+    /// so a trusted time that cannot be formed is the earliest it can be and holds a round rather
+    /// than admits one.
+    #[must_use]
+    pub fn trusted_after(start: UtcNanos, elapsed: Duration) -> UtcNanos {
+        let nanos = u64::from(start.nanos()).saturating_add(u64::from(elapsed.subsec_nanos()));
+        let carry = i64::from(nanos >= NANOS_PER_SEC);
+        let secs = i64::try_from(elapsed.as_secs())
+            .ok()
+            .and_then(|secs| start.secs().checked_add(secs))
+            .and_then(|secs| secs.checked_add(carry));
+        secs.and_then(|secs| {
+            let nanos = u32::try_from(nanos.checked_rem(NANOS_PER_SEC)?).ok()?;
+            UtcNanos::from_parts(secs, nanos).ok()
+        })
+        .unwrap_or(start)
+    }
+}
+
+const NANOS_PER_SEC: u64 = 1_000_000_000;
+
+/// Whether `clock`'s receipt is at most [`RECEIPT_LEAD_S`] past its trusted time; a bound past
+/// the representable range admits nothing.
+fn within_lead(clock: Clock) -> bool {
+    clock
+        .trusted
+        .secs()
+        .checked_add(RECEIPT_LEAD_S)
+        .and_then(|secs| UtcNanos::from_parts(secs, clock.trusted.nanos()).ok())
+        .is_some_and(|bound| clock.now <= bound)
+}
 
 /// What a reader runs.
 #[derive(Debug, Clone)]
@@ -79,6 +141,9 @@ pub struct Counts {
     pub fetch_failed: BTreeMap<&'static str, u64>,
     /// Chunks of a round that stopped at the page cap with a page still to follow.
     pub page_caps: u64,
+    /// Rounds refused because their receipt ran more than [`RECEIPT_LEAD_S`] ahead of the trusted
+    /// time (DEC-2289).
+    pub receipt_ahead: u64,
 }
 
 /// One workspace's news reader.
@@ -99,11 +164,17 @@ pub struct NewsReader<S, A, T> {
     pub(crate) held: BTreeSet<String>,
     pub(crate) last_known: Option<UtcNanos>,
     round: Option<Round>,
-    /// The reader asks nothing before this, after a round it could not start or that failed.
+    /// The reader asks nothing before the trusted time reaches this, after a round it could not
+    /// start, that failed, or that ran past the receipt lead: the trusted time, so a host clock
+    /// that jumps ahead and back neither shortens nor lengthens a pause (DEC-2289).
     paused_until: Option<UtcNanos>,
     pub(crate) pending: Option<Pending>,
     pub(crate) lifecycle: Lifecycle,
     pub(crate) counts: Counts,
+    /// The operator alerts raised and not yet taken, each a fixed code.
+    alerts: Vec<&'static str>,
+    /// Whether the last round judged was held past the receipt lead, already alerted.
+    ahead: bool,
 }
 
 impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
@@ -155,6 +226,8 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             pending: None,
             lifecycle: Lifecycle::new(Kind::Writer, config.liveness, now),
             counts: Counts::default(),
+            alerts: Vec::new(),
+            ahead: false,
         };
         if config.environment != Environment::Paper || this.source.is_none() {
             this.lifecycle.observe(now, Input::Failed);
@@ -213,20 +286,31 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
         this
     }
 
-    /// One step at the host clock's reading `now`: a retried batch first, then at most one page
-    /// asked and its new items stored. Nothing is done once the reader has exited, and nothing but
+    /// One step at `clock`: a retried batch first, then, if the receipt is within the lead of the
+    /// trusted time, at most one page asked and its new items stored. Nothing is done once the reader has exited, and nothing but
     /// a heartbeat while it is not ready or paused.
-    pub async fn step(&mut self, now: UtcNanos) {
+    pub async fn step(&mut self, clock: Clock) {
+        let now = clock.now;
         if self.exited() {
             return;
         }
         self.lifecycle.observe(now, Input::Heartbeat);
-        let paused = self.paused_until.is_some_and(|until| now < until);
+        let paused = self.paused_until.is_some_and(|until| clock.trusted < until);
         if self.not_ready.is_some() || paused || !self.flush(now) {
             return;
         }
+        if !within_lead(clock) {
+            self.counts.receipt_ahead = self.counts.receipt_ahead.saturating_add(1);
+            if !self.ahead {
+                self.ahead = true;
+                self.alerts.push(RECEIPT_AHEAD);
+            }
+            self.paused_until = cooldown_until(clock.trusted);
+            return;
+        }
+        self.ahead = false;
         let Some(round) = self.round.take().or_else(|| self.next_round(now)) else {
-            self.paused_until = cooldown_until(now);
+            self.paused_until = cooldown_until(clock.trusted);
             return;
         };
         let (Some(auth), Some((source, symbols, ciks))) =
@@ -260,7 +344,7 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             }
             Err(error) => {
                 count(&mut self.counts.fetch_failed, error.code());
-                self.paused_until = cooldown_until(now);
+                self.paused_until = cooldown_until(clock.trusted);
                 return;
             }
         };
@@ -293,6 +377,11 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             Input::Failed
         };
         self.lifecycle.observe(now, last);
+    }
+
+    /// The operator alerts raised since the last take, each a fixed code, oldest first.
+    pub fn take_alerts(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.alerts)
     }
 
     pub fn lifecycle(&self) -> &Lifecycle {
