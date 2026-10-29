@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use mandate_news_reader::{RECEIPT_AHEAD, RECEIPT_LEAD_S};
 use mandate_process::State;
+use mandate_sources::ingest::FUTURE_SKEW_MS;
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
@@ -101,7 +102,7 @@ fn a_host_clock_behind_the_trusted_time_holds_nothing() {
     assert_eq!(reader.counts().receipt_ahead, 0);
 }
 
-/// The pause after a held round is the failed round's cooldown, by the host clock, so a clock
+/// The pause after a held round is the failed round's cooldown, by the trusted time, so a clock
 /// stuck ahead is judged again once each cooldown and never spins; the episode alerts once, and a
 /// round within the bound ends it, so the next episode alerts again. The round that resumes asks
 /// from the stream's last `knowledge_at`, which no held round moved.
@@ -170,12 +171,17 @@ fn an_old_item_on_a_first_poll_is_journaled() {
     assert_eq!(reader.counts().receipt_ahead, 0);
 }
 
-/// The oracle: the journal's latest `knowledge_at` against the step's trusted time and the lead;
-/// `Some` names the breach.
+/// The oracle: the journal's latest `knowledge_at` against the step's trusted time, the lead, and
+/// the sources' future skew a vendor time may run past its receipt; `Some` names the breach.
 fn breach(journal: &Journal, clock: Clock) -> Option<String> {
     let last = last_known(journal)?;
-    (last > plus(clock.trusted, RECEIPT_LEAD_S))
-        .then(|| format!("knowledge_at {last} past trusted {} + lead", clock.trusted))
+    let skew = i64::from(FUTURE_SKEW_MS / 1_000);
+    (last > plus(clock.trusted, RECEIPT_LEAD_S + skew)).then(|| {
+        format!(
+            "knowledge_at {last} past trusted {} + lead + skew",
+            clock.trusted
+        )
+    })
 }
 
 /// The oracle fails on a journal holding an item known past the bound.
@@ -186,8 +192,8 @@ fn the_oracle_catches_an_item_known_past_the_bound() {
     block_on(reader.step(ahead(t0(), RECEIPT_LEAD_S)));
     assert_eq!(breach(&journal, ahead(t0(), RECEIPT_LEAD_S)), None);
     assert!(
-        breach(&journal, Clock::agreed(plus(at, -RECEIPT_LEAD_S - 1))).is_some(),
-        "a trusted time a second earlier puts the stored item past the bound"
+        breach(&journal, Clock::agreed(plus(at, -RECEIPT_LEAD_S - 2))).is_some(),
+        "a trusted time two seconds earlier puts the stored item past the lead and the skew"
     );
 }
 
@@ -253,4 +259,43 @@ fn the_trusted_time_is_the_start_plus_the_elapsed_time() {
             "{elapsed:?}"
         );
     }
+}
+
+/// Every pause runs by the trusted time, not the host clock (DEC-2289 item 4): after a failed
+/// request, with the host clock 20 s ahead of the trusted time and within the lead, the reader asks
+/// nothing until the trusted time is 30 s on, and asks again then.
+#[test]
+fn a_failed_request_pauses_until_the_trusted_time_is_a_cooldown_on() {
+    let (_, transport, mut reader) = ready(&[]);
+    let at = |trusted: i64| Clock {
+        now: plus(t0(), trusted + 20),
+        trusted: plus(t0(), trusted),
+    };
+    block_on(reader.step(at(0)));
+    assert_eq!(transport.sent().len(), 1, "the request the transport fails");
+    assert_eq!(reader.counts().fetch_failed.values().sum::<u64>(), 1);
+    block_on(reader.step(at(29)));
+    assert_eq!(transport.sent().len(), 1, "paused, trusted 29 s on");
+    block_on(reader.step(at(30)));
+    assert_eq!(transport.sent().len(), 2, "asked again, trusted 30 s on");
+}
+
+/// The idle round's pause runs by the trusted time too: with nothing to ask, the reader waits until
+/// the trusted time is 30 s on before it reads its streams for a round again.
+#[test]
+fn an_idle_round_pauses_until_the_trusted_time_is_a_cooldown_on() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    let transport = Recorded::answering(&[one_item(41000017)]);
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    let at = |trusted: i64| Clock {
+        now: plus(t0(), trusted + 20),
+        trusted: plus(t0(), trusted),
+    };
+    block_on(reader.step(at(0)));
+    assert!(transport.sent().is_empty(), "no thesis: nothing to ask");
+    spy(&journal, &shelf);
+    block_on(reader.step(at(29)));
+    assert!(transport.sent().is_empty(), "paused, trusted 29 s on");
+    block_on(reader.step(at(30)));
+    assert_eq!(transport.sent().len(), 1, "a round, trusted 30 s on");
 }

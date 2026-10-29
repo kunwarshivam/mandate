@@ -20,7 +20,8 @@
 //!
 //! **The receipt lead** (DEC-2289). A round whose receipt, the host clock's reading, runs more
 //! than [`RECEIPT_LEAD_S`] past the step's trusted time asks and journals nothing, so no
-//! `knowledge_at` is set past the trusted time by more than the lead. It is counted, alerted once
+//! `knowledge_at` is set past the trusted time by more than the lead, plus the sources' 1 s future
+//! skew (`mandate_sources::ingest::FUTURE_SKEW_MS`) a vendor time may run past its receipt. It is counted, alerted once
 //! an episode as [`RECEIPT_AHEAD`], and pauses the reader as a failed request does. A round within
 //! the bound ends the episode. Every pause runs by the trusted time.
 //!
