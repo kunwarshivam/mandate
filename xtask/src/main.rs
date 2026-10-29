@@ -6914,6 +6914,10 @@ const READ_LINES: &[(&str, &str)] = &[
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
     (
+        ".github/workflows/web.yml",
+        "node scripts/workers.mjs smoke",
+    ),
+    (
         ".github/workflows/web-deploy.yml",
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
