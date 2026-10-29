@@ -165,6 +165,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::real_money::CONTROL.contains(&event_type)
                 || crate::credentials::CONTROL.contains(&event_type)
                 || crate::connection_roles::CONTROL.contains(&event_type)
+                || crate::chat::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -211,6 +212,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::real_money::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::credentials::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::connection_roles::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::chat::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account)
             | (KILL_SWITCH, StreamType::Agent) => None,
@@ -267,6 +269,7 @@ pub(crate) fn payload(
         causation_id,
     )?;
     crate::control_plane::rules(event_type, &payload, actor)?;
+    crate::chat::rules(event_type, &payload, actor)?;
     crate::deployment::rules(event_type, &payload, actor)?;
     crate::gateway::rules(event_type, stream_type, &payload, config_refs, actor)?;
     crate::news::rules(event_type, stream_type, &payload, actor)?;

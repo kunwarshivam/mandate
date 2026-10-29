@@ -25,6 +25,7 @@ mod agent;
 mod artifact;
 mod backtest_records;
 mod catalogue;
+mod chat;
 mod confirmations;
 mod connection_fold;
 mod connection_roles;
