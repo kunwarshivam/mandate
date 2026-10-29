@@ -146,7 +146,7 @@ fn every_recorded_item_about_a_polled_ticker_is_journaled_once_and_no_other() {
     );
     assert_eq!(reader.not_ready(), None);
     for second in 0..600 {
-        block_on(reader.step(plus(t0(), second)));
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
     }
     let stored: Vec<String> = stored(&journal)
         .iter()

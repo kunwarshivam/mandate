@@ -591,13 +591,12 @@ impl<'a> Folded<'a> {
 
     /// Folds one assertion: a kept one raises its credential's last counter and uses its
     /// challenge; a breaking one disables step-up for its member and the credential's holder. An
-    /// assertion of the member's own credential inside its cool-off is owed a waiver by the next
-    /// record (rule 318's converse).
+    /// assertion of a held credential inside its cool-off, whichever member made it, is owed a
+    /// waiver by the next record (rule 318's converse).
     fn assert(&mut self, assertion: &'a Assertion) {
         if self.enrolment(&assertion.credential).is_some_and(|e| {
-            e.member == assertion.member
-                && e.cool_off_ends
-                    .is_some_and(|ends| ends > assertion.event_time)
+            e.cool_off_ends
+                .is_some_and(|ends| ends > assertion.event_time)
         }) {
             self.owed = Some(assertion);
         }

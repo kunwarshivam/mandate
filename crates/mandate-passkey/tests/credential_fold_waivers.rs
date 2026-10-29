@@ -309,7 +309,6 @@ fn a_waiver_after_another_row_does_not_settle_its_assertion() {
 /// owed a waiver whoever made it. Another member's assertion of the owner's cooling credential,
 /// with no waiver after it, breaks the rule at the assertion.
 #[test]
-#[ignore = "pending E9-4"]
 fn another_members_assertion_inside_the_cool_off_is_owed_a_waiver_too() {
     let fold = CredentialFold::new([
         record(1, Step::Enrol(0, 0, true)),
@@ -468,7 +467,6 @@ fn oracle(steps: &[Step]) -> Option<u64> {
 /// first, so the comparison never rests on the runner happening to draw one. The runner keeps
 /// no failure file (DEC-381).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_rule_318_break_is_the_oracles() {
     let matches_the_oracle = |steps: Vec<Step>| -> Result<(), TestCaseError> {
         let records: Vec<CredentialRecord> = steps
