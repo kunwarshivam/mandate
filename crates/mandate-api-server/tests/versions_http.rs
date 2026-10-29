@@ -4214,7 +4214,7 @@ fn without_the_waiver_a_fresh_passkeys_acknowledgment_is_step_up_missing_and_the
     assert!(w.held(&issued), "the challenge is kept");
     assert_eq!(
         listed(&list(&w, "?agent=agt_a&state=open")),
-        [hold.event_id.clone()],
+        [hold.event_id],
         "the hold still stands"
     );
 }
