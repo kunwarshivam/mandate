@@ -1,5 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { CDPSession, Page } from "@playwright/test";
+import { writeOwnerOnly } from "./owner-only";
 
 /**
  * A passkey for the cell's gestures, held by Chromium's virtual WebAuthn authenticator (the DevTools
@@ -18,8 +19,8 @@ export interface VirtualPasskey {
   remove(): Promise<void>;
   /**
    * Writes every credential the authenticator holds to `path`, for a later run of this cell, and
-   * answers how many: any file already there is deleted first and the new one created exclusively
-   * at 0600, so the key never sits in a file another user can read, even for a moment.
+   * answers how many, through `writeOwnerOnly`, so the key never sits in a file another user can
+   * read, even for a moment.
    */
   exportTo(path: string): Promise<number>;
   /** Adds the credentials a run wrote with `exportTo` at `path`; answers how many. */
@@ -43,8 +44,7 @@ export async function virtualPasskey(page: Page): Promise<VirtualPasskey> {
     },
     async exportTo(path) {
       const { credentials } = await held();
-      rmSync(path, { force: true });
-      writeFileSync(path, JSON.stringify({ credentials }), { mode: 0o600, flag: "wx" });
+      writeOwnerOnly(path, JSON.stringify({ credentials }));
       return credentials.length;
     },
     async importFrom(path) {
