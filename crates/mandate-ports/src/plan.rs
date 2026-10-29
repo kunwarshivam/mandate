@@ -411,7 +411,10 @@ pub fn classify(
     proposal: &Proposal,
     policy_nonconforming: bool,
 ) -> Result<Classified, PortError> {
-    let expected_score = Value::Str(action.combined_score.to_string());
+    let Some(score) = action.combined_score else {
+        return Err(mandate_builder::BuilderError::Unimplemented.into());
+    };
+    let expected_score = Value::Str(score.to_string());
     if action.instrument.as_str() != proposal.instrument.as_str()
         || action.asset_class != proposal.asset_class
         || runtime_purpose(action.purpose) != proposal.purpose

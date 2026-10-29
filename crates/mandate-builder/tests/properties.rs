@@ -952,7 +952,10 @@ fn oracle_bool(field: ConditionField, action: &ActionContext) -> bool {
 fn oracle_decimal(field: ConditionField, action: &ActionContext) -> String {
     match field {
         ConditionField::OrderUsd => action.order_usd.to_string(),
-        ConditionField::CombinedScore => action.combined_score.to_string(),
+        ConditionField::CombinedScore => action.combined_score.map_or_else(
+            || panic!("the oracle reads only scored actions"),
+            |score| score.to_string(),
+        ),
         ConditionField::ThesisConfidence => action.thesis_confidence.to_string(),
         ConditionField::Drawdown => action.drawdown.to_string(),
         ConditionField::DailyPnlFraction => action.daily_pnl_fraction.to_string(),
@@ -2234,7 +2237,7 @@ prop_compose! {
         ActionContext {
             purpose,
             order_usd: usd(&order_dollars.to_string()),
-            combined_score: unit(&Scenario::milli(score_milli).to_text()),
+            combined_score: Some(unit(&Scenario::milli(score_milli).to_text())),
             instrument: asset(if crypto { BTC_INSTRUMENT } else { SWING_INSTRUMENT }),
             asset_class: if crypto { AssetClass::Crypto } else { AssetClass::UsEquity },
             session: if crypto { MarketSession::Crypto } else { MarketSession::Regular },
@@ -2777,7 +2780,7 @@ fn proposal_for(action: &ActionContext) -> Proposal {
             outputs_used: BTreeSet::new(),
             exit_conviction: Conviction::ZERO,
             buy_conviction: Conviction::ZERO,
-            score: opening.combined_score,
+            score: opening.combined_score.unwrap_or(Unit::ZERO),
         },
         sizes: mandate_builder::Sizes {
             cap: mandate_num::UsdExact::parse("1500").unwrap_or(mandate_num::UsdExact::zero()),
@@ -3079,7 +3082,7 @@ fn every_rule_default_admission_and_requester_obeys_the_client_ceiling() {
                             let action = ActionContext {
                                 purpose,
                                 order_usd: usd("300"),
-                                combined_score: unit("0.8"),
+                                combined_score: Some(unit("0.8")),
                                 instrument: asset(SWING_INSTRUMENT),
                                 asset_class: AssetClass::UsEquity,
                                 session: MarketSession::Regular,
@@ -3347,7 +3350,7 @@ fn every_rule_default_admission_requester_and_day_obeys_the_review_ceiling() {
                                 let action = ActionContext {
                                     purpose,
                                     order_usd: usd("300"),
-                                    combined_score: unit("0.8"),
+                                    combined_score: Some(unit("0.8")),
                                     instrument: asset(SWING_INSTRUMENT),
                                     asset_class: AssetClass::UsEquity,
                                     session: MarketSession::Regular,

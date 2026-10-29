@@ -57,8 +57,9 @@ pub use autonomy::{
 };
 pub use builder::{
     AccountSnapshot, AccumulateGoal, Action, BuilderMandate, Clip, Combined, Direction, GoalKind,
-    HoldReason, Limits, Market, ModelOutput, ModelVersion, OrderShape, Proposal, RiskContext,
-    SignalModel, Sizes, Sizing, autonomy_policy, buy_action, combine, propose, propose_thesis_exit,
+    HoldReason, Limits, Market, ModelOutput, ModelVersion, OrderShape, Proposal, RequestCut,
+    RequestedBuy, RiskContext, SignalModel, Sizes, Sizing, autonomy_policy, buy_action, combine,
+    propose, propose_thesis_exit, requested_buy,
 };
 pub use opening::{Venue, deployable, opening_form, propose_on};
 
@@ -85,7 +86,7 @@ use mandate_time::TimeError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BuilderError {
     /// A stub of a DEC-77 tests PR returns this, so every pending test fails on it (DEC-77, DEC-83,
-    /// DEC-110). Nothing returns it since E6-12's implementation; it stays because
+    /// DEC-110). E10-30's tests PR stubs `requested_buy` with it; it stays after because
     /// `tests/vocabulary.rs` pins every stable code, and removing it is a tests change of its own.
     #[error("the order builder is not implemented yet")]
     Unimplemented,

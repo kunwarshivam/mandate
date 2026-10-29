@@ -123,7 +123,7 @@ fn builder() -> BuilderContext {
         action: ActionContext {
             purpose: BuilderPurpose::DiscretionaryExit,
             order_usd: usd("499.5"),
-            combined_score: Unit::ZERO,
+            combined_score: Some(Unit::ZERO),
             instrument,
             asset_class: AssetClass::UsEquity,
             session: MarketSession::Regular,

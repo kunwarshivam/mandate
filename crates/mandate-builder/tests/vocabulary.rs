@@ -231,7 +231,7 @@ fn an_action() -> ActionContext {
     ActionContext {
         purpose: Purpose::Increase,
         order_usd: usd("400"),
-        combined_score: unit("0.74"),
+        combined_score: Some(unit("0.74")),
         instrument: mandate_domain::AssetId::parse("7b4a1c2e-2222-4a2b-9c3d-000000000002")
             .unwrap_or_else(|e| panic!("an asset id: {e}")),
         asset_class: AssetClass::UsEquity,
