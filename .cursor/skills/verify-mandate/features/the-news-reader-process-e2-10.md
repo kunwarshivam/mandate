@@ -18,7 +18,8 @@
   `NewsItemStored` as drafts with deterministic ids, timed `local`), `src/reader.rs`
   (`NewsReader`: one writer epoch, the stream folded at start, one page a step; DEC-2289's
   `Clock`, a round held past `RECEIPT_LEAD_S` of the trusted time, counted and alerted
-  `receipt_ahead` once an episode, every pause by the trusted time), `src/items.rs`
+  `receipt_ahead` once an episode, every pause by the trusted time; DEC-2292's bound against the
+  earlier of the trusted time and `Store::clock`, the database server's, and `store_clock_unavailable`), `src/items.rs`
   (each new item's typed record stored and journaled, a batch in doubt retried as the same bytes,
   a refused append stopping the reader), `src/recorded.rs` (DEC-2085: `RecordedNews`, a recording of the vendor's
   items answered one page per request by the tickers asked, reaching no host; `recorded_key`, the

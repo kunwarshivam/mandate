@@ -388,8 +388,9 @@ fn a_held_round_of_the_other_kind_alerts_its_own_code() {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
 
-    /// With a store clock anywhere from ten minutes behind the trusted time to ten ahead, no stored
-    /// `knowledge_at` runs past the earlier of the two by more than the lead and the skew.
+    /// With a store clock anywhere from ten minutes behind the trusted time to ten ahead, no item a
+    /// step stores is known past the earlier of the two at that step by more than the lead and the
+    /// skew. The oracle judges each step's new rows by that step's own bound.
     #[test]
     fn no_item_is_known_past_the_store_s_clock_and_the_lead(
         steps in prop::collection::vec((0i64..120, -300i64..600, -600i64..600), 1..30),
@@ -404,9 +405,13 @@ proptest! {
             let store_now = plus(trusted, store);
             journal.store_clock.set(Some(Some(store_now)));
             let clock = Clock { now: plus(trusted, offset), trusted };
+            let before = stored(&journal).len();
             block_on(reader.step(clock));
-            let earlier = Clock::agreed(trusted.min(store_now));
-            prop_assert_eq!(breach(&journal, earlier), None);
+            let bound = plus(trusted.min(store_now), RECEIPT_LEAD_S + i64::from(FUTURE_SKEW_MS / 1_000));
+            for row in &stored(&journal)[before..] {
+                let known = UtcNanos::parse(member(row, "knowledge_at").as_str().unwrap()).unwrap();
+                prop_assert!(known <= bound, "stored at {} past {}", known, bound);
+            }
         }
     }
 }
