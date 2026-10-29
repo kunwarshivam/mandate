@@ -1,4 +1,4 @@
-- **E11-9w (Proposed, M9; W2)** As the founder rehearsing the demo, I want `cell demo` to warm
+- **E11-9w (Done, M9; W2; lane SC)** As the founder rehearsing the demo, I want `cell demo` to warm
   `web/`'s `next dev` while the gestures' Job runs, so that a slow first compile never stops the
   trade loop at Playwright's 60 s `webServer` start (lane DR's rehearsal of 2026-10-27: the first
   run on a freshly started machine timed out, and later runs on the same machine did not).

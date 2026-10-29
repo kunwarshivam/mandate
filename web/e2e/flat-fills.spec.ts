@@ -33,7 +33,7 @@ const ROUTES = [
     recordHref("release", AGENT_IDS.btc),
     recordHref("stop_all", CONNECTION),
     recordHref("close_all", CONNECTION),
-    "/design",
+    "/kumo-specimen",
     "/no-such-page",
   ]),
 ];
@@ -260,7 +260,7 @@ test.describe("no gradient paints in any overlay (DEC-200)", () => {
 
 test.describe("Kumo surfaces are flat (DEC-200)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/design");
+    await page.goto("/kumo-specimen");
     await page.waitForLoadState("networkidle");
   });
 
