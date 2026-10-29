@@ -91,7 +91,7 @@ impl Chat {
             .saturating_mul(1_000)
             .saturating_add(u128::from(now.nanos() / 1_000_000));
         let count = u128::from(self.ids.fetch_add(1, Ordering::Relaxed));
-        encode_ulid((millis << 80) | (count & ((1 << 80) - 1)))
+        encode_ulid((millis << 80) | count)
     }
 
     pub fn stop(&self, run: &str) {
