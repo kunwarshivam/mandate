@@ -7,7 +7,7 @@ import * as agents from "@/app/(app)/agents/page";
 import * as approvals from "@/app/(app)/approvals/page";
 import * as audit from "@/app/(app)/audit/page";
 import * as connections from "@/app/(app)/connections/page";
-import * as design from "@/app/(app)/design/page";
+import * as design from "@/app/(app)/design/page.dev";
 import * as dashboard from "@/app/(app)/page";
 import * as settings from "@/app/(app)/settings/page";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS } from "@/fixtures/workspace";

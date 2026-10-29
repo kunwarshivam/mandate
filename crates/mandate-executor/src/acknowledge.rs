@@ -628,4 +628,417 @@ mod tests {
         assert_eq!(request_subject(&not_text), None);
         Ok(())
     }
+
+    mod differential {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        use mandate_canon::{Digest, Value, to_canonical};
+        use mandate_journal::StoredEvent;
+        use mandate_journal::holds::{
+            Holder, Reason, holds, independence_required, requests, standing,
+        };
+        use proptest::prelude::*;
+
+        use super::super::{fold, judged, named_stands};
+        use super::{evidence, paper, state};
+        use crate::payload::{int, object, text};
+        use crate::types::{AcknowledgmentHandoff, EventId, FoldedEvent, RiskClock, Seq};
+
+        const AGENTS: [&str; 2] = ["agent_a", "agent_b"];
+        const LIMITS: [&str; 2] = ["max_daily_loss", "profit_stop"];
+        const MODE_AGENTS: [&str; 3] = ["agent_a", "agent_b", "*"];
+        const RESTRICTIONS: [&str; 3] =
+            ["reconciliation:cash", "reconciliation:SPY", "kill_switch"];
+        const MODES: [&str; 4] = ["exits_only", "paused", "normal", "stopped"];
+        const CAUSES: [&str; 2] = ["broker_notice", "connection_unavailable"];
+        const RESTRICTED: [&str; 2] = ["closing_only", "blocked"];
+        const SUBJECTS: [&str; 2] = ["limit", "reconciliation"];
+        const REQUESTERS: [&str; 2] = ["u-req1", "u-req2"];
+        /// The user who answers a request: never one of [`REQUESTERS`], so rule 239 never refuses.
+        const ANSWERER: &str = "u-ack";
+        const ACCOUNT: &str = "acct:ws1:acct-1";
+        /// The second every step-up here is given and judged at.
+        const AT: u64 = 1_000;
+
+        fn pick<const N: usize>(names: &[&'static str; N], at: usize) -> &'static str {
+            names.get(at).copied().unwrap_or_default()
+        }
+
+        /// A policy record's `independent_approval_required`: required, not, or a member that does
+        /// not read.
+        #[derive(Debug, Clone, Copy)]
+        enum Policy {
+            Required,
+            NotRequired,
+            Unreadable,
+        }
+
+        #[derive(Debug, Clone)]
+        enum Op {
+            Trigger(usize, usize),
+            Lift(usize, usize),
+            Mode(usize, usize, usize, bool),
+            Copy(usize, usize, Option<usize>),
+            Refuse(bool, usize),
+            Restrict(usize, usize),
+            LiftRestriction(usize),
+            Request(usize, usize, usize, usize, bool),
+            Policy(Policy),
+        }
+
+        fn op() -> impl Strategy<Value = Op> {
+            prop_oneof![
+                (0..2usize, 0..2usize).prop_map(|(a, l)| Op::Trigger(a, l)),
+                (0..2usize, 0..2usize).prop_map(|(a, l)| Op::Lift(a, l)),
+                (0..3usize, 0..3usize, 0..4usize, any::<bool>())
+                    .prop_map(|(a, r, t, o)| Op::Mode(a, r, t, o)),
+                (
+                    any::<usize>(),
+                    0..3usize,
+                    proptest::option::of(any::<usize>())
+                )
+                    .prop_map(|(e, c, r)| Op::Copy(e, c, r)),
+                (any::<bool>(), 0..3usize).prop_map(|(ack, c)| Op::Refuse(ack, c)),
+                (0..2usize, 0..2usize).prop_map(|(c, r)| Op::Restrict(c, r)),
+                (0..2usize).prop_map(Op::LiftRestriction),
+                (
+                    0..2usize,
+                    any::<usize>(),
+                    0..2usize,
+                    0..2usize,
+                    any::<bool>()
+                )
+                    .prop_map(|(a, e, s, b, i)| Op::Request(a, e, s, b, i)),
+                prop_oneof![
+                    Just(Policy::Required),
+                    Just(Policy::NotRequired),
+                    Just(Policy::Unreadable)
+                ]
+                .prop_map(Op::Policy),
+            ]
+        }
+
+        /// One generated record, as the executor folds it and as the journal stores it.
+        fn record(
+            id: &str,
+            kind: &str,
+            causation: Option<&str>,
+            pairs: Vec<(&str, Value)>,
+        ) -> (FoldedEvent, StoredEvent) {
+            let payload = object(pairs).unwrap_or(Value::Null);
+            let body = to_canonical(
+                &object(vec![
+                    ("causation_id", causation.map_or(Value::Null, text)),
+                    ("event_id", text(id)),
+                    ("payload", payload.clone()),
+                ])
+                .unwrap_or(Value::Null),
+            );
+            let folded = FoldedEvent {
+                stream: ACCOUNT.to_owned(),
+                seq: Seq(1),
+                event_id: EventId(id.to_owned()),
+                event_type: kind.to_owned(),
+                causation_id: causation.map(|c| EventId(c.to_owned())),
+                payload,
+            };
+            let stored = StoredEvent {
+                stream_id: ACCOUNT.to_owned(),
+                seq: 1,
+                event_id: id.to_owned(),
+                event_type: kind.to_owned(),
+                schema_version: 1,
+                environment: "paper".to_owned(),
+                recorded_at: "2026-10-26T12:00:00.000000000Z".to_owned(),
+                prev_hash: Digest::ZERO,
+                hash: Digest::of(&body),
+                body,
+            };
+            (folded, stored)
+        }
+
+        /// `pairs` as the control stream stores a `kind` original at version 2.
+        fn control_row(id: &str, kind: &str, pairs: Vec<(&str, Value)>) -> StoredEvent {
+            let (_, row) = record(id, kind, None, pairs);
+            StoredEvent {
+                stream_id: "ctl:ws1".to_owned(),
+                schema_version: 2,
+                ..row
+            }
+        }
+
+        /// An acknowledgment as the executor is handed it, its payload `pairs`.
+        fn handed(pairs: Vec<(&str, Value)>, overlay: bool) -> AcknowledgmentHandoff {
+            AcknowledgmentHandoff {
+                original: FoldedEvent {
+                    stream: "ctl:ws1".to_owned(),
+                    seq: Seq(1),
+                    event_id: EventId("probe".to_owned()),
+                    event_type: "OwnerAcknowledged".to_owned(),
+                    causation_id: None,
+                    payload: object(pairs).unwrap_or(Value::Null),
+                },
+                schema_version: 2,
+                processed_at: RiskClock::from_secs(i64::try_from(AT).unwrap_or_default()),
+                spent: BTreeSet::new(),
+                request_spent: Some(BTreeSet::new()),
+                independent_overlay: overlay,
+                methods: paper(),
+            }
+        }
+
+        /// Checks 1 and 2's probe: an acknowledgment of `event` with `subject`, as `agent`.
+        fn handoff(event: &str, subject: &str, agent: &str) -> AcknowledgmentHandoff {
+            handed(
+                vec![
+                    ("agent", text(agent)),
+                    ("event", text(event)),
+                    ("subject", text(subject)),
+                ],
+                false,
+            )
+        }
+
+        /// The acknowledgment `mandate agent holds` prints for a hold of `event` with `subject`,
+        /// posted to `agent`, answering `request` when it names one, as `ANSWERER`, with fresh
+        /// step-up: everything but checks 1, 2 and 4 passes.
+        fn answer(
+            event: &str,
+            subject: &str,
+            agent: &str,
+            request: Option<(&str, &str, bool)>,
+            overlay: bool,
+        ) -> AcknowledgmentHandoff {
+            let mut pairs = vec![
+                ("agent", text(agent)),
+                ("event", text(event)),
+                ("subject", text(subject)),
+                ("user", text(ANSWERER)),
+                ("step_up", evidence("ack", AT, "cli_confirm")),
+            ];
+            match request {
+                Some((id, by, independent)) => {
+                    pairs.push(("request", text(id)));
+                    pairs.push(("requested_by", text(by)));
+                    pairs.push(("independent_required", Value::Bool(independent)));
+                }
+                None => pairs.push(("independent_required", Value::Bool(false))),
+            }
+            handed(pairs, overlay)
+        }
+
+        proptest! {
+            /// E7-4b, DEC-2144: over any account stream of triggers, lifts, mode records,
+            /// restrictions and their lifts, requests, acknowledgment copies and refusals, beside
+            /// the control stream's originals and policy records, `mandate_journal::holds` lists
+            /// what the executor's §9.28 checks judge:
+            /// - a limit's trigger or a reconciliation hold exactly when checks 1 and 2 pass;
+            /// - each restriction cause from its latest change until a lift of that cause (an
+            ///   accumulator of the test's own), none of which the executor lifts yet (E7-2y);
+            /// - a request as spent exactly when the executor holds an acknowledgment copy naming
+            ///   it (rule 241), and a hold's attached request as one check 4 accepts, while a spent
+            ///   request is refused;
+            /// - the policy's independence as the test's own reading of the latest membership
+            ///   record (none `false`, unreadable `true`), which, as the executor's overlay, lets an
+            ///   acknowledgment with no request stand exactly when it is `false`.
+            #[test]
+            fn the_shared_fold_lists_exactly_what_the_executor_s_checks_let_stand(
+                ops in prop::collection::vec(op(), 1..40)
+            ) {
+                let mut executor = state();
+                let mut stored = Vec::new();
+                let mut control = Vec::new();
+                let mut triggers: Vec<(String, &str)> = Vec::new();
+                let mut ids: Vec<String> = Vec::new();
+                let mut causes: BTreeMap<&str, String> = BTreeMap::new();
+                let mut asked: Vec<String> = Vec::new();
+                let mut policy: Option<Policy> = None;
+                for (i, op) in ops.iter().enumerate() {
+                    let id = format!("e{i}");
+                    let (folded, row) = match *op {
+                        Op::Trigger(a, l) | Op::Lift(a, l) => {
+                            let kind = if matches!(op, Op::Trigger(..)) {
+                                triggers.push((id.clone(), pick(&AGENTS, a)));
+                                "RiskLimitTriggered"
+                            } else {
+                                "RiskLimitLifted"
+                            };
+                            record(&id, kind, None, vec![
+                                ("agent_id", text(pick(&AGENTS, a))),
+                                ("limit", text(pick(&LIMITS, l))),
+                            ])
+                        }
+                        Op::Mode(a, r, t, originated) => record(&id, "AgentModeApplied", None, vec![
+                            ("agent", text(pick(&MODE_AGENTS, a))),
+                            ("originated", Value::Bool(originated)),
+                            ("restriction", text(pick(&RESTRICTIONS, r))),
+                            ("to", text(pick(&MODES, t))),
+                        ]),
+                        Op::Copy(named, c, request) => {
+                            let event = named.checked_rem(ids.len()).and_then(|at| ids.get(at)).cloned().unwrap_or_default();
+                            let request = request
+                                .and_then(|r| r.checked_rem(asked.len()))
+                                .and_then(|at| asked.get(at))
+                                .map_or(Value::Null, text);
+                            let original = format!("ctl{c}");
+                            control.push(control_row(&original, "OwnerAcknowledged", vec![
+                                ("event", text(&event)),
+                                ("request", request.clone()),
+                            ]));
+                            record(&id, "OwnerAcknowledged", Some(&original), vec![
+                                ("event", text(&event)),
+                                ("request", request),
+                            ])
+                        }
+                        Op::Refuse(acknowledge, c) => record(
+                            &id,
+                            "OwnerCommandRefused",
+                            Some(&format!("ctl{c}")),
+                            vec![("command", text(if acknowledge { "acknowledge" } else { "resume" }))],
+                        ),
+                        Op::Restrict(c, r) => {
+                            causes.insert(pick(&CAUSES, c), id.clone());
+                            record(&id, "AccountRestrictionChanged", None, vec![
+                                ("cause", text(pick(&CAUSES, c))),
+                                ("restriction", text(pick(&RESTRICTED, r))),
+                            ])
+                        }
+                        Op::LiftRestriction(c) => {
+                            causes.remove(pick(&CAUSES, c));
+                            record(&id, "AccountRestrictionLifted", None, vec![
+                                ("cause", text(pick(&CAUSES, c))),
+                            ])
+                        }
+                        Op::Request(a, named, s, by, independent) => {
+                            let event = named.checked_rem(ids.len()).and_then(|at| ids.get(at)).cloned().unwrap_or_default();
+                            let original = format!("rq{i}");
+                            let pairs = || vec![
+                                ("agent", text(pick(&AGENTS, a))),
+                                ("event", text(&event)),
+                                ("independent_required", Value::Bool(independent)),
+                                ("requested_by", text(pick(&REQUESTERS, by))),
+                                ("step_up", evidence(&format!("rq-step-{i}"), AT, "cli_confirm")),
+                                ("subject", text(pick(&SUBJECTS, s))),
+                                ("submitted_at", int(AT).unwrap_or(Value::Null)),
+                            ];
+                            control.push(control_row(&original, "OwnerAcknowledgmentRequested", pairs()));
+                            asked.push(original.clone());
+                            record(&id, "OwnerAcknowledgmentRequested", Some(&original), pairs())
+                        }
+                        Op::Policy(chosen) => {
+                            policy = Some(chosen);
+                            let required = match chosen {
+                                Policy::Required => Value::Bool(true),
+                                Policy::NotRequired => Value::Bool(false),
+                                Policy::Unreadable => text("no"),
+                            };
+                            control.push(control_row(&format!("m{i}"), "MemberRoleChanged", vec![
+                                ("independent_approval_required", required),
+                            ]));
+                            ids.push(id);
+                            continue;
+                        }
+                    };
+                    fold(&mut executor, &folded).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                    stored.push(row);
+                    ids.push(id);
+                }
+                let listed = standing(&stored).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                let held = &executor.acknowledgments;
+                for (id, _) in &triggers {
+                    for agent in AGENTS {
+                        let lifts = named_stands(held, &handoff(id, "limit", agent)).is_none();
+                        let lists = listed.iter().any(|h| {
+                            h.event == *id
+                                && matches!(h.reason, Reason::Limit(_))
+                                && h.holder == Holder::Agent(agent.to_owned())
+                        });
+                        prop_assert_eq!(lifts, lists, "the trigger {} acknowledged as {}", id, agent);
+                    }
+                }
+                for id in &ids {
+                    let lifts = named_stands(held, &handoff(id, "reconciliation", "agent_a")).is_none();
+                    let lists = listed
+                        .iter()
+                        .any(|h| h.event == *id && matches!(h.reason, Reason::Reconciliation { .. }));
+                    prop_assert_eq!(lifts, lists, "the hold {}", id);
+                }
+
+                let restricted: BTreeMap<&str, String> = listed
+                    .iter()
+                    .filter_map(|h| match &h.reason {
+                        Reason::Cause(cause) => CAUSES
+                            .iter()
+                            .find(|c| **c == cause.as_str())
+                            .map(|c| (*c, h.event.clone())),
+                        _ => None,
+                    })
+                    .collect();
+                prop_assert_eq!(&restricted, &causes, "the causes in force");
+                for event in restricted.values() {
+                    prop_assert_eq!(
+                        named_stands(held, &handoff(event, "restriction", "agent_a")),
+                        Some("trigger_unknown"),
+                        "no restriction is lifted by an acknowledgment until E7-2y"
+                    );
+                }
+
+                let requested = requests(&control).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                for (request, spent) in &requested {
+                    prop_assert_eq!(*spent, held.named.contains(&request.event_id), "request {}", request.event_id);
+                    prop_assert!(held.requests.contains_key(&request.event_id), "request {} is copied", request.event_id);
+                    if *spent {
+                        let refused = judged(
+                            held,
+                            &answer(&request.event, &request.subject, &request.agent, Some((&request.event_id, &request.requested_by, true)), false),
+                            RiskClock::from_secs(i64::try_from(AT).unwrap_or_default()),
+                        );
+                        prop_assert!(refused.is_some(), "a spent request {} answers nothing", request.event_id);
+                    }
+                }
+                let accounts = [(ACCOUNT.to_owned(), stored.clone(), AGENTS.map(str::to_owned).to_vec())];
+                let at = RiskClock::from_secs(i64::try_from(AT).unwrap_or_default());
+                for hold in holds(&accounts, &requested).map_err(|e| TestCaseError::fail(format!("{e:?}")))? {
+                    let subject = hold.raised.reason.subject();
+                    if subject == "restriction"
+                        || named_stands(held, &handoff(&hold.raised.event, subject, &hold.agent_id)).is_some()
+                    {
+                        continue;
+                    }
+                    if let Some(request) = &hold.request {
+                        let independent = held
+                            .requests
+                            .get(&request.event_id)
+                            .and_then(|r| r.get("independent_required"))
+                            == Some(&Value::Bool(true));
+                        prop_assert_eq!(
+                            judged(held, &answer(&hold.raised.event, subject, &hold.agent_id, Some((&request.event_id, &request.requested_by, independent)), true), at),
+                            None,
+                            "the request {} attached to {} answers it", request.event_id, hold.raised.event
+                        );
+                    }
+                }
+
+                let expected = match policy {
+                    None | Some(Policy::NotRequired) => false,
+                    Some(Policy::Required | Policy::Unreadable) => true,
+                };
+                let overlay = independence_required(&control);
+                prop_assert_eq!(overlay, expected, "the policy's independence");
+                for hold in &listed {
+                    let subject = hold.reason.subject();
+                    let agent = match &hold.holder {
+                        Holder::Agent(agent) => agent.as_str(),
+                        Holder::Account => "agent_a",
+                    };
+                    if subject == "restriction" || named_stands(held, &handoff(&hold.event, subject, agent)).is_some() {
+                        continue;
+                    }
+                    let unasked = judged(held, &answer(&hold.event, subject, agent, None, overlay), at);
+                    let wanted = overlay.then_some("not_independent");
+                    prop_assert_eq!(unasked, wanted, "an acknowledgment of {} with no request", hold.event);
+                }
+            }
+        }
+    }
 }

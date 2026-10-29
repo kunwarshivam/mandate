@@ -589,6 +589,87 @@ pub fn journey_result(text: &str) -> Result<BTreeMap<String, String>> {
     Ok(steps)
 }
 
+/// The warm-up spec under `web/e2e-cell/` (E11-9w).
+const WARM_SPEC: &str = "warm.spec.ts";
+/// Playwright's bound on the warm-up (`OWLHEAD_CELL_TIMEOUT_MS`): 150 seconds, `next dev`'s 60 s start
+/// and the first pages' compiles, ending inside [`WARM_POLLS`]' 180 s, so it writes its result first.
+const WARM_TIMEOUT_MS: &str = "150000";
+/// The warm-up's polls: 180 seconds, run beside the gestures' Job, so only what the Job does not
+/// already take is added to the `cell-demo-web` job's ten minutes (DEC-464).
+const WARM_POLLS: u32 = 720;
+
+/// The pages the cell's specs open, as the warm-up requests them, with `agent` for the agent's page
+/// and a placeholder id where a spec opens a record the run has not made yet: the route compiles
+/// whatever the id.
+pub fn warm_paths(agent: &str) -> Vec<String> {
+    [
+        "/",
+        "/agents",
+        &format!("/agents/{agent}"),
+        &format!("/agents/{agent}/kill-switch"),
+        &format!("/agents/{agent}/positions"),
+        "/agents/new",
+        "/approvals",
+        "/approvals/warm",
+        "/positions",
+        "/instruments",
+        "/audit/timeline",
+        "/alerts",
+        "/connections",
+        "/go-live",
+        "/settings/profile",
+        "/backtests/warm",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+/// What the warm-up did: the pages it was asked for, in order, each page's status or why it did
+/// not load as its result names them, and about how long the run took, counted in polls. A run
+/// stopped part way names fewer pages than it was asked for.
+#[derive(Debug)]
+pub struct Warmed {
+    pub requested: Vec<String>,
+    pub pages: BTreeMap<String, String>,
+    pub seconds: f64,
+}
+
+/// Warms `next dev` for `workspace` (E11-9w): a Playwright run of [`WARM_SPEC`] under the cell's
+/// config, which starts `next dev` as every cell gesture does, so the compiled pages it leaves are
+/// the ones the next run reads, requests each of [`warm_paths`] for `agent`, then stops. It makes no
+/// gesture and checks nothing.
+///
+/// # Errors
+/// A missing tool, a run past [`WARM_POLLS`], or a run that wrote no result (its log is named).
+pub fn warm(workspace: &str, agent: &str) -> Result<Warmed> {
+    let requested = warm_paths(agent);
+    let run = spec_run(
+        workspace,
+        &[
+            ("OWLHEAD_CELL_SPEC", WARM_SPEC.to_owned()),
+            ("OWLHEAD_CELL_WARM_PATHS", requested.join(",")),
+            ("OWLHEAD_CELL_TIMEOUT_MS", WARM_TIMEOUT_MS.to_owned()),
+        ],
+        "web-warm",
+        WARM_POLLS,
+        &mut || Ok(()),
+    )?;
+    let Some(text) = run.result else {
+        bail!(
+            "web/'s warm-up wrote no result ({}); its log is {}",
+            run.status,
+            run.log.display()
+        );
+    };
+    Ok(Warmed {
+        requested,
+        pages: serde_json::from_str(&text)
+            .context("the warm-up's result is not a JSON object of strings")?,
+        seconds: (POLL * run.polled).as_secs_f64(),
+    })
+}
+
 /// The owner's set-up spec under `web/e2e-cell/` (the demo's step 2 from web/, lane WB).
 const SETUP_SPEC: &str = "setup.spec.ts";
 /// Playwright's bound on the set-up run (`OWLHEAD_CELL_TIMEOUT_MS`): 330 seconds, which holds the
@@ -747,6 +828,7 @@ struct SpecRun {
     status: ExitStatus,
     result: Option<String>,
     log: PathBuf,
+    polled: u32,
 }
 
 /// The variable `playwright.cell.config.ts` reads to build `next dev` with the browser's side of
@@ -850,6 +932,7 @@ fn spec_run(
         status,
         result: fs::read_to_string(&result).ok(),
         log,
+        polled,
     })
 }
 
@@ -1450,6 +1533,136 @@ mod tests {
             !group_alive(pgid),
             "a dropped group leaves no process behind"
         );
+        Ok(())
+    }
+
+    /// The page paths a cell spec's text opens: every quoted or templated literal that starts with
+    /// `/` and whose first segment is a screen of `web/`'s app, each `${...}` or `{...}` segment read as `*` and
+    /// a regular expression's closing `$` dropped, so a request suffix like `/passkeys` or an API path under `/v1` is not one.
+    fn opened_paths(spec: &str, screens: &[String]) -> Vec<String> {
+        let mut paths = Vec::new();
+        for quote in ['"', '`'] {
+            let mut rest = spec;
+            while let Some(at) = rest.find(&format!("{quote}/")) {
+                let tail = &rest[at + 1..];
+                let Some(end) = tail[1..].find(quote) else {
+                    break;
+                };
+                let literal = &tail[..end + 1];
+                rest = &tail[end + 1..];
+                let segments: Vec<String> = literal
+                    .trim_end_matches('$')
+                    .trim_start_matches('/')
+                    .split('/')
+                    .map(|s| {
+                        if s.contains('{') {
+                            "*".to_owned()
+                        } else {
+                            s.to_owned()
+                        }
+                    })
+                    .collect();
+                let first = segments.first().cloned().unwrap_or_default();
+                if literal == "/" || screens.contains(&first) {
+                    paths.push(format!("/{}", segments.join("/")));
+                }
+            }
+        }
+        paths
+    }
+
+    /// Whether `warm`, a path the warm-up requests, opens the route `opened` names, `*` matching any
+    /// one segment.
+    fn warms(warm: &str, opened: &str) -> bool {
+        let (w, o): (Vec<&str>, Vec<&str>) =
+            (warm.split('/').collect(), opened.split('/').collect());
+        w.len() == o.len() && w.iter().zip(&o).all(|(w, o)| *o == "*" || w == o)
+    }
+
+    /// The warm-up ends inside its 180 s beside the Job, and Playwright's own bound ends first, so
+    /// a run stopped part way still writes the pages it reached.
+    #[test]
+    fn the_warm_up_s_bounds_end_inside_its_three_minutes() {
+        let driver = POLL * WARM_POLLS;
+        assert!(driver <= Duration::from_secs(180), "{driver:?}");
+        let playwright = Duration::from_millis(WARM_TIMEOUT_MS.parse::<u64>().unwrap());
+        assert!(playwright < driver, "{playwright:?} against {driver:?}");
+    }
+
+    #[test]
+    fn opened_paths_reads_screens_and_templates_only() {
+        let screens = ["agents".to_owned(), "approvals".to_owned()];
+        let spec = r#"goto("/agents"); until(page, `/approvals/${id}`, 1); new RegExp(`/agents/${a}/kill-switch$`); isPost(r, "/passkeys"); api("/v1/x"); x = "/""#;
+        assert_eq!(
+            opened_paths(spec, &screens),
+            ["/agents", "/", "/approvals/*", "/agents/*/kill-switch"]
+        );
+        assert!(warms("/approvals/warm", "/approvals/*"));
+        assert!(warms("/agents", "/agents"));
+        assert!(!warms("/agents", "/agents/*"));
+        assert!(!warms("/agents/new", "/approvals/*"));
+    }
+
+    /// Every page a cell spec opens by a literal path, the warm-up's own spec aside, is one the
+    /// warm-up requests (E11-9w), so a spec that opens a new screen warms it too; and each page the
+    /// warm-up requests is one of `web/`'s app screens.
+    #[test]
+    fn the_warm_up_requests_every_page_the_cell_s_specs_open() -> Result<()> {
+        let root = crate::repo_root()?;
+        let app = root.join("web/src/app");
+        let mut screens = Vec::new();
+        for group in ["(app)", "(site)"] {
+            for entry in fs::read_dir(app.join(group))? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    screens.push(entry.file_name().to_string_lossy().into_owned());
+                }
+            }
+        }
+        let warm = warm_paths("agt_x");
+        let mut opened = Vec::new();
+        for entry in fs::read_dir(root.join("web/e2e-cell"))? {
+            let path = entry?.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if name
+                .as_deref()
+                .is_some_and(|n| n.ends_with(".spec.ts") && n != WARM_SPEC)
+            {
+                opened.extend(opened_paths(&fs::read_to_string(&path)?, &screens));
+            }
+        }
+        for route in [
+            "/agents",
+            "/approvals/*",
+            "/positions",
+            "/go-live",
+            "/agents/*",
+        ] {
+            assert!(
+                opened.iter().any(|o| o == route),
+                "the specs open {route}: {opened:?}"
+            );
+        }
+        for route in &opened {
+            assert!(
+                warm.iter().any(|w| warms(w, route)),
+                "a cell spec opens {route}, which the warm-up does not request"
+            );
+        }
+        for page in &warm {
+            let first = page
+                .trim_start_matches('/')
+                .split('/')
+                .next()
+                .unwrap_or_default();
+            assert!(
+                first.is_empty() || screens.iter().any(|s| s == first),
+                "the warm-up requests {page}, which is no screen of web/"
+            );
+        }
+        assert_eq!(warm[2], "/agents/agt_x", "the agent's own page");
+        let spec = fs::read_to_string(root.join("web/e2e-cell").join(WARM_SPEC))?;
+        assert!(spec.contains("process.env.OWLHEAD_CELL_WARM_PATHS"));
         Ok(())
     }
 }

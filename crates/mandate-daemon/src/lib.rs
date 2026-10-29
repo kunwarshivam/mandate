@@ -72,7 +72,8 @@ pub mod wake;
 pub mod worker;
 
 pub use runtime::{
-    Alert, ArtifactSink, Config, ContextUnread, FLATTEN_UNPLANNED, ModelsWiring, Refs,
-    ResearchParts, ResearchSource, ResearchWiring, ResearchWorker, RuntimeProcess, Wiring,
+    Alert, ArtifactSink, Config, ContextUnread, FLATTEN_UNPLANNED, ModelsWiring, Refs, RefusedNews,
+    ResearchParts, ResearchSource, ResearchWiring, ResearchWorker, RuntimeProcess, StoredNews,
+    Wiring, merge_offers,
 };
 pub use wake::Wake;

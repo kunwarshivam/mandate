@@ -57,6 +57,13 @@ pub trait Store {
         }
     }
 
+    /// The store's own clock, a second host's that a process may bound its own against
+    /// (DEC-2292); `None` when the store has none or cannot answer, which a caller reads as no
+    /// bound it can trust (`AGENTS.md` rule 3). The in-memory store has none.
+    fn clock(&self) -> Option<UtcNanos> {
+        None
+    }
+
     /// Appends `drafts` at `expected_head` under `epoch`, recorded at `recorded_at`.
     fn append(
         &mut self,
@@ -135,6 +142,11 @@ impl Store for PgStore {
 
     /// The stream's records from `start.from_seq` on, their chain checked from `start`
     /// ([`PgJournal::rows_from`]). `None` when the store cannot answer or the chain fails.
+    /// The database server's `clock_timestamp()` ([`PgJournal::clock`]).
+    fn clock(&self) -> Option<UtcNanos> {
+        self.runtime.block_on(self.journal.clock()).ok()
+    }
+
     fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
         self.runtime
             .block_on(self.journal.rows_from(stream, start))

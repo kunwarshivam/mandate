@@ -93,7 +93,11 @@ impl Refused {
 }
 
 /// Authenticates, then authorizes the read of `workspace`, then reads its control stream.
-async fn reader(app: &App, headers: &HeaderMap, workspace: &str) -> Result<Reader, Refused> {
+pub(crate) async fn reader(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+) -> Result<Reader, Refused> {
     let (admitted, now) = session(app, headers, Request::Other)?;
     authorized(
         app,
@@ -304,7 +308,7 @@ pub(crate) fn watermark(rows: &[StoredEvent]) -> Option<Value> {
 }
 
 /// A 200 with the envelope (§3.2, §6.1) and `members`.
-fn served(
+pub(crate) fn served(
     reader: &Reader,
     streams: &[&[StoredEvent]],
     mut members: Vec<(&str, Value)>,
@@ -354,7 +358,7 @@ fn agent_members(view: &AgentView, document: Option<&Envelope>) -> Vec<(&'static
 }
 
 /// The mandate document `deployment`'s version names, from the deployment's store.
-fn document(app: &App, deployment: &Deployment) -> Option<Envelope> {
+pub(crate) fn document(app: &App, deployment: &Deployment) -> Option<Envelope> {
     let store = app.artifacts.as_ref()?;
     envelope(store.as_ref(), &deployment.2)
 }
@@ -629,7 +633,7 @@ async fn all_approvals(
 
 /// The `account_ref` the control stream binds to the connection `document` names, and that
 /// account stream's rows (DEC-1020 item 3); `None` with no document or no bound reference.
-async fn account_of(
+pub(crate) async fn account_of(
     app: &App,
     reader: &Reader,
     document: Option<&Envelope>,

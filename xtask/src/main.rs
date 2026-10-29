@@ -6914,6 +6914,10 @@ const READ_LINES: &[(&str, &str)] = &[
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
     (
+        ".github/workflows/web.yml",
+        "node scripts/workers.mjs smoke",
+    ),
+    (
         ".github/workflows/web-deploy.yml",
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
@@ -7076,6 +7080,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "NEXT_PUBLIC_OWLHEAD_APP_ORIGIN",
     "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
     "NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN",
+    "NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
