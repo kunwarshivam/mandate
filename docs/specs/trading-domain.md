@@ -10,9 +10,12 @@
 ## Change history
 
 - **v0.26 ([DEC-2849](../project/decisions/DEC-2849.md) item 8):** §5.4 under shared positions:
-  - each holder's protection is re-placed on a leg of its own;
+  - each holder's protection is re-placed on a leg of its own, and a holder with no prices of its
+    own takes no room from one that has them;
   - a marketable exit cancels its own agent's legs and every unattributed or `*` leg;
-  - another holder's legs are cancelled only when they would not fit beside the exit within N;
+  - another holder's legs are cancelled only when they would not fit beside the exit within N, or
+    with its own exits within its coverage after the exit;
+  - the sequence records its own agent's prices, never another holder's;
   - the triggered-stop watchdog measures against the highest resting stop.
 
   A passive exit, an exit of no agent, and every single-holder position behave as before.
@@ -616,11 +619,19 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
   its own entry's prices. The holders share what the long position leaves beside resting
   protection and working exits, largest lots first. The owner's residual keeps the cover above, on
   the re-placing sequence's own leg. A holder with no prices of its own is never lent another's:
-  its shares are journaled and alerted as unprotected.
+  it takes no share of that room, so a holder that can be protected is, and its shares are
+  journaled and alerted as unprotected. They never ride on another holder's leg, nor does the
+  owner's residual ride on a sequence whose agent has no prices; that residual is journaled
+  uncovered too.
 - A marketable exit cancels its own agent's legs and every unattributed or `*` leg. Another
   holder's legs keep resting while they fit beside the exit: what they have left to sell (an OCO's
-  legs once), every working sell and the exit together within N. Otherwise they are cancelled too,
-  so they never cut a rule-13 exit (DEC-2849 I4), and re-placed after it.
+  legs once), every working sell and the exit together within N, and each holder's legs with its
+  own working exits within its Pᵢ after the exit. Otherwise they are cancelled too, so they never
+  cut a rule-13 exit (DEC-2849 I4) and the exit resizes them to the coverage left after it, and
+  re-placed after it.
+  - The sequence records its own agent's prices: its agent's own leg's, from its request or its
+    placement record, and the instrument's last protection prices only when no other holder has a
+    leg. It never takes another holder's prices.
   - The sequence waits only on its own cancels, and re-places only what it cancelled.
   - A passive exit, and an exit of no agent (`*`), still cancel every leg.
 
