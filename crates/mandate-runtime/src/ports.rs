@@ -34,8 +34,7 @@ pub trait OrderPlan {
     /// owner's quantity unclipped, so the gate's dry run names the cap that binds. `None` when the
     /// plan cannot price or size it at all, which journals nothing (`AGENTS.md` rule 3); a plan that
     /// builds no owner requests says so by keeping this default.
-    fn requested(&self, view: &MandateView, request: &OwnerRequest) -> Option<Proposal> {
-        let _ = (view, request);
+    fn requested(&self, _view: &MandateView, _request: &OwnerRequest) -> Option<Proposal> {
         None
     }
 }

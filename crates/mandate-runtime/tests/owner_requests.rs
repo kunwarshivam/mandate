@@ -513,6 +513,34 @@ fn a_request_the_plan_cannot_price_journals_nothing() {
     assert_eq!(plan.asked.borrow().len(), 1, "the plan was asked");
 }
 
+/// Live from the stub on: an owner's request is owner input routed as a request, never read as a
+/// command or an answer, so one addressed to another deployment steps cleanly and does nothing
+/// here, whether or not this runtime decides requests yet.
+#[test]
+fn another_agents_request_steps_cleanly_and_does_nothing() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        OwnerPlan::classified(Autonomy::Auto),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&ports);
+    let request = Request {
+        agent: "agent-b",
+        ..Request::owner_buy(1)
+    };
+    let event = request.event();
+    shell
+        .fold_one(&event)
+        .unwrap_or_else(|e| panic!("folding the request: {e}"));
+    let ran = shell
+        .step(Input::Journal(event), &ports)
+        .unwrap_or_else(|e| panic!("stepping another agent's request refused: {e}"));
+    assert!(ran.is_empty(), "{:?}", ran.draft_types());
+    assert!(plan.asked.borrow().is_empty());
+}
+
 /// One step of the property run: a request (by the owner or a client, possibly a repeat of an
 /// earlier one), or a restart.
 #[derive(Debug, Clone)]

@@ -7,13 +7,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use mandate_api_server::config::{
-    COOL_OFF_WAIVER, MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE, StartRefusal, authorize_page,
-    check_bind, check_database_url, check_environment, check_key_set_tier, cool_off_waiver,
-    read_session_key,
+    COOL_OFF_WAIVER, COOL_OFF_WAIVER_UNTIL, MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE,
+    STAGING_WAIVER_CEILING, StartRefusal, authorize_page, check_bind, check_database_url,
+    check_environment, check_key_set_tier, cool_off_waiver, read_session_key,
 };
 use mandate_api_server::methods::CoolOffWaiver;
 use mandate_connections::start::AuthorizePage;
 use mandate_release::startup::Tier;
+use mandate_time::UtcNanos;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 
@@ -507,38 +508,184 @@ fn a_release_build_refuses_any_set_page_in_every_tier() {
     }
 }
 
-/// DEC-2146 item 2: the waiver is exactly `true`, and only a `dev` or `ci` tier starts with it,
-/// each waiving as its own tier. Unset is no waiver, in every tier.
+/// The waiver's setting, `true`.
+fn on() -> Option<&'static OsStr> {
+    Some(OsStr::new("true"))
+}
+
+/// An expiry before [`STAGING_WAIVER_CEILING`].
+const BEFORE_CEILING: &str = "2026-11-01T12:00:00Z";
+
+fn instant(text: &str) -> UtcNanos {
+    UtcNanos::parse_rfc3339(text).expect("a timestamp")
+}
+
+/// DEC-2146 item 2: the waiver is exactly `true`, and a `dev` or `ci` tier starts with it without
+/// an expiry, each waiving as its own tier (DEC-2150 item 2 leaves them unchanged). Unset is no
+/// waiver, in every tier.
 #[test]
-fn a_waiver_of_true_starts_only_in_dev_and_ci_and_unset_waives_nothing() {
-    let on = Some(OsStr::new("true"));
-    assert_eq!(cool_off_waiver(Tier::Dev, on), Ok(Some(CoolOffWaiver::Dev)));
-    assert_eq!(cool_off_waiver(Tier::Ci, on), Ok(Some(CoolOffWaiver::Ci)));
+fn a_waiver_of_true_starts_in_dev_and_ci_without_an_expiry_and_unset_waives_nothing() {
+    assert_eq!(
+        cool_off_waiver(Tier::Dev, on(), None),
+        Ok(Some((CoolOffWaiver::Dev, None)))
+    );
+    assert_eq!(
+        cool_off_waiver(Tier::Ci, on(), None),
+        Ok(Some((CoolOffWaiver::Ci, None)))
+    );
     for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
-        assert_eq!(cool_off_waiver(tier, None), Ok(None), "{tier:?} unset");
+        assert_eq!(
+            cool_off_waiver(tier, None, None),
+            Ok(None),
+            "{tier:?} unset"
+        );
     }
 }
 
-/// DEC-2146 item 2: staging, production, and a tier unset or unknown (which reads as production)
-/// refuse the waiver at start, naming the setting alone, so a misconfigured cell fails closed.
+/// DEC-2146 item 2 and DEC-2150 item 1: production, and a tier unset or unknown (which reads as
+/// production), refuse the waiver at start, with or without an expiry, naming the waiver alone, so
+/// a misconfigured cell fails closed.
 #[test]
-fn a_waiver_outside_dev_and_ci_refuses_the_start() {
+fn a_waiver_in_production_refuses_the_start_with_or_without_an_expiry() {
     let refused = Err(StartRefusal::Setting {
         name: COOL_OFF_WAIVER,
     });
-    for setting in [
-        Some("staging"),
-        Some("production"),
-        None,
-        Some("qa"),
-        Some("CI"),
-    ] {
+    for setting in [Some("production"), None, Some("qa"), Some("CI")] {
         let tier = Tier::from_setting(setting);
+        for until in [None, Some(OsStr::new(BEFORE_CEILING))] {
+            assert_eq!(
+                cool_off_waiver(tier, on(), until),
+                refused,
+                "tier setting {setting:?}, expiry {until:?}"
+            );
+        }
+    }
+}
+
+/// DEC-2150 item 3: the ceiling compiled into the server is 2026-11-05T00:00:00Z, in the form the
+/// expiry takes.
+#[test]
+fn the_staging_ceiling_is_the_fifth_of_november() {
+    assert_eq!(STAGING_WAIVER_CEILING, "2026-11-05T00:00:00Z");
+    assert_eq!(
+        instant(STAGING_WAIVER_CEILING),
+        UtcNanos::from_parts(1_793_836_800, 0).expect("an instant")
+    );
+}
+
+/// DEC-2150 items 1 to 3: a staging cell starts with the waiver and an expiry no later than the
+/// ceiling, the ceiling itself included, and waives as `staging` until it. An expiry already past
+/// still starts: the verifier then counts no waiver (item 4), which fails closed.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_staging_waiver_starts_with_an_expiry_no_later_than_the_ceiling() {
+    for until in [
+        STAGING_WAIVER_CEILING,
+        BEFORE_CEILING,
+        "2026-10-01T00:00:00Z",
+    ] {
         assert_eq!(
-            cool_off_waiver(tier, Some(OsStr::new("true"))),
-            refused,
-            "tier setting {setting:?}"
+            cool_off_waiver(Tier::Staging, on(), Some(OsStr::new(until))),
+            Ok(Some((CoolOffWaiver::Staging, Some(instant(until))))),
+            "{until}"
         );
+    }
+}
+
+/// DEC-2150 item 2: a staging waiver without an expiry refuses the start, naming the expiry.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_staging_waiver_without_an_expiry_refuses_the_start() {
+    assert_eq!(
+        cool_off_waiver(Tier::Staging, on(), None),
+        Err(StartRefusal::Setting {
+            name: COOL_OFF_WAIVER_UNTIL,
+        })
+    );
+}
+
+/// DEC-2150 item 3: a staging expiry later than the ceiling, by a second or by more, refuses the
+/// start, so a values edit alone cannot extend the waiver.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_staging_expiry_past_the_ceiling_refuses_the_start() {
+    for until in [
+        "2026-11-05T00:00:01Z",
+        "2026-11-06T00:00:00Z",
+        "2027-01-01T00:00:00Z",
+    ] {
+        assert_eq!(
+            cool_off_waiver(Tier::Staging, on(), Some(OsStr::new(until))),
+            Err(StartRefusal::Setting {
+                name: COOL_OFF_WAIVER_UNTIL,
+            }),
+            "{until}"
+        );
+    }
+}
+
+/// DEC-2150 item 2: an expiry in any form but `YYYY-MM-DDTHH:MM:SSZ` refuses the start, naming the
+/// expiry, in staging and in a test tier alike.
+#[test]
+#[ignore = "pending E9-4"]
+fn an_expiry_in_any_other_form_refuses_the_start() {
+    let forms = [
+        OsStr::new(""),
+        OsStr::new("2026-11-01"),
+        OsStr::new("2026-11-01T12:00Z"),
+        OsStr::new("2026-11-01T12:00:00.000Z"),
+        OsStr::new("2026-11-01T12:00:00+00:00"),
+        OsStr::new("2026-11-01 12:00:00Z"),
+        OsStr::new("2026-11-01t12:00:00z"),
+        OsStr::new(" 2026-11-01T12:00:00Z"),
+        OsStr::new("2026-11-31T12:00:00Z"),
+        OsStr::from_bytes(b"2026-11-01T12:00:00\xff"),
+    ];
+    for tier in [Tier::Staging, Tier::Ci, Tier::Dev] {
+        for until in forms {
+            assert_eq!(
+                cool_off_waiver(tier, on(), Some(until)),
+                Err(StartRefusal::Setting {
+                    name: COOL_OFF_WAIVER_UNTIL,
+                }),
+                "{until:?} in {tier:?}"
+            );
+        }
+    }
+}
+
+/// DEC-2150 item 2: an expiry without the waiver refuses the start in every tier, naming the
+/// expiry, so a stray expiry is never silently ignored.
+#[test]
+#[ignore = "pending E9-4"]
+fn an_expiry_without_the_waiver_refuses_the_start() {
+    for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
+        assert_eq!(
+            cool_off_waiver(tier, None, Some(OsStr::new(BEFORE_CEILING))),
+            Err(StartRefusal::Setting {
+                name: COOL_OFF_WAIVER_UNTIL,
+            }),
+            "{tier:?}"
+        );
+    }
+}
+
+/// DEC-2150 item 2: a `dev` or `ci` cell honours an expiry it is given, which can only end its
+/// waiver, and the staging ceiling does not apply to it.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_test_cell_honours_an_expiry_past_the_ceiling() {
+    for (tier, waiver) in [
+        (Tier::Dev, CoolOffWaiver::Dev),
+        (Tier::Ci, CoolOffWaiver::Ci),
+    ] {
+        for until in [BEFORE_CEILING, "2027-01-01T00:00:00Z"] {
+            assert_eq!(
+                cool_off_waiver(tier, on(), Some(OsStr::new(until))),
+                Ok(Some((waiver, Some(instant(until))))),
+                "{until} in {tier:?}"
+            );
+        }
     }
 }
 
@@ -563,7 +710,7 @@ fn a_waiver_of_any_other_value_refuses_the_start_in_every_tier() {
     for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
         for value in values {
             assert_eq!(
-                cool_off_waiver(tier, Some(value)),
+                cool_off_waiver(tier, Some(value), None),
                 refused,
                 "{value:?} in {tier:?}"
             );
@@ -576,4 +723,8 @@ fn a_waiver_of_any_other_value_refuses_the_start_in_every_tier() {
 #[test]
 fn the_waivers_name_passes_the_secret_name_check() {
     assert_eq!(check_environment([(COOL_OFF_WAIVER, "true")]), Ok(()));
+    assert_eq!(
+        check_environment([(COOL_OFF_WAIVER_UNTIL, BEFORE_CEILING)]),
+        Ok(())
+    );
 }
