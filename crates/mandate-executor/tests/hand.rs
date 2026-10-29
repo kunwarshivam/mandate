@@ -3307,13 +3307,19 @@ fn a_held_bracket(
     entry
 }
 
-/// The quantity of the one protective OCO a step submits that is not `except`.
+/// What the protective OCOs a step submits cover together, but `except`: a re-placement sends one
+/// leg for each holder (DEC-2849 item 8).
 fn re_placed(ran: &common::Ran, except: Option<&str>) -> mandate_num::Qty {
-    ran.submissions()
+    let legs: Vec<mandate_num::Qty> = ran
+        .submissions()
         .into_iter()
-        .find(|o| o.oco.is_some() && Some(o.client_order_id.as_str()) != except)
+        .filter(|o| o.oco.is_some() && Some(o.client_order_id.as_str()) != except)
         .map(|o| o.qty)
-        .expect("protection is re-placed in this step")
+        .collect();
+    assert!(!legs.is_empty(), "protection is re-placed in this step");
+    legs.into_iter()
+        .try_fold(mandate_num::Qty::ZERO, |sum, qty| sum.checked_add(qty))
+        .expect("the legs sum")
 }
 
 /// E1 (DEC-532 item 2, `replace` after an exit sequence). The protected 10 and another agent's
