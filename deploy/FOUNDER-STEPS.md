@@ -610,15 +610,15 @@ nothing and takes no command.
    `web/wrangler.jsonc` keeps them across later deploys, so you set them once.
 4. **Sign in** at `https://app.owlhead.ai`. The dashboard should show staging's workspace, or say
    that something is not reported. It should never show the example agents.
-5. **Add your passkey right away.** Open **Settings → Profile → Passkeys for confirming** and click
-   **Add a passkey** within five minutes of signing in; after that, sign in again first. This is
-   the passkey that confirms a mandate, a deployment or an approval. It is not the Supabase
-   sign-in passkey. A first passkey cannot confirm anything for 24 hours (DEC-2108 item 5), and
-   staging has no way round that: the waiver exists only in development and CI builds
-   ([DEC-2146](../docs/project/decisions/DEC-2146.md), [DEC-2411](../docs/project/decisions/DEC-2411.md)).
-   Every day you wait to add it is a day added to the first deploy.
-6. **After 24 hours, set up the demo agent** under **Agents → New**. Each step-up the app shows
-   comes with a code. Confirm it as section J says.
+5. **Add your passkey.** Open **Settings → Profile → Passkeys for confirming** and click **Add a
+   passkey** within five minutes of signing in; after that, sign in again first. This is the passkey
+   that confirms a mandate, a deployment or an approval. It is not the Supabase sign-in passkey.
+   Elsewhere a first passkey cannot confirm anything for 24 hours (DEC-2108 item 5). Staging waives
+   that for the demo until its expiry, no later than 2026-11-05T00:00Z
+   ([DEC-2150](../docs/project/decisions/DEC-2150.md)), so you can use it at once.
+6. **Set up the demo agent the same day**, under **Agents → New**. Each step-up the app shows comes
+   with a code. Confirm it as section J says. After the waiver's expiry, a passkey added from then on
+   waits its 24 hours again.
 
 **To undo:** delete `OWLHEAD_DATA_SOURCE` from the Worker's variables and deploy. The app then
 shows the fixtures again. Nothing in staging changes, and your passkey stays enrolled.
