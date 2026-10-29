@@ -22,6 +22,7 @@ use mandate_authn::Request;
 use mandate_canon::Value;
 use mandate_identity::Permission;
 
+use crate::backtests::paper;
 use crate::commands::Command;
 use crate::http::{App, invalid, problem, problem_body};
 use crate::reads::{Deployment, deployed};
@@ -60,7 +61,7 @@ pub async fn owner_request(
     let Some(deployment) = live_deployment(&reader.control, &agent) else {
         return Refused::NotFound.response();
     };
-    if reader.control.first().map(|row| row.environment.as_str()) != Some("paper") {
+    if !paper(&reader.control) {
         return problem(
             StatusCode::CONFLICT,
             problem_body(ProblemCode::LiveUnavailable),
