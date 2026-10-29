@@ -175,6 +175,17 @@ fn switched(shell: &mut Shell, ports: &Ports<'_>) -> Vec<common::Ran> {
     ran
 }
 
+/// The id of the switch the shell journaled last.
+fn switch_id(shell: &Shell) -> String {
+    shell
+        .account_journal
+        .iter()
+        .rev()
+        .find(|event| event.event_type == "KillSwitchActivated")
+        .map(|event| event.event_id.0.clone())
+        .unwrap_or_default()
+}
+
 fn member<'a>(payload: &'a Value, name: &str) -> Option<&'a str> {
     payload.get(name).and_then(Value::as_str)
 }
@@ -556,6 +567,242 @@ fn an_exit_other_than_the_flatten_is_still_held_by_an_order_in_doubt() {
     );
 }
 
+/// Another agent's `quantity` of `AAPL`, bought at 150 beside the agent's ten after its OCO was
+/// placed, so the OCO stays the agent's own (§5.4's leg-agent rule) and the position is shared
+/// (DEC-2849).
+fn another_holder(shell: &mut Shell, quantity: &str) {
+    let bought = [
+        (
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-other-1")),
+                ("agent", text(common::OTHER_AGENT)),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty", text(quantity)),
+                ("limit", text("150")),
+            ],
+        ),
+        (
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-other")),
+                ("client_order_id", text("md-other-1")),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty_gross", text(quantity)),
+                ("price", text("150")),
+            ],
+        ),
+        (
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text("md-other-1")),
+                ("state", text("filled")),
+            ],
+        ),
+    ];
+    for (event_type, pairs) in bought {
+        let at = shell.head().0.saturating_add(1);
+        shell
+            .fold_one(&event(
+                ACCOUNT_STREAM,
+                at,
+                event_type,
+                with_clock(&pairs, 10),
+            ))
+            .expect("the other holder's lots fold");
+    }
+}
+
+/// The owner's release of `quantity` of the agent's `AAPL` (journal spec §9.27, DEC-2354).
+fn released(shell: &mut Shell, quantity: &str) {
+    let at = shell.head().0.saturating_add(1);
+    let pairs = [
+        ("agent_id", text(common::AGENT)),
+        ("instrument", text(AAPL)),
+        ("qty", text(quantity)),
+        ("cause", text("owner_release")),
+    ];
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            at,
+            "PositionReleased",
+            with_clock(&pairs, 10),
+        ))
+        .expect("the release folds");
+}
+
+/// R1's case, DEC-2857 items 2 and 3: another agent holds ten beside the agent's ten, and the
+/// agent's own OCO answer was lost. Its stop may have fired and sold the agent's ten, so nothing
+/// of the agent's is certainly held: the switch sells nothing at once, raises only the remainder,
+/// and never offers the other holder's shares.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_agents_own_protective_order_in_doubt_leaves_another_holders_shares_unsold() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    another_holder(&mut shell, "10");
+    oco_unknown(&mut shell);
+    let runs = switched(&mut shell, &ports);
+    assert!(sells(&runs).is_empty(), "{:?}", sells(&runs));
+    let parts = flattens(&runs);
+    let [(remainder, _)] = parts.as_slice() else {
+        panic!("the remainder alone: {parts:?}");
+    };
+    assert!(remainder.ends_with('r'));
+}
+
+/// The switch beside a sell of four in doubt with the OCO still resting: the certain part, sized
+/// six, waits on the OCO's cancel (§5.4). The owner then releases six of the agent's ten, and the
+/// cancel is confirmed: the runs of the confirmation.
+fn capped_to_zero_beside_a_sell_in_doubt(shell: &mut Shell, ports: &Ports<'_>) -> Vec<common::Ran> {
+    unknown(shell, SELL_IN_DOUBT, Side::Sell, "4");
+    let switch = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(OwnerConfirmation {
+                bid: price("155"),
+                bid_size: qty("100"),
+                floor: price("150.35"),
+                user: "user-1".to_owned(),
+                step_up: "assertion-1".to_owned(),
+            }),
+            cause: None,
+        }),
+        ports,
+    );
+    assert!(
+        sells(&[switch]).is_empty(),
+        "the certain part waits on the OCO's cancel"
+    );
+    released(shell, "6");
+    vec![shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: OCO.to_owned(),
+        })),
+        ports,
+    )]
+}
+
+/// DEC-2857 item 5: a certain part capped to zero, the agent's four all covered by the sell in
+/// doubt, is held `unknown_order_in_flight` while that sell is `Unknown`, as rule 13 holds any
+/// exit: nothing is sent.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_certain_part_capped_to_zero_is_held_while_an_order_is_in_doubt() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    let runs = capped_to_zero_beside_a_sell_in_doubt(&mut shell, &ports);
+    assert!(sells(&runs).is_empty());
+    let certain = format!("k-{}-0", switch_id(&shell));
+    assert_eq!(
+        verdicts(&runs, &certain).last().cloned(),
+        Some((
+            "hold".to_owned(),
+            Some("unknown_order_in_flight".to_owned())
+        ))
+    );
+}
+
+/// DEC-2857 item 5: once the sell in doubt is found filled, nothing of the agent's is left and
+/// nothing in the instrument is `Unknown`, so the zero-capped certain part ends: abandoned
+/// `released_to_owner` with an `ExitStalled` alert (DEC-2360 item 1), never waiting on.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_certain_part_capped_to_zero_ends_once_nothing_is_in_doubt() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    capped_to_zero_beside_a_sell_in_doubt(&mut shell, &ports);
+    let after = resolved(
+        &mut shell,
+        &ports,
+        20,
+        (SELL_IN_DOUBT, Side::Sell, "4"),
+        ("filled", "4"),
+    );
+    assert!(sells(&after).is_empty());
+    assert!(
+        abandoned(&after).contains(&"released_to_owner".to_owned()),
+        "{:?}",
+        abandoned(&after)
+    );
+    assert!(
+        after
+            .iter()
+            .any(|ran| ran.notifications.contains(&"exit_stalled"))
+    );
+}
+
+/// DEC-2857 item 5: the sell in doubt is found filled while the certain six rest, so the remainder
+/// ends `flatten_covered`. The broker then rejects the six unfilled, which ends their sequence and
+/// re-protects them: what they did not sell is the owner's, and the owner is alerted once, never
+/// left with it silently unsold.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_certain_part_ending_unfilled_after_its_remainder_was_covered_alerts_the_owner() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    let runs = switched_beside_a_sell_of_four(&mut shell, &ports);
+    let (certain, six) = sells(&runs).first().cloned().expect("the certain part");
+    let covered = resolved(
+        &mut shell,
+        &ports,
+        20,
+        (SELL_IN_DOUBT, Side::Sell, "4"),
+        ("filled", "4"),
+    );
+    assert_eq!(abandoned(&covered), ["flatten_covered"]);
+    let text_qty = six.to_string();
+    let accepted = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "new",
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(accepted))),
+        &ports,
+    );
+    let rejected = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "rejected",
+    );
+    let ended = shell.run(Input::BrokerUpdate(BrokerUpdate::Order(rejected)), &ports);
+    let alerts = ended
+        .notifications
+        .iter()
+        .filter(|kind| **kind == "exit_stalled")
+        .count();
+    assert_eq!(alerts, 1, "{:?}", ended.draft_types());
+}
+
 /// How the broker turns out to have handled one order in doubt, once its lookup is answered.
 #[derive(Debug, Clone, Copy)]
 enum Outcome {
@@ -600,6 +847,8 @@ enum Seen {
     Sent(u32),
     /// A flatten sell of this many filled.
     Sold(u32),
+    /// A flatten sell's unfilled rest, this many, was cancelled and sells no more.
+    Withdrawn(u32),
     /// Order in doubt `n` filled this many.
     DoubtFilled(usize, u32),
     /// Order in doubt `n` was found terminal.
@@ -609,8 +858,10 @@ enum Seen {
 const HELD: u32 = 10;
 
 /// The independent oracle of DEC-2857 invariants 1 to 3, over the scenario and what the run
-/// showed, with its own accumulators: the position, the flatten's sells outstanding, and the most
-/// each order in doubt could still sell. It never reads the executor's state.
+/// showed, with its own accumulators: the agent's position, the flatten's sells outstanding, and
+/// the most each order in doubt could still sell, the agent's own protective one included. It never
+/// reads the executor's state. Only the agent's orders sell, so the agent's position never falling
+/// below zero is another holder's shares never being sold.
 fn judge(doubts: &[(Side, u32)], seen: &[Seen]) -> Result<(), String> {
     let mut position = i64::from(HELD);
     let mut outstanding = 0_i64;
@@ -645,6 +896,10 @@ fn judge(doubts: &[(Side, u32)], seen: &[Seen]) -> Result<(), String> {
                 position -= i64::from(quantity);
                 outstanding -= i64::from(quantity);
             }
+            Seen::Withdrawn(quantity) => {
+                outstanding -= i64::from(quantity);
+                sent_so_far -= i64::from(quantity);
+            }
             Seen::DoubtFilled(at, quantity) => {
                 let quantity = i64::from(quantity);
                 match doubts[at].0 {
@@ -667,7 +922,7 @@ fn judge(doubts: &[(Side, u32)], seen: &[Seen]) -> Result<(), String> {
     let waited_on = before_any_resolved.unwrap_or(sent_so_far);
     if waited_on != certain {
         return Err(format!(
-            "{waited_on} sold before any order in doubt resolved; {certain} was certainly held"
+            "{waited_on} offered before any order in doubt resolved; {certain} was certainly held"
         ));
     }
     if position != 0 || outstanding != 0 {
@@ -684,21 +939,133 @@ fn shares(quantity: Qty) -> u32 {
     quantity.to_string().parse().unwrap_or(u32::MAX)
 }
 
-/// Runs the agent's switch over its ten beside `doubts` against a broker that fills every flatten
-/// sell whole at once, answers each lookup of an order in doubt from its round on, and ticks eight
-/// seconds a round: what the run showed.
-fn drive(doubts: &[Doubt]) -> Vec<Seen> {
+/// One run's setting beside the agent's ten: its orders in doubt, another holder's shares, the
+/// agent's own OCO in doubt (its outcome and round), and how much the first flatten sell fills at
+/// once, the rest resting.
+#[derive(Debug, Clone)]
+struct Scenario {
+    doubts: Vec<Doubt>,
+    other: u32,
+    oco: Option<(Outcome, u32)>,
+    first_fill: Option<u32>,
+}
+
+impl Scenario {
+    /// Every order in doubt as the oracle reads it, the OCO last as a sell of the ten it covers.
+    fn in_doubt(&self) -> Vec<Doubt> {
+        let mut all = self.doubts.clone();
+        if let Some((outcome, round)) = self.oco {
+            all.push(Doubt {
+                side: Side::Sell,
+                qty: HELD,
+                outcome,
+                round,
+            });
+        }
+        all
+    }
+}
+
+/// A sell the executor sent, accepted, `part` of it filled at 155, and the rest left resting.
+fn partly_filled(
+    shell: &mut Shell,
+    ports: &Ports<'_>,
+    client: &str,
+    quantity: Qty,
+    part: u32,
+) -> Vec<common::Ran> {
+    let text_qty = quantity.to_string();
+    let accepted = broker_order(
+        &format!("b-{client}"),
+        Some(client),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "new",
+    );
+    let mut fill = broker_fill(
+        &format!("f-{client}"),
+        Some(client),
+        &part.to_string(),
+        "155",
+    );
+    fill.side = Side::Sell;
+    let partly = broker_order(
+        &format!("b-{client}"),
+        Some(client),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        &part.to_string(),
+        "partially_filled",
+    );
+    vec![
+        shell.run(Input::Broker(Ok(BrokerOutcome::Submitted(accepted))), ports),
+        shell.run(Input::BrokerUpdate(BrokerUpdate::Fill(fill)), ports),
+        shell.run(Input::BrokerUpdate(BrokerUpdate::Order(partly)), ports),
+    ]
+}
+
+/// The resting rest of a partly filled flatten sell, `rest` of it, filled at 155 and the order
+/// with it.
+fn rest_filled(shell: &mut Shell, ports: &Ports<'_>, client: &str, rest: u32) -> Vec<common::Ran> {
+    let Some(order) = shell
+        .state
+        .orders()
+        .values()
+        .find(|order| order.client_order_id.as_str() == client)
+        .map(|order| order.qty.to_string())
+    else {
+        return Vec::new();
+    };
+    let mut fill = broker_fill(
+        &format!("f-rest-{client}"),
+        Some(client),
+        &rest.to_string(),
+        "155",
+    );
+    fill.side = Side::Sell;
+    let done = broker_order(
+        &format!("b-{client}"),
+        Some(client),
+        AAPL,
+        Side::Sell,
+        &order,
+        &order,
+        "filled",
+    );
+    vec![
+        shell.run(Input::BrokerUpdate(BrokerUpdate::Fill(fill)), ports),
+        shell.run(Input::BrokerUpdate(BrokerUpdate::Order(done)), ports),
+    ]
+}
+
+/// Runs the agent's switch in `scenario` against a broker that fills each flatten sell whole at
+/// once (the first only `first_fill` of it, the rest resting two rounds unless a ladder step
+/// withdraws it first),
+/// answers each lookup of an order in doubt from its round on, and ticks eight seconds a round:
+/// what the run showed.
+fn drive(scenario: &Scenario) -> Vec<Seen> {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = ten_held(&ports);
-    let named: Vec<String> = (0..doubts.len())
+    if scenario.other > 0 {
+        another_holder(&mut shell, &scenario.other.to_string());
+    }
+    let doubts = scenario.in_doubt();
+    let mut named: Vec<String> = (0..scenario.doubts.len())
         .map(|at| format!("01JABCDEFGHJKMNPQRSTVWXY{at:02}"))
         .collect();
-    for (doubt, id) in doubts.iter().zip(&named) {
+    for (doubt, id) in scenario.doubts.iter().zip(&named) {
         unknown(&mut shell, id, doubt.side, &doubt.qty.to_string());
+    }
+    if scenario.oco.is_some() {
+        oco_unknown(&mut shell);
+        named.push(OCO.trim_start_matches("md-").to_owned());
     }
     let mut seen = Vec::new();
     let mut queue: VecDeque<BrokerRequest> = switched(&mut shell, &ports)
@@ -706,6 +1073,8 @@ fn drive(doubts: &[Doubt]) -> Vec<Seen> {
         .flat_map(|ran| ran.requests)
         .collect();
     let mut found = vec![false; doubts.len()];
+    let mut first_fill = scenario.first_fill;
+    let mut resting: Option<(String, u32, u32)> = None;
     let mut round = 0_u32;
     let mut budget = 2_000_u32;
     while round < 40 && budget > 0 {
@@ -713,6 +1082,14 @@ fn drive(doubts: &[Doubt]) -> Vec<Seen> {
             round += 1;
             let at = 10 + i64::from(round) * 8;
             queue.extend(shell.run(Input::Tick(clock(at)), &ports).requests);
+            if let Some((client, rest, _)) = resting.take_if(|(_, _, due)| *due <= round) {
+                seen.push(Seen::Sold(rest));
+                queue.extend(
+                    rest_filled(&mut shell, &ports, &client, rest)
+                        .into_iter()
+                        .flat_map(|ran| ran.requests),
+                );
+            }
             continue;
         };
         budget -= 1;
@@ -720,19 +1097,24 @@ fn drive(doubts: &[Doubt]) -> Vec<Seen> {
             BrokerRequest::Submit(order)
                 if order.side == Side::Sell && order.purpose != Purpose::Protective =>
             {
-                seen.push(Seen::Sent(shares(order.qty)));
-                let ran = filled(
-                    &mut shell,
-                    &ports,
-                    order.client_order_id.as_str(),
-                    order.qty,
-                );
-                seen.push(Seen::Sold(shares(order.qty)));
-                ran
+                let quantity = shares(order.qty);
+                seen.push(Seen::Sent(quantity));
+                let client = order.client_order_id.as_str();
+                match first_fill.take().filter(|part| *part < quantity) {
+                    Some(part) => {
+                        seen.push(Seen::Sold(part));
+                        resting = Some((client.to_owned(), quantity - part, round + 2));
+                        partly_filled(&mut shell, &ports, client, order.qty, part)
+                    }
+                    None => {
+                        seen.push(Seen::Sold(quantity));
+                        filled(&mut shell, &ports, client, order.qty)
+                    }
+                }
             }
             BrokerRequest::Submit(order) => {
                 let text_qty = order.qty.to_string();
-                let resting = broker_order(
+                let rests = broker_order(
                     "b-resting",
                     Some(order.client_order_id.as_str()),
                     AAPL,
@@ -741,14 +1123,21 @@ fn drive(doubts: &[Doubt]) -> Vec<Seen> {
                     "0",
                     "new",
                 );
-                vec![shell.run(Input::Broker(Ok(BrokerOutcome::Submitted(resting))), &ports)]
+                vec![shell.run(Input::Broker(Ok(BrokerOutcome::Submitted(rests))), &ports)]
             }
-            BrokerRequest::Cancel { client_order_id } => vec![shell.run(
-                Input::Broker(Ok(BrokerOutcome::CancelAccepted {
-                    client_order_id: client_order_id.as_str().to_owned(),
-                })),
-                &ports,
-            )],
+            BrokerRequest::Cancel { client_order_id } => {
+                if let Some((_, rest, _)) =
+                    resting.take_if(|(client, _, _)| client.as_str() == client_order_id.as_str())
+                {
+                    seen.push(Seen::Withdrawn(rest));
+                }
+                vec![shell.run(
+                    Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                        client_order_id: client_order_id.as_str().to_owned(),
+                    })),
+                    &ports,
+                )]
+            }
             BrokerRequest::GetOrderByClientId(client) => {
                 let at = named
                     .iter()
@@ -780,30 +1169,46 @@ fn drive(doubts: &[Doubt]) -> Vec<Seen> {
     seen
 }
 
+fn outcome() -> impl Strategy<Value = Outcome> {
+    prop_oneof![
+        Just(Outcome::Filled),
+        (1_u32..=3).prop_map(Outcome::PartlyThenCancelled),
+        Just(Outcome::Cancelled),
+        Just(Outcome::Rejected),
+    ]
+}
+
 fn doubt() -> impl Strategy<Value = Doubt> {
-    (
-        any::<bool>(),
-        1_u32..=4,
-        prop_oneof![
-            Just(Outcome::Filled),
-            (1_u32..=3).prop_map(Outcome::PartlyThenCancelled),
-            Just(Outcome::Cancelled),
-            Just(Outcome::Rejected),
-        ],
-        0_u32..=6,
-    )
-        .prop_map(|(sell, quantity, outcome, round)| Doubt {
+    (any::<bool>(), 1_u32..=4, outcome(), 0_u32..=6).prop_map(|(sell, quantity, outcome, round)| {
+        Doubt {
             side: if sell { Side::Sell } else { Side::Buy },
             qty: quantity,
             outcome,
             round,
+        }
+    })
+}
+
+fn scenario() -> impl Strategy<Value = Scenario> {
+    (
+        proptest::collection::vec(doubt(), 0..=3),
+        0_u32..=10,
+        proptest::option::of((outcome(), 0_u32..=6)),
+        proptest::option::of(1_u32..=5),
+    )
+        .prop_map(|(doubts, other, oco, first_fill)| Scenario {
+            doubts,
+            other,
+            oco,
+            first_fill,
         })
 }
 
 /// DEC-2857 item 9, invariants 1 to 3: across random orders in doubt beside the agent's ten (buys
-/// and sells, each found filled, partly filled then cancelled, cancelled or rejected, in any
-/// order), the flatten never leaves the position able to go short, sells exactly what was
-/// certainly held before anything resolved, and ends flat.
+/// and sells, the agent's own OCO among them, each found filled, partly filled then cancelled,
+/// cancelled or rejected, in any order), with another holder's shares beside them and a first
+/// flatten sell that may fill only in part and rest, the flatten never leaves the agent able to
+/// go short, sells exactly what was certainly held before anything resolved, and ends flat.
 #[test]
 #[ignore = "pending E7-4"]
 fn across_random_resolutions_the_flatten_never_goes_short_and_ends_flat() {
@@ -812,18 +1217,33 @@ fn across_random_resolutions_the_flatten_never_goes_short_and_ends_flat() {
         failure_persistence: None,
         ..proptest::test_runner::Config::default()
     });
-    let result = runner.run(&proptest::collection::vec(doubt(), 1..=3), |doubts| {
+    let result = runner.run(&scenario(), |scenario| {
+        let doubts = scenario.in_doubt();
+        prop_assume!(!doubts.is_empty());
         let sells: u32 = doubts
             .iter()
             .filter(|d| d.side == Side::Sell)
             .map(|d| d.qty)
             .sum();
         prop_assume!(sells <= HELD);
-        let scenario: Vec<(Side, u32)> = doubts.iter().map(|d| (d.side, d.qty)).collect();
-        let seen = drive(&doubts);
-        judge(&scenario, &seen).map_err(|why| TestCaseError::fail(format!("{why}: {seen:?}")))
+        let in_doubt: Vec<(Side, u32)> = doubts.iter().map(|d| (d.side, d.qty)).collect();
+        let seen = drive(&scenario);
+        judge(&in_doubt, &seen).map_err(|why| TestCaseError::fail(format!("{why}: {seen:?}")))
     });
     assert!(result.is_ok(), "{result:?}");
+}
+
+/// Seeded bug 5, R1's: the agent's own OCO in doubt left out of its cap. Beside another holder,
+/// the whole ten go at once, and the stop that may have fired could sell ten more of the agent's.
+#[test]
+fn the_oracle_catches_the_agents_protective_order_in_doubt_left_out_of_its_cap() {
+    let seen = [
+        Seen::Sent(10),
+        Seen::Sold(10),
+        Seen::DoubtFilled(0, 10),
+        Seen::Resolved(0),
+    ];
+    assert!(judge(&[(Side::Sell, HELD)], &seen).is_err());
 }
 
 /// The oracle accepts the run DEC-2857 describes for a sell of four in doubt found cancelled: six
