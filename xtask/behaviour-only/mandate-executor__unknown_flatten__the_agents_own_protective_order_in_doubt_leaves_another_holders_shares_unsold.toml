@@ -1,8 +1,0 @@
-file = "crates/mandate-executor/tests/unknown_flatten.rs"
-test = "the_agents_own_protective_order_in_doubt_leaves_another_holders_shares_unsold"
-reason = """
-DEC-2857 (E7-4): an agent-scoped kill switch's flatten never waits on an `Unknown` order. No stub
-stands in the way: today the switch raises no close while the OCO is `Unknown`, so no remainder is
-received, and that is the failure. The implementation deletes this file with the test's `#[ignore]`
-line.
-"""

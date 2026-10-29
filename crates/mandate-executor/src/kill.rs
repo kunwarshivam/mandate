@@ -704,9 +704,9 @@ fn in_doubt_buys(
 
 /// DEC-2857 item 3: the most a send of a switch's flatten may sell, so that whatever each
 /// `Unknown` order turns out to have done the agent's sub-ledger and the position stay at or above
-/// zero. The lower of the sub-ledger less every live non-protective sell the switch reaches, and
-/// the long position less every live non-protective sell in the instrument and every `Unknown`
-/// protective one; neither counts the order of `own` being sized, but an earlier one of it still
+/// zero. The lower of the sub-ledger less every live non-protective sell the switch reaches and
+/// every `Unknown` one it reaches, protective or not, and the long position less every live
+/// non-protective sell in the instrument and every `Unknown` one, protective or not; neither counts the order of `own` being sized, but an earlier one of it still
 /// `Unknown` is counted.
 fn flatten_cap(
     view: &ExecutorState,
@@ -728,13 +728,12 @@ fn flatten_cap(
     let mut anyone = Qty::ZERO;
     for order in selling {
         let left = order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO);
-        let protective = order.purpose == Purpose::Protective;
-        if !protective
-            && (order.agent.as_ref() == Some(agent) || reached(view, order, agent, closing))
+        let counted = order.purpose != Purpose::Protective || order.state == OrderState::Unknown;
+        if counted && (order.agent.as_ref() == Some(agent) || reached(view, order, agent, closing))
         {
             reaching = reaching.checked_add(left)?;
         }
-        if !protective || order.state == OrderState::Unknown {
+        if counted {
             anyone = anyone.checked_add(left)?;
         }
     }
@@ -777,6 +776,49 @@ pub(crate) fn is_remainder(view: &ExecutorState, intent: &IntentId) -> bool {
 /// items 1 and 3).
 pub(crate) fn is_certain(view: &ExecutorState, intent: &IntentId) -> bool {
     is_flatten(view, intent) && !intent.0.0.ends_with(REMAINDER)
+}
+
+/// DEC-2857 item 5: a certain part's order that `ended` unfilled after its remainder ended
+/// `flatten_covered` leaves the agent's rest in the instrument to the owner, who is alerted once on
+/// the record that ends it, so the rest is never left silently unsold. A rejection or an expiry
+/// ends its sequence; a cancel does only when it is not a ladder step's, whose confirmation sends
+/// the next rung (§5.6 step 2).
+pub(crate) fn certain_part_ended(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    state: OrderState,
+    ended: &EventId,
+) -> Result<(), ExecutorError> {
+    let view = &batch.view;
+    let Some(order) = view.orders.get(id) else {
+        return Ok(());
+    };
+    let Some(intent) = order.intent_id.as_ref() else {
+        return Ok(());
+    };
+    let Some(switch) = switch_of(view, intent).filter(|_| is_certain(view, intent)) else {
+        return Ok(());
+    };
+    let remainder = IntentId(EventId(format!("{}{REMAINDER}", intent.0.0)));
+    let covered = view
+        .intents
+        .get(&remainder)
+        .is_some_and(|record| record.outcome == IntentOutcome::Abandoned);
+    let stepped = state == OrderState::Canceled
+        && view
+            .exiting
+            .values()
+            .map(|sequence| (&sequence.intent, &sequence.ladder))
+            .chain(
+                view.ladders
+                    .values()
+                    .map(|lone| (&lone.intent, &lone.ladder)),
+            )
+            .any(|(of, ladder)| of == intent && ladder.stepping);
+    if covered && !stepped && sub_ledger(view, &switch.agent, &order.instrument)? > Qty::ZERO {
+        batch.notify(ended.clone(), OwnerAlertKind::ExitStalled);
+    }
+    Ok(())
 }
 
 /// Whether `switch`'s close `ordinal` is `agent`'s sell of `instrument`: what makes an intent

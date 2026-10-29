@@ -213,11 +213,18 @@ pub(crate) fn record_state_change(
     state: OrderState,
     evidence: StateEvidence,
 ) -> Result<EventId, ExecutorError> {
-    batch.journal(
+    let ended = batch.journal(
         "OrderStateChanged",
         None,
         state_change_fields(id, state, evidence),
-    )
+    )?;
+    if matches!(
+        state,
+        OrderState::Canceled | OrderState::Rejected | OrderState::Expired
+    ) {
+        crate::kill::certain_part_ended(batch, id, state, &ended)?;
+    }
+    Ok(ended)
 }
 
 /// Journals one transition, or — when §5.7 has no such edge — the attempt, marked ignored, with

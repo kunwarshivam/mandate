@@ -633,7 +633,6 @@ fn released(shell: &mut Shell, quantity: &str) {
 /// of the agent's is certainly held: the switch sells nothing at once, raises only the remainder,
 /// and never offers the other holder's shares.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_agents_own_protective_order_in_doubt_leaves_another_holders_shares_unsold() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -689,7 +688,6 @@ fn capped_to_zero_beside_a_sell_in_doubt(shell: &mut Shell, ports: &Ports<'_>) -
 /// doubt, is held `unknown_order_in_flight` while that sell is `Unknown`, as rule 13 holds any
 /// exit: nothing is sent.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_certain_part_capped_to_zero_is_held_while_an_order_is_in_doubt() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -713,7 +711,6 @@ fn a_certain_part_capped_to_zero_is_held_while_an_order_is_in_doubt() {
 /// nothing in the instrument is `Unknown`, so the zero-capped certain part ends: abandoned
 /// `released_to_owner` with an `ExitStalled` alert (DEC-2360 item 1), never waiting on.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_certain_part_capped_to_zero_ends_once_nothing_is_in_doubt() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -747,7 +744,6 @@ fn a_certain_part_capped_to_zero_ends_once_nothing_is_in_doubt() {
 /// re-protects them: what they did not sell is the owner's, and the owner is alerted once, never
 /// left with it silently unsold.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_certain_part_ending_unfilled_after_its_remainder_was_covered_alerts_the_owner() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
