@@ -162,8 +162,35 @@ fn walk_attributes(attributes: Option<&Value>, path: &mut Vec<String>, found: &m
     }
 }
 
+/// The top-level attributes `change` gives a different value, or a value known only after the
+/// apply, by name alone and sorted: the keys of its `before` and `after` whose values differ, a
+/// key on one side alone included, and those `after_unknown` marks `true`.
+fn changed_attributes(change: &Value) -> Vec<String> {
+    let side = |name: &str| change.get(name).and_then(Value::as_object);
+    let (before, after) = (side("before"), side("after"));
+    let mut names: BTreeSet<String> = before
+        .into_iter()
+        .chain(after)
+        .flat_map(|object| object.keys())
+        .filter(|key| {
+            before.and_then(|object| object.get(*key)) != after.and_then(|object| object.get(*key))
+        })
+        .cloned()
+        .collect();
+    names.extend(
+        side("after_unknown")
+            .into_iter()
+            .flatten()
+            .filter(|(_, unknown)| **unknown == Value::Bool(true))
+            .map(|(key, _)| key.clone()),
+    );
+    names.into_iter().collect()
+}
+
 /// A saved plan (`tofu show -json <plan>`) as the log may show it: one line per resource change,
-/// its actions and address, and nothing of its values. A plan that names no change says so.
+/// its actions and address, and nothing of its values. An update or a replacement also names the
+/// attributes it changes ([`changed_attributes`]), so a diff that returns on every plan shows which
+/// field moves; a create or a delete names none. A plan that names no change says so.
 pub(crate) fn plan_summary(plan: &Value) -> Vec<String> {
     let changes: Vec<String> = plan
         .get("resource_changes")
@@ -179,8 +206,19 @@ pub(crate) fn plan_summary(plan: &Value) -> Vec<String> {
                 .iter()
                 .filter_map(Value::as_str)
                 .collect();
-            (actions != ["no-op"] && actions != ["read"])
-                .then(|| format!("{} {address}", actions.join("+")))
+            if actions == ["no-op"] || actions == ["read"] {
+                return None;
+            }
+            let line = format!("{} {address}", actions.join("+"));
+            if actions == ["create"] || actions == ["delete"] {
+                return Some(line);
+            }
+            let names = changed_attributes(change.get("change")?);
+            Some(if names.is_empty() {
+                format!("{line} (changes: none named)")
+            } else {
+                format!("{line} (changes: {})", names.join(", "))
+            })
         })
         .collect();
     if changes.is_empty() {
@@ -377,7 +415,7 @@ mod tests {
             summary,
             [
                 "create module.cell.module.doks.digitalocean_kubernetes_cluster.this",
-                "delete+create module.cloudflare.cloudflare_dns_record.api",
+                "delete+create module.cloudflare.cloudflare_dns_record.api (changes: content)",
             ]
         );
         for value in ["203.0.113.7", "cfargotunnel"] {
