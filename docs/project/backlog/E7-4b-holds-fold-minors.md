@@ -2,7 +2,9 @@
   shared fold `mandate_journal::holds` (both from PR #2762) to read every input as the executor
   does and to print commands I can run as they stand, so that the list never disagrees with what
   the executor will accept. R3's four minors on #2762, deferred under the freeze rule, each ranked:
-  1. **Must** (the coordinator's ranking): `independence_required` reads only the workspace's
+  1. **Must** (the coordinator's ranking), **done** (#2941 and its implementation): the listing's
+     first line ends `(advisory until E9-6: the executor applies the strictest policy of every
+     agent deployed on the account)`. `independence_required` reads only the workspace's
      latest membership record, while §9.28 check 4 takes the strictest overlay across every agent
      deployed on the account ([DEC-2830](../decisions/DEC-2830.md) item 2, DEC-2824 item 1). It
      fails safe (an unreadable record reads `true`), but it can print `no` where the executor
