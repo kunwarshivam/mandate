@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use common::{MemJournal, Reply, WORKSPACE, hosted, send, serve};
 use mandate_api_server::chat::{Chat, ChatModel};
-use mandate_api_server::chat_watch::pass_once;
+use mandate_api_server::chat_watch::{pass_once, watch};
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
@@ -2082,6 +2082,100 @@ fn a_member_hears_only_from_agents_they_wrote_to_and_another_member_s_message_is
         0,
         "no member wrote to agt_a, and a row with no user actor is no member's"
     );
+}
+
+#[test]
+fn whoever_deployed_the_agent_hears_its_fill_and_a_member_of_another_agent_does_not() {
+    let f = fixture(None);
+    let bob = "01JB3K6F0C9R2V7N4M8Q1T5W3Y";
+    let version = {
+        let bytes = to_canonical(&parse(PINNED_DOCUMENT.as_bytes()).expect("JSON"));
+        format!("sha256:{}", Digest::of(&bytes).to_hex())
+    };
+    let user = |id: &str| format!(r#""actor":{{"id":"{id}","kind":"user"}},"#);
+    f.journal.streams.lock().expect("unpoisoned").insert(
+        ctl(),
+        vec![
+            row(1, "StreamOpened", "{}"),
+            row_on(
+                &ctl(),
+                2,
+                "AgentDeployed",
+                &format!(r#"{{"agent_id":"agt_a","mandate_version":"{version}"}}"#),
+                &user(ALICE),
+            ),
+        ],
+    );
+    seed_fill(&f);
+    push(
+        &f,
+        &ctl(),
+        vec![
+            row_on(
+                &ctl(),
+                20,
+                "AgentDeployed",
+                &format!(r#"{{"agent_id":"agt_b","mandate_version":"{version}"}}"#),
+                &user(bob),
+            ),
+            row_on(
+                &ctl(),
+                21,
+                "ChatMessagePosted",
+                &format!(
+                    r#"{{"agent_id":"agt_b","author":"owner","card":null,"member":"{bob}","proactive":false,"run_id":null,"setup_id":null,"sources":[],"text":"to another agent"}}"#
+                ),
+                &user(bob),
+            ),
+        ],
+    );
+    assert_eq!(
+        pass(&f),
+        1,
+        "alice deployed agt_a without writing and hears it; bob deployed and wrote only to agt_b"
+    );
+    let said = texts(&thread(&f, &signed_in(&f)));
+    assert_eq!(
+        said.last().map(|t| t.1.as_str()),
+        Some("Bought 10 AAPL at 190.12.")
+    );
+}
+
+#[test]
+fn the_watcher_passes_on_its_interval_until_it_is_stopped() {
+    let f = fixture(None);
+    let cookie = alice_writes(&f);
+    seed_fill(&f);
+    let before = chat_rows(&f).len();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let app = Arc::clone(&f.app);
+    let heard = runtime.block_on(async {
+        let watcher = tokio::spawn(watch(app, stopped, Duration::from_millis(20)));
+        let mut heard = false;
+        for _ in 0..500 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if chat_rows(&f).len() > before {
+                heard = true;
+                break;
+            }
+        }
+        stop.send(true).expect("the watcher listens");
+        tokio::time::timeout(Duration::from_secs(20), watcher)
+            .await
+            .expect("the watcher ends once stopped")
+            .expect("the watcher did not panic");
+        heard
+    });
+    assert!(heard, "a pass ran on the interval");
+    assert_eq!(
+        texts(&thread(&f, &cookie)).last().map(|t| t.1.as_str()),
+        Some("Bought 10 AAPL at 190.12.")
+    );
+    runtime.shutdown_timeout(Duration::from_secs(20));
 }
 
 /// The daily note's pass at `at`, with a gateway or none, and the mode the agent's stream last records, if any.

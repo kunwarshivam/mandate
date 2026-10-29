@@ -38,10 +38,10 @@ const EVENT_REF: &str = "ev:";
 /// The `sources` label of the daily note's marker, `brief:{date}`.
 const BRIEF_REF: &str = "brief:";
 
-/// Runs a pass every [`PASS`], the first one [`PASS`] after the start, and starts none once `stop`
-/// turns true, so a draining process starts no pass.
-pub async fn watch(app: Arc<App>, mut stop: Receiver<bool>) {
-    while tokio::time::timeout(PASS, stop.wait_for(|stopped| *stopped))
+/// Runs a pass every `every` ([`PASS`] in the process), the first one `every` after the start, and
+/// starts none once `stop` turns true, so a draining process starts no pass.
+pub async fn watch(app: Arc<App>, mut stop: Receiver<bool>, every: Duration) {
+    while tokio::time::timeout(every, stop.wait_for(|stopped| *stopped))
         .await
         .is_err()
     {

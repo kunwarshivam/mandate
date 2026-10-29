@@ -381,7 +381,11 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         chat: Arc::new(start.chat),
     };
     let app = Arc::new(app);
-    tokio::spawn(chat_watch::watch(Arc::clone(&app), stop.clone()));
+    tokio::spawn(chat_watch::watch(
+        Arc::clone(&app),
+        stop.clone(),
+        chat_watch::PASS,
+    ));
     let api = spawn_listener(
         serve(
             api,
