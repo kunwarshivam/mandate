@@ -1256,8 +1256,9 @@ def render_all_result(*extra: str) -> subprocess.CompletedProcess:
 
 def test_the_recorded_news_reader_is_the_local_cell_s_alone_and_the_live_one_staging_s_alone():
     """DEC-2085 items 3 and 4, DEC-2084 item 2: `news.recorded` renders only in the local cell, at
-    dev or ci, and never in a hosted cell, whatever its tier; the live reader, which logs in to the
-    vault for the platform's key, is still refused in the local cell."""
+    dev or ci, and never in a hosted cell, whatever its tier, nor with local builds at staging or
+    production; the live reader, which logs in to the vault for the platform's key, is still
+    refused in the local cell, even at staging."""
     local_live = render_all_result(*NEWS_LOCAL, "--set", "news.recorded=false")
     assert "runs the news reader in staging alone" in local_live.stderr, local_live.stderr
     for tier in ("dev", "ci"):
@@ -1273,6 +1274,22 @@ def test_the_recorded_news_reader_is_the_local_cell_s_alone_and_the_live_one_sta
         )
         message = "news.recorded runs the news reader on its recording in the local cell alone"
         assert message in refused.stderr, (tier, refused.stderr)
+
+    def local_build(*extra: str):
+        """A render with local builds of the API's image and the reader's alone, so a refusal is
+        the reader's own."""
+        return helm(
+            CHART, "-f", str(CELL / "values" / "k3d.yaml"),
+            "--set", "images.api=mandate.local/api:0123456789ab", *NEWS_LOCAL, *extra,
+        )
+
+    for tier in ("staging", "production"):
+        refused = local_build("--set", f"deploymentTier={tier}")
+        message = f'local cell alone, at dev or ci, and localImages is true and deploymentTier "{tier}"'
+        assert message in refused.stderr, (tier, refused.stderr)
+    live_local = local_build("--set", "news.recorded=false", "--set", "deploymentTier=staging")
+    message = 'runs the news reader in staging alone, and deploymentTier is "staging"'
+    assert message in live_local.stderr, live_local.stderr
 
 
 def test_the_news_reader_s_journal_role_is_made_by_its_exact_name_in_the_application_group():
