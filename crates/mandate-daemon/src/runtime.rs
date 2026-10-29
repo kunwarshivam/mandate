@@ -3,7 +3,8 @@
 mod research;
 
 pub use research::{
-    ArtifactSink, ContextUnread, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker,
+    ArtifactSink, ContextUnread, RefusedNews, ResearchParts, ResearchSource, ResearchWiring,
+    ResearchWorker, StoredNews, merge_offers,
 };
 
 use std::collections::{BTreeSet, VecDeque};

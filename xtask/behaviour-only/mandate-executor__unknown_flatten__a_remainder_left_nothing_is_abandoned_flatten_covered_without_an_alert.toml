@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/unknown_flatten.rs"
+test = "a_remainder_left_nothing_is_abandoned_flatten_covered_without_an_alert"
+reason = """
+DEC-2857 (E7-4): an agent-scoped kill switch's flatten never waits on an `Unknown` order. No stub
+stands in the way: today the switch raises no certain part while a sell is `Unknown`, so the case
+finds nothing to fill, and that is the failure. The implementation deletes this file with the
+test's `#[ignore]` line.
+"""

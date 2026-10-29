@@ -90,7 +90,7 @@ module "cluster" {
   region                     = local.region
   vpc_id                     = module.network.vpc_id
   node_tag                   = module.network.node_tag
-  kubernetes_version         = "1.35.9-do.1"
+  kubernetes_version         = "1.35.9-do.2"
   ha_control_plane           = true
   system_pool                = { size = local.size.system_size, count = 3 }
   workspace_pool             = { size = local.size.ws_size, count = local.workspace_nodes }

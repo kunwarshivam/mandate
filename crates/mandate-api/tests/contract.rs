@@ -13,9 +13,10 @@ use mandate_api::problem::{
     ProblemError, Violation,
 };
 use mandate_api::requests::{
-    AcknowledgeRequest, ApprovalResponseRequest, ConfirmRequest, DelegationPreviewRequest,
-    EndDelegationRequest, HoldRequest, KillSwitchRequest, LiftHoldRequest, OwnerExitRequest,
-    OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest, StopRequest,
+    AcknowledgeRequest, AcknowledgmentRequestRequest, ApprovalResponseRequest, ConfirmRequest,
+    DelegationPreviewRequest, EndDelegationRequest, HoldRequest, KillSwitchRequest,
+    LiftHoldRequest, OwnerExitRequest, OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest,
+    StopRequest,
 };
 use mandate_api::responses::{CommandAccepted, CommandStatus, DelegationPreview};
 use mandate_api::wire::{
@@ -138,6 +139,11 @@ const TITLES: &[(&str, &str)] = &[
     ("last_admin", "Admin must remain"),
     ("reduction_only", "Risk reduction only"),
     ("membership_unavailable", "Membership unavailable"),
+    ("acknowledgment_unavailable", "Nothing to acknowledge"),
+    (
+        "acknowledgment_request_invalid",
+        "Request cannot be answered",
+    ),
 ];
 
 fn title_of(name: &str) -> &'static str {
@@ -989,9 +995,16 @@ fn a_request_body_given_as_an_array_is_refused_as_type_at_the_root() {
     ]));
     wrong.extend(misjudged_rows::<LiftHoldRequest>(&[("[null, null]", root)]));
     wrong.extend(misjudged_rows::<AcknowledgeRequest>(&[
-        (r#"[null, null, "$U"]"#, root),
+        (r#"[null, null, null, null, "limit", "$U"]"#, root),
         (
-            r#"{"record": null, "step_up": null, "acknowledged": "$U"}"#,
+            r#"{"record": null, "step_up": null, "subject": "limit", "acknowledged": "$U"}"#,
+            None,
+        ),
+    ]));
+    wrong.extend(misjudged_rows::<AcknowledgmentRequestRequest>(&[
+        (r#"[null, null, null, "limit", "$U"]"#, root),
+        (
+            r#"{"record": null, "step_up": null, "subject": "limit", "acknowledged": "$U"}"#,
             None,
         ),
     ]));
@@ -1584,8 +1597,10 @@ fn the_safety_enums_of_a_problem_are_closed() {
 
 /// The stories whose planned values the code may already serve (DEC-683 item 5): a value both a
 /// variant and marked planned passes only under a story named here. E10-10 is this crate's own
-/// story: its implementation serves `outcome_unknown`, which #788 lists as planned under it.
-const IN_FLIGHT: &[&str] = &["E10-10"];
+/// story: its implementation serves `outcome_unknown`, which #788 lists as planned under it. E10-12's
+/// acknowledgment routes serve `acknowledgment_unavailable` and `acknowledgment_request_invalid`
+/// until the spec drops their markers (DEC-2144 item 8).
+const IN_FLIGHT: &[&str] = &["E10-10", "E10-12"];
 
 /// DEC-683: every code the server can emit is in §3.5's table, and every code the table serves is a
 /// variant. A code the table marks `(planned: <story>)` may be absent, or present while its story is

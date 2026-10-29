@@ -20,8 +20,8 @@ use mandate_cli::agent::{
 use mandate_cli::brake::AgentCommand;
 use mandate_cli::control::ControlError;
 use mandate_cli::owner::{
-    Typed, answer, run_acknowledge, run_exit, run_request_ack, run_resume, run_status, run_stop,
-    status_lines,
+    Typed, answer, run_acknowledge, run_exit, run_holds, run_request_ack, run_resume, run_status,
+    run_stop, status_lines,
 };
 use mandate_cli::{Cli, Command};
 
@@ -695,6 +695,7 @@ fn every_command_refuses_without_a_database() {
     ] {
         for args in [
             vec!["status", AGENT, "--account", ACCOUNT],
+            vec!["holds", AGENT, "--account", ACCOUNT],
             vec!["resume", AGENT, "--code", "c0de"],
             vec!["stop", AGENT, "--release"],
             vec!["exit", AGENT, INSTRUMENT],
@@ -707,6 +708,7 @@ fn every_command_refuses_without_a_database() {
             let mut out = Vec::new();
             let ran = match &command {
                 AgentCommand::Status(a) => run_status(a, &mut out),
+                AgentCommand::Holds(a) => run_holds(a, &mut out),
                 AgentCommand::Resume(a) => run_resume(a, now, &mut out),
                 AgentCommand::Stop(a) => run_stop(a, now, &mut out),
                 AgentCommand::Exit(a) => run_exit(a, now, &mut out),
