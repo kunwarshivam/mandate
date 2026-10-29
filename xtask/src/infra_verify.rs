@@ -162,9 +162,16 @@ const FLUX_CLASSES: [(&str, &str); 16] = [
     ("retries exhausted", "retries-exhausted"),
 ];
 
+/// A HelmRelease's conditions that hold the last Helm action's own error, each with the status
+/// that names a failure: `Released` is `False` when an install or upgrade failed, and `Remediated`
+/// is `True` once helm-controller rolled back or uninstalled after one. While a release is retried,
+/// Ready and Stalled say only that it is progressing or out of retries, so these carry the cause,
+/// such as an admission webhook's denial.
+const HELM_ACTION_CONDITIONS: [(&str, &str); 2] = [("Released", "False"), ("Remediated", "True")];
+
 /// Why a Flux object is not Ready: its Ready condition's status and reason word, a Stalled
-/// condition's reason, and the classes their messages match; a message that matches none is
-/// `unclassified`.
+/// condition's reason, a failed Helm action's conditions' reasons ([`HELM_ACTION_CONDITIONS`]), and
+/// the classes their messages match; a message that matches none is `unclassified`.
 fn flux_why(object: &Value) -> String {
     let conditions = object["status"]["conditions"].as_array();
     let find =
@@ -181,6 +188,12 @@ fn flux_why(object: &Value) -> String {
     if let Some(stalled) = find("Stalled").filter(|c| text(c, &["status"]) == "True") {
         said.push_str(&format!("; Stalled: {}", word(text(stalled, &["reason"]))));
         messages.push(text(stalled, &["message"]));
+    }
+    for (kind, failing) in HELM_ACTION_CONDITIONS {
+        if let Some(condition) = find(kind).filter(|c| text(c, &["status"]) == failing) {
+            said.push_str(&format!("; {kind}: {}", word(text(condition, &["reason"]))));
+            messages.push(text(condition, &["message"]));
+        }
     }
     let lower = messages.join("\n").to_lowercase();
     let mut found: Vec<&str> = Vec::new();
@@ -899,17 +912,42 @@ mod tests {
                     "message": "something new and odd: hunter2"}]),
                 "(False: Progressing; message unclassified)",
             ),
+            (
+                json!([
+                    {"type": "Ready", "status": "Unknown", "reason": "Progressing",
+                        "message": "Running 'upgrade' action with timeout of 5m0s"},
+                    {"type": "Stalled", "status": "True", "reason": "RetriesExceeded",
+                        "message": "Failed to upgrade after 1 attempt(s)"},
+                    {"type": "Released", "status": "False", "reason": "UpgradeFailed",
+                        "message": "Helm upgrade failed for release ws-ws1/workspace: admission webhook \"policy.sigstore.dev\" denied the request: validation failed: no signatures found: ghcr.io/kunwarshivam/mandate/secret-token-xyz"},
+                    {"type": "Remediated", "status": "True", "reason": "RollbackSucceeded",
+                        "message": "Helm rollback to previous release ws-ws1/workspace.v1 succeeded: hunter2"},
+                ]),
+                "(Unknown: Progressing; Stalled: RetriesExceeded; Released: UpgradeFailed; Remediated: RollbackSucceeded; message admission-denied, signature)",
+            ),
+            (
+                json!([
+                    {"type": "Ready", "status": "True", "reason": "UpgradeSucceeded", "message": "ok"},
+                    {"type": "Released", "status": "True", "reason": "UpgradeSucceeded",
+                        "message": "Helm upgrade succeeded: hunter2"},
+                ]),
+                "",
+            ),
             (json!([]), "(no Ready condition)"),
         ];
         for (conditions, why) in cases {
             let mut staging = Staging::up();
             staging.flux[3] = failing("HelmRelease", "workspace", conditions);
             let text = run(&staging)?;
-            assert_eq!(
-                missing(&text),
-                [format!("HelmRelease flux-system/workspace is Ready {why}").as_str()],
-                "{text}"
-            );
+            if why.is_empty() {
+                assert!(missing(&text).is_empty(), "{text}");
+            } else {
+                assert_eq!(
+                    missing(&text),
+                    [format!("HelmRelease flux-system/workspace is Ready {why}").as_str()],
+                    "{text}"
+                );
+            }
             for secret in [
                 "secret-token-xyz",
                 "hunter2",
