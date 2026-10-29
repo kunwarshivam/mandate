@@ -230,8 +230,9 @@ REQUESTED_BY = one_of("agent", "owner", "client")
 BUILTIN_LABEL = "builtin_risk_reducing"
 DELEGATION_PREFIX = "delegation:"
 POLICY_OVERLAY_LABEL = "policy_overlay"
+OWNER_REQUEST_LABEL = "owner_request"
 DECIDED_BY = re.compile(
-    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay|(rule|delegation):[A-Za-z0-9_-]+)\Z"
+    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay|owner_request|(rule|delegation):[A-Za-z0-9_-]+)\Z"
 )
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -464,6 +465,15 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
         overlay_label = by != POLICY_OVERLAY_LABEL or p["autonomy"] != "auto"
         rule("7.policy_overlay_label", overlay_label, "schema", "payload.decided_by")
+        owner = p["requested_by"] == "owner"
+        rule(
+            "7.owner_request",
+            not (owner and adds_risk and asked),
+            "schema",
+            "payload.autonomy",
+        )
+        owner_label = by != OWNER_REQUEST_LABEL or (owner and adds_risk and p["autonomy"] == "auto")
+        rule("7.owner_request_label", owner_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule(
             "8.exit_origin",
@@ -3918,12 +3928,18 @@ def deferral_decisions(chain: list[dict]) -> dict[str, dict]:
 
 
 def owner_request_decisions(chain: list[dict]) -> dict[str, dict]:
-    """The three asked openings `owner_requests` pairs requests with (v0.117, DEC-2858): the chain's
-    evaluated decision asked by a rule, and the same opening requested by the owner and by a
-    connected client, which no §8.3 evaluation produced, so they carry no numbers, outputs or
-    weights and keep the chain's clip."""
+    """The three openings `owner_requests` judges (v0.117, DEC-2858): the chain's evaluated decision
+    asked by a rule, the same opening requested by a connected client and asked by the client
+    ceiling, and requested by the owner and run `auto` by the owner's request (mandate spec §6.2
+    step 5d, item 10). The two requests were produced by no §8.3 evaluation, so they carry no
+    numbers, outputs or weights and keep the chain's clip."""
     by_rule = [change("payload.autonomy", "ask"), change("payload.decided_by", "rule:large_orders")]
-    owner = [change("payload.requested_by", "owner"), *unevaluated(), *by_rule]
+    owner = [
+        change("payload.requested_by", "owner"),
+        *unevaluated(),
+        change("payload.autonomy", "auto"),
+        change("payload.decided_by", OWNER_REQUEST_LABEL),
+    ]
     client = [
         change("payload.requested_by", "client"),
         change("payload.client_id", "client_dots"),
@@ -3933,7 +3949,7 @@ def owner_request_decisions(chain: list[dict]) -> dict[str, dict]:
     ]
     return {
         name: apply_changes(chain, {"base_seq": SEQ["decision"], "changes": changes})
-        for name, changes in (("agent_asked", by_rule), ("owner_asked", owner), ("client_asked", client))
+        for name, changes in (("agent_asked", by_rule), ("owner_auto", owner), ("client_asked", client))
     }
 
 

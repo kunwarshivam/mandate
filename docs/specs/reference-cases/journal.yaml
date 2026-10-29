@@ -4149,7 +4149,7 @@ approval_deferrals:
     - 1
     - 2
 owner_requests:
-  spec: docs/specs/journal.md v0.117 §9.1 rule 8 and §9.6 rule 319 (DEC-2858)
+  spec: docs/specs/journal.md v0.117 §9.1 rules 7 and 8 and §9.6 rule 319 (DEC-2858)
   decisions:
     agent_asked:
       envelope_version: 1
@@ -4200,7 +4200,7 @@ owner_requests:
         client_id: null
       artifact_refs: []
       pii_refs: []
-    owner_asked:
+    owner_auto:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z3M1A000000000000000G4
@@ -4236,9 +4236,9 @@ owner_requests:
         - max_order_usd
         dry_run: allow
         reason_code: null
-        autonomy: ask
+        autonomy: auto
         ask_suppressed: null
-        decided_by: rule:large_orders
+        decided_by: owner_request
         delegation_id: null
         requested_by: owner
         client_id: null
@@ -4508,13 +4508,13 @@ owner_requests:
   decision_cases:
   - name: owner_open_unevaluated
     clause: 'rule 8: an owner request'
-    decision: owner_asked
+    decision: owner_auto
     changes: []
     expect:
       outcome: Valid
   - name: owner_open_clipped_twice
     clause: 'rule 8: an owner request lists every bound that cut it'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.clips_applied
       value:
@@ -4524,7 +4524,7 @@ owner_requests:
       outcome: Valid
   - name: owner_open_unclipped
     clause: 'rule 8: an owner request the bounds left whole'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.clips_applied
       value: []
@@ -4532,7 +4532,7 @@ owner_requests:
       outcome: Valid
   - name: owner_increase_unevaluated
     clause: 'rule 8: whatever its purpose'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.purpose
       value: increase
@@ -4540,7 +4540,7 @@ owner_requests:
       outcome: Valid
   - name: owner_open_auto
     clause: 'rule 8: an owner request the rules let run'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.autonomy
       value: auto
@@ -4550,7 +4550,7 @@ owner_requests:
       outcome: Valid
   - name: owner_open_denied_at_its_cap
     clause: 'rule 8, DEC-2858 item 7: a clip that leaves nothing is the gate''s denial, no clip listed'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.clips_applied
       value: []
@@ -4566,7 +4566,7 @@ owner_requests:
       outcome: Valid
   - name: owner_open_denied_by_a_rule_reading_the_score
     clause: 'rule 8, DEC-2858 item 8: a rule that reads the missing score denies, labelled with it'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.autonomy
       value: deny
@@ -4580,9 +4580,67 @@ owner_requests:
     changes: []
     expect:
       outcome: Valid
+  - name: owner_open_asked
+    clause: 'rule 7, DEC-2858 item 10: an owner''s own opening is never asked'
+    decision: owner_auto
+    changes:
+    - path: payload.autonomy
+      value: ask
+    - path: payload.decided_by
+      value: default
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autonomy
+  - name: owner_increase_asked
+    clause: 'rule 7, DEC-2858 item 10: nor its increase'
+    decision: owner_auto
+    changes:
+    - path: payload.purpose
+      value: increase
+    - path: payload.autonomy
+      value: ask
+    - path: payload.decided_by
+      value: rule:large_orders
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autonomy
+  - name: owner_request_label_on_a_client_request
+    clause: 'rule 7: the owner''s label is the owner''s alone'
+    decision: client_asked
+    changes:
+    - path: payload.decided_by
+      value: owner_request
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decided_by
+  - name: owner_request_label_on_the_agents_opening
+    clause: 'rule 7: the agent''s own opening never claims the owner''s Send'
+    decision: agent_asked
+    changes:
+    - path: payload.autonomy
+      value: auto
+    - path: payload.decided_by
+      value: owner_request
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decided_by
+  - name: owner_request_label_on_an_owner_denial
+    clause: 'rule 7: the label names only an owner''s request that ran'
+    decision: owner_auto
+    changes:
+    - path: payload.autonomy
+      value: deny
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decided_by
   - name: owner_open_with_evaluation_numbers
     clause: 'rule 8: the first offending number'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - &id004
       path: payload.exit_conviction
@@ -4599,7 +4657,7 @@ owner_requests:
       path: payload.exit_conviction
   - name: owner_open_with_a_score
     clause: 'rule 8: no score on an owner request'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.combined_score
       value: '0.882'
@@ -4609,7 +4667,7 @@ owner_requests:
       path: payload.combined_score
   - name: owner_open_citing_outputs
     clause: 'rule 8: no output on an owner request'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.outputs_used
       value:
@@ -4620,7 +4678,7 @@ owner_requests:
       path: payload.outputs_used
   - name: owner_open_with_weights
     clause: 'rule 8: no weight on an owner request'
-    decision: owner_asked
+    decision: owner_auto
     changes:
     - path: payload.model_weights
       value:
@@ -4790,9 +4848,9 @@ owner_requests:
     expect:
       outcome: Valid
   batches:
-  - name: owner_decision_and_its_unscored_request
+  - name: client_decision_and_its_unscored_request
     clause: rule 319
-    decision: owner_asked
+    decision: client_asked
     request:
       base_draft: unscored_v1
       changes: []
@@ -4817,20 +4875,8 @@ owner_requests:
     order: decision_first
     expect:
       outcome: Valid
-  - name: owner_decision_and_a_scored_request
-    clause: 'rule 319: no score is invented'
-    decision: owner_asked
-    request:
-      base_draft: requested_v1
-      changes: []
-    order: decision_first
-    expect:
-      outcome: Invalid
-      index: 1
-      reason: schema
-      path: payload.combined_score
   - name: client_decision_and_a_scored_request
-    clause: rule 319
+    clause: 'rule 319: no score is invented'
     decision: client_asked
     request:
       base_draft: requested_v1
@@ -4853,9 +4899,21 @@ owner_requests:
       index: 1
       reason: schema
       path: payload.combined_score
-  - name: scored_request_written_before_the_owner_decision
+  - name: agent_decision_and_an_unscored_v2_request
+    clause: rule 319 at version 2
+    decision: agent_asked
+    request:
+      base_draft: unscored_v2
+      changes: []
+    order: decision_first
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.combined_score
+  - name: scored_request_written_before_the_client_decision
     clause: rule 319 judges the batch, whatever the order
-    decision: owner_asked
+    decision: client_asked
     request:
       base_draft: requested_v1
       changes: []

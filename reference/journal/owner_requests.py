@@ -23,7 +23,7 @@ from common import Violation, apply_change, change, digest_strings
 from control import check_of, draft_for, reported, violations
 from requests import V1, V2, base_drafts, oracle_hash
 
-SPEC = "docs/specs/journal.md v0.117 §9.1 rule 8 and §9.6 rule 319 (DEC-2858)"
+SPEC = "docs/specs/journal.md v0.117 §9.1 rules 7 and 8 and §9.6 rule 319 (DEC-2858)"
 SCORED = V1
 UNSCORED = "unscored_v1"
 UNSCORED_V2 = "unscored_v2"
@@ -170,38 +170,39 @@ EVALUATED = [
 def decision_cases(decisions: dict[str, dict]) -> list[dict]:
     """Rule 8's owner branch: an owner's or a client's request carries no evaluation numbers,
     outputs, or weights whatever its purpose, and lists every clip; an agent's opening still needs
-    its numbers."""
+    its numbers. Rule 7's owner clauses (item 10): an owner's opening is never asked, and only an
+    owner's `auto` opening carries the `owner_request` label."""
     agent = decisions["agent_asked"]["payload"]
     return [
-        decision_case("owner_open_unevaluated", "rule 8: an owner request", "owner_asked", []),
+        decision_case("owner_open_unevaluated", "rule 8: an owner request", "owner_auto", []),
         decision_case(
             "owner_open_clipped_twice",
             "rule 8: an owner request lists every bound that cut it",
-            "owner_asked",
+            "owner_auto",
             [change("payload.clips_applied", ["max_order_usd", "position_cap"])],
         ),
         decision_case(
             "owner_open_unclipped",
             "rule 8: an owner request the bounds left whole",
-            "owner_asked",
+            "owner_auto",
             [change("payload.clips_applied", [])],
         ),
         decision_case(
             "owner_increase_unevaluated",
             "rule 8: whatever its purpose",
-            "owner_asked",
+            "owner_auto",
             [change("payload.purpose", "increase")],
         ),
         decision_case(
             "owner_open_auto",
             "rule 8: an owner request the rules let run",
-            "owner_asked",
+            "owner_auto",
             [change("payload.autonomy", "auto"), change("payload.decided_by", "default")],
         ),
         decision_case(
             "owner_open_denied_at_its_cap",
             "rule 8, DEC-2858 item 7: a clip that leaves nothing is the gate's denial, no clip listed",
-            "owner_asked",
+            "owner_auto",
             [
                 change("payload.clips_applied", []),
                 change("payload.dry_run", "deny"),
@@ -213,35 +214,74 @@ def decision_cases(decisions: dict[str, dict]) -> list[dict]:
         decision_case(
             "owner_open_denied_by_a_rule_reading_the_score",
             "rule 8, DEC-2858 item 8: a rule that reads the missing score denies, labelled with it",
-            "owner_asked",
+            "owner_auto",
             [change("payload.autonomy", "deny"), change("payload.decided_by", "rule:low_score")],
         ),
         decision_case("client_open_unevaluated", "rule 8: a client request", "client_asked", []),
         decision_case(
+            "owner_open_asked",
+            "rule 7, DEC-2858 item 10: an owner's own opening is never asked",
+            "owner_auto",
+            [change("payload.autonomy", "ask"), change("payload.decided_by", "default")],
+            refused_at("payload.autonomy"),
+        ),
+        decision_case(
+            "owner_increase_asked",
+            "rule 7, DEC-2858 item 10: nor its increase",
+            "owner_auto",
+            [
+                change("payload.purpose", "increase"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "rule:large_orders"),
+            ],
+            refused_at("payload.autonomy"),
+        ),
+        decision_case(
+            "owner_request_label_on_a_client_request",
+            "rule 7: the owner's label is the owner's alone",
+            "client_asked",
+            [change("payload.decided_by", "owner_request")],
+            refused_at("payload.decided_by"),
+        ),
+        decision_case(
+            "owner_request_label_on_the_agents_opening",
+            "rule 7: the agent's own opening never claims the owner's Send",
+            "agent_asked",
+            [change("payload.autonomy", "auto"), change("payload.decided_by", "owner_request")],
+            refused_at("payload.decided_by"),
+        ),
+        decision_case(
+            "owner_request_label_on_an_owner_denial",
+            "rule 7: the label names only an owner's request that ran",
+            "owner_auto",
+            [change("payload.autonomy", "deny")],
+            refused_at("payload.decided_by"),
+        ),
+        decision_case(
             "owner_open_with_evaluation_numbers",
             "rule 8: the first offending number",
-            "owner_asked",
+            "owner_auto",
             list(EVALUATED),
             refused_at("payload.exit_conviction"),
         ),
         decision_case(
             "owner_open_with_a_score",
             "rule 8: no score on an owner request",
-            "owner_asked",
+            "owner_auto",
             [change("payload.combined_score", "0.882")],
             refused_at("payload.combined_score"),
         ),
         decision_case(
             "owner_open_citing_outputs",
             "rule 8: no output on an owner request",
-            "owner_asked",
+            "owner_auto",
             [change("payload.outputs_used", list(agent["outputs_used"]))],
             refused_at("payload.outputs_used"),
         ),
         decision_case(
             "owner_open_with_weights",
             "rule 8: no weight on an owner request",
-            "owner_asked",
+            "owner_auto",
             [change("payload.model_weights", copy.deepcopy(agent["model_weights"]))],
             refused_at("payload.model_weights"),
         ),
@@ -295,18 +335,18 @@ def refused(index: int) -> dict:
 
 def batches() -> list[dict]:
     """Rule 319 on the batch: the request has no score exactly when its decision is an owner's or a
-    client's request."""
+    client's request. Only a client's is ever asked (item 10), so the cases pair the client's."""
     return [
-        batch("owner_decision_and_its_unscored_request", "rule 319", "owner_asked", UNSCORED, []),
+        batch("client_decision_and_its_unscored_request", "rule 319", "client_asked", UNSCORED, []),
         batch("client_decision_and_its_unscored_v2_request", "rule 319", "client_asked", UNSCORED_V2, []),
         batch("agent_decision_and_its_scored_request", "rule 319: the agent's request keeps its score", "agent_asked", SCORED, []),
-        batch("owner_decision_and_a_scored_request", "rule 319: no score is invented", "owner_asked", SCORED, [], refused(1)),
-        batch("client_decision_and_a_scored_request", "rule 319", "client_asked", SCORED, [], refused(1)),
+        batch("client_decision_and_a_scored_request", "rule 319: no score is invented", "client_asked", SCORED, [], refused(1)),
         batch("agent_decision_and_an_unscored_request", "rule 319: the agent's score is never dropped", "agent_asked", UNSCORED, [], refused(1)),
+        batch("agent_decision_and_an_unscored_v2_request", "rule 319 at version 2", "agent_asked", UNSCORED_V2, [], refused(1)),
         batch(
-            "scored_request_written_before_the_owner_decision",
+            "scored_request_written_before_the_client_decision",
             "rule 319 judges the batch, whatever the order",
-            "owner_asked",
+            "client_asked",
             SCORED,
             [],
             refused(0),
@@ -385,10 +425,17 @@ def outcome(got: list[tuple[int, Violation]]) -> dict:
 
 
 def expected_decision(decision: dict) -> dict:
-    """The oracle's own reading of rule 8, for a decision every other rule accepts: who asked
-    decides whether an evaluation produced it, then the six members are walked in the table's
+    """The oracle's own reading of rule 7's owner clauses and then rule 8, for a decision every other
+    rule accepts: an owner's opening asked, or the owner's label anywhere else, first; then who
+    asked decides whether an evaluation produced it, and the six members are walked in the table's
     order."""
     p = decision["payload"]
+    opening = p["purpose"] in ("open", "increase")
+    owners_own = p["requested_by"] == "owner" and opening
+    if owners_own and p["autonomy"] == "ask":
+        return refused_at("payload.autonomy")
+    if p["decided_by"] == "owner_request" and not (owners_own and p["autonomy"] == "auto"):
+        return refused_at("payload.decided_by")
     asked_by_owner = p["requested_by"] != "agent"
     produced = not asked_by_owner and (p["purpose"] in ("open", "increase") or p["exit_origin"] == "signal")
     for member in NUMBERS:
@@ -442,11 +489,14 @@ def check_section(section: dict, decide: Validator) -> list[str]:
         if got:
             problems.append(found("decisions.valid", f"decision {name}: {got}"))
     who = {name: d["payload"]["requested_by"] for name, d in section["decisions"].items()}
-    if who != {"agent_asked": "agent", "owner_asked": "owner", "client_asked": "client"}:
+    if who != {"agent_asked": "agent", "owner_auto": "owner", "client_asked": "client"}:
         problems.append(found("decisions.requested", f"the decisions are asked by {who}"))
-    if any(d["payload"]["autonomy"] != "ask" for d in section["decisions"].values()):
-        problems.append(found("decisions.requested", "a decision a request asks for is not an ask"))
-    if section["decisions"]["owner_asked"]["payload"]["clips_applied"] == []:
+    autonomy = {name: (d["payload"]["autonomy"], d["payload"]["decided_by"]) for name, d in section["decisions"].items()}
+    if autonomy["owner_auto"] != ("auto", "owner_request") or any(
+        autonomy[name][0] != "ask" for name in ("agent_asked", "client_asked")
+    ):
+        problems.append(found("decisions.requested", f"the owner's runs unasked and the others ask, not {autonomy}"))
+    if section["decisions"]["owner_auto"]["payload"]["clips_applied"] == []:
         problems.append(found("decisions.requested", "the owner's decision lists no clip"))
     for case in section["decision_cases"]:
         d = decision_for(section, case)
@@ -474,6 +524,8 @@ def check_section(section: dict, decide: Validator) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
+    "rule.7.owner_request",
+    "rule.7.owner_request_label",
     "regress.rule_8_owner_request_evaluated",
     "regress.rule_8_owner_request_without_clips",
     "rule.319.outputs",
@@ -508,7 +560,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "the owner's decision carries its evaluation's score",
             "decisions.valid",
-            mutated(lambda s: s["decisions"]["owner_asked"]["payload"].update(combined_score="0.882")),
+            mutated(lambda s: s["decisions"]["owner_auto"]["payload"].update(combined_score="0.882")),
         ),
         (
             "the client's decision is recorded as the agent's",
@@ -533,7 +585,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "a refused batch is stated accepted",
             "batches",
-            mutated(lambda s: case(s, "batches", "owner_decision_and_a_scored_request").update(expect={"outcome": "Valid"})),
+            mutated(lambda s: case(s, "batches", "client_decision_and_a_scored_request").update(expect={"outcome": "Valid"})),
         ),
     ]
 
