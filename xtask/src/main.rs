@@ -29,6 +29,7 @@ mod mask;
 mod mutant_costs;
 mod promote;
 mod release;
+mod step_up;
 mod tofu_audit;
 mod trial;
 mod vault_init;
