@@ -139,9 +139,13 @@ api:
   connectFinish: false
   # A dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up
   # (MANDATE_API_STEP_UP_COOL_OFF_WAIVER, DEC-2146): each waived step-up is journaled as
-  # StepUpCoolOffWaived. Any other tier refuses it, in the schema, in the chart and at the API's
-  # start.
+  # StepUpCoolOffWaived. A staging cell may set it only with stepUpCoolOffWaiverUntil (DEC-2150).
+  # Production refuses it, in the schema, in the chart and at the API's start.
   stepUpCoolOffWaiver: false
+  # The waiver's expiry, YYYY-MM-DDTHH:MM:SSZ (MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL,
+  # DEC-2150): required with the waiver in staging, and only with the waiver. The API refuses a
+  # staging expiry past 2026-11-05T00:00:00Z and waives no step-up at or after the expiry.
+  stepUpCoolOffWaiverUntil: null
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.

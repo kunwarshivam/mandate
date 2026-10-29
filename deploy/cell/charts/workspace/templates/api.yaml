@@ -16,10 +16,12 @@ its memory until they move to Postgres (item 6).
   the pod's loopback, started and answering before the server starts, since the server fetches
   the stub's key set at its own start and only every five minutes after. Its image can only be a
   local build, and the chart refuses it in any other tier.
-- In a dev or ci cell only, `api.stepUpCoolOffWaiver` sets the API's
+- In a dev or ci cell, `api.stepUpCoolOffWaiver` sets the API's
   `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`, which waives a first passkey's enrolment cool-off at
-  step-up and journals each waiver (DEC-2146). The chart refuses it in any other tier, as the API
-  does at its start.
+  step-up and journals each waiver (DEC-2146). A staging cell may set it only with
+  `api.stepUpCoolOffWaiverUntil`, which sets `MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL`, the
+  waiver's expiry (DEC-2150). The chart refuses the waiver in production and in staging without
+  its expiry, and an expiry without the waiver, as the API does at its start.
 */ -}}
 {{- define "mandate.stubIssuer" -}}
 {{- $tier := .root.Values.deploymentTier -}}
@@ -88,11 +90,20 @@ its memory until they move to Postgres (item 6).
   value: /run/ca-bundle/ca-certificates.crt
 {{- if $a.stepUpCoolOffWaiver }}
 {{- $tier := .root.Values.deploymentTier }}
-{{- if not (has $tier (list "dev" "ci")) }}
-{{- fail (printf "api.stepUpCoolOffWaiver waives a first passkey's cool-off only in a dev or ci cell, and deploymentTier is %q (DEC-2146)" $tier) }}
+{{- if not (has $tier (list "dev" "ci" "staging")) }}
+{{- fail (printf "api.stepUpCoolOffWaiver waives a first passkey's cool-off only in a dev or ci cell, or in staging until its expiry, and deploymentTier is %q (DEC-2146, DEC-2150)" $tier) }}
+{{- end }}
+{{- if and (eq $tier "staging") (not $a.stepUpCoolOffWaiverUntil) }}
+{{- fail "api.stepUpCoolOffWaiver in staging needs its expiry, api.stepUpCoolOffWaiverUntil (DEC-2150)" }}
 {{- end }}
 - name: MANDATE_API_STEP_UP_COOL_OFF_WAIVER
   value: "true"
+{{- with $a.stepUpCoolOffWaiverUntil }}
+- name: MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL
+  value: {{ . | quote }}
+{{- end }}
+{{- else if $a.stepUpCoolOffWaiverUntil }}
+{{- fail "api.stepUpCoolOffWaiverUntil is the expiry of api.stepUpCoolOffWaiver, and the waiver is off (DEC-2150)" }}
 {{- end }}
 {{- if .root.Values.api.vaultBinding }}
 - name: MANDATE_API_VAULT_ADDRESS

@@ -59,7 +59,7 @@ use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
-use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
+use mandate_api_server::methods::{CoolOffWaiver, CoolOffWaiving, Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::operator;
 use mandate_api_server::reduction::{self, Reduction, rp_id};
@@ -320,9 +320,10 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
                 let store: Arc<dyn ArtifactSource + Send + Sync> = store;
                 store
             }),
-            cool_off_waiver: start.cool_off_waiver.map(|(waiver, _)| waiver),
-            cool_off_waiver_until: start.cool_off_waiver.and_then(|(_, until)| until),
-        },
+            cool_off_waiver: None,
+            cool_off_waiver_until: None,
+        }
+        .waived_by(CoolOffWaiving::from_start(start.cool_off_waiver)),
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),
             links: Arc::new(subject::Fixed),

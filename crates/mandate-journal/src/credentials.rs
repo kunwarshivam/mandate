@@ -110,13 +110,14 @@ static STEP_UP_ASSERTED: Ty = Ty::Record(&[
     ("assertion", Ty::DigestRef),
 ]);
 
-/// §9.38's `StepUpCoolOffWaived`: the challenge and credential of the step-up a test cell counted
-/// inside the credential's enrolment cool-off, the cool-off's end, and the cell's tier.
+/// §9.38's `StepUpCoolOffWaived`: the challenge and credential of the step-up a test cell, or a
+/// staging cell before its waiver's expiry (v0.116, DEC-2150), counted inside the credential's
+/// enrolment cool-off, the cool-off's end, and the cell's tier.
 static STEP_UP_COOL_OFF_WAIVED: Ty = Ty::Record(&[
     ("challenge", Ty::Ulid),
     ("credential", Ty::Text(credential_id)),
     ("cool_off_ends", Ty::Timestamp),
-    ("tier", Ty::OneOf(&["dev", "ci"])),
+    ("tier", Ty::OneOf(&["dev", "ci", "staging"])),
 ]);
 
 static CREDENTIAL_REMOVED: Ty = Ty::Record(&[

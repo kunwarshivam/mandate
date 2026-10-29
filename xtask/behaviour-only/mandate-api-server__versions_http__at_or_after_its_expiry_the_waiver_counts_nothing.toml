@@ -1,8 +1,0 @@
-file = "crates/mandate-api-server/tests/versions_http.rs"
-test = "at_or_after_its_expiry_the_waiver_counts_nothing"
-reason = """
-The verifier judges no expiry yet: until the DEC-2150 implementation reads `cool_off_waiver_until`
-against `judged.now`, a confirmation at or after the expiry is still waived (and in staging the
-journal then refuses the tier), and that answer is the failure. The implementation deletes this
-file with the test's `#[ignore]` line (DEC-2150).
-"""

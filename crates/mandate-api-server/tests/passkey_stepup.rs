@@ -25,7 +25,7 @@ use mandate_api::problem::ProblemCode;
 use mandate_api::wire::{EventId, Timestamp};
 use mandate_api_server::challenges::Challenges;
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
+use mandate_api_server::methods::{CoolOffWaiver, CoolOffWaiving, Methods, Passkey};
 use mandate_api_server::stepup::{Action, Asserted, CoolOffWaived, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_canon::{Digest, encode_ulid};
@@ -879,7 +879,6 @@ fn a_staging_waiver_before_its_expiry_counts_and_names_staging() {
 /// and the challenge is kept. Without the expiry the same step-up counts, so the expiry alone ends
 /// it.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_judged_at_or_after_its_expiry_counts_nothing() {
     for waiver in [
         CoolOffWaiver::Staging,
@@ -899,6 +898,60 @@ fn a_waiver_judged_at_or_after_its_expiry_counts_nothing() {
             assert!(w.held(), "{waiver:?} until {until}: nothing is taken");
         }
     }
+}
+
+/// DEC-2150 item 4: [`CoolOffWaiving::past`] is the one rule a reader holds: a credential with no
+/// cool-off or one that has ended is past it; one still cooling is past it only while the waiver
+/// holds at that instant, which an expiry at or before the instant ends.
+#[test]
+fn past_reads_the_cool_off_and_the_waiver_by_one_instant() {
+    let now = at(ISSUED + 30);
+    let none = CoolOffWaiving::default();
+    assert!(none.past(None, now), "no cool-off");
+    assert!(none.past(Some(now), now), "ends at the instant");
+    assert!(none.past(Some(at(ISSUED)), now), "ended before it");
+    assert!(
+        !none.past(Some(at(COOLING)), now),
+        "still cooling, no waiver"
+    );
+    assert_eq!(none.at(now), None);
+    let open = CoolOffWaiving::from_start(Some((CoolOffWaiver::Staging, None)));
+    assert!(open.past(Some(at(COOLING)), now), "a waiver with no expiry");
+    assert_eq!(open.at(now), Some(CoolOffWaiver::Staging));
+    for (until, holds) in [
+        (ISSUED + 31, true),
+        (ISSUED + 30, false),
+        (ISSUED + 29, false),
+    ] {
+        let waiving = CoolOffWaiving::from_start(Some((CoolOffWaiver::Staging, Some(at(until)))));
+        assert_eq!(
+            waiving.past(Some(at(COOLING)), now),
+            holds,
+            "expiry {until}"
+        );
+        assert_eq!(waiving.at(now).is_some(), holds, "expiry {until}");
+    }
+}
+
+/// DEC-2150 item 2: the waiving `main` builds from the start's answer keeps the expiry, and a
+/// verifier given it holds both, so a slip in that wiring cannot drop the expiry and leave the
+/// waiver open-ended. No answer waives nothing.
+#[test]
+fn the_start_answer_reaches_the_verifier_with_its_expiry() {
+    let until = at(ISSUED + 60);
+    let waiving = CoolOffWaiving::from_start(Some((CoolOffWaiver::Staging, Some(until))));
+    assert_eq!(
+        waiving,
+        CoolOffWaiving {
+            tier: Some(CoolOffWaiver::Staging),
+            until: Some(until),
+        }
+    );
+    assert_eq!(CoolOffWaiving::from_start(None), CoolOffWaiving::default());
+    let passkey = world().port.passkey.waived_by(waiving);
+    assert_eq!(passkey.waiving(), waiving);
+    assert_eq!(passkey.cool_off_waiver_until, Some(until));
+    assert_eq!(passkey.cool_off_waiver, Some(CoolOffWaiver::Staging));
 }
 
 /// DEC-2146 item 3: the waiver changes the cool-off check alone. A cooling passkey's step-up that

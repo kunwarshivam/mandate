@@ -226,7 +226,11 @@ the browser proofs of confirm, deploy, resume, stop and connect can step up with
 minutes earlier.
 - `api.stepUpCoolOffWaiver: true` sets the API's `MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true`. It is
   off by default.
-- Any other tier refuses it: the schema and the chart at render, and the API at its start.
+- A staging cell may set it too, for the founder's demo (DEC-2150), but only with
+  `api.stepUpCoolOffWaiverUntil`, its expiry as `YYYY-MM-DDTHH:MM:SSZ`. The API refuses at start a
+  staging expiry later than the ceiling it is built with, 2026-11-05T00:00:00Z, and waives no
+  step-up at or after the expiry. Staging's values set both until the demo ends.
+- Production refuses it: the schema and the chart at render, and the API at its start.
 - Each waived step-up is journaled as `StepUpCoolOffWaived`, right after its `StepUpAsserted` (journal
   spec §9.38).
 

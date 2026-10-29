@@ -678,7 +678,6 @@ fn the_real_money_mode_refuses_what_dec_2134_refuses() {
 /// waiver is refused the same way. Staging is refused before any setting is read in this build,
 /// as the waiver's own test says, so its expiry and ceiling are `tests/config.rs`'s cases.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_test_cell_reads_the_waivers_expiry_at_start() {
     for env in [
         vec![
