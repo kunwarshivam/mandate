@@ -72,6 +72,7 @@ pub mod catalogue;
 pub mod challenges;
 pub mod chat;
 pub mod chat_run;
+pub mod chat_watch;
 pub mod clock;
 pub mod commands;
 pub mod config;

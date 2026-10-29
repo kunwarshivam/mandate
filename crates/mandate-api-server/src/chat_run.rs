@@ -149,8 +149,11 @@ pub(crate) struct Start {
     pub workspace: String,
     pub thread: Thread,
     pub run: String,
-    /// The session of the owner whose message started it, under which its actions commit.
-    pub gate: Gate,
+    /// The session of the owner whose message started it, under which its actions commit; `None`
+    /// for a proactive run, which no one's message started and which commits nothing.
+    pub gate: Option<Gate>,
+    /// When it started.
+    pub now: UtcNanos,
     pub deployment: Option<Deployment>,
     /// The record that woke it: the owner's message, or the event a proactive run follows.
     pub cause: String,
@@ -160,10 +163,15 @@ pub(crate) struct Start {
 
 /// Starts `start`'s run on a blocking thread; the thread is released when it ends.
 pub(crate) fn spawn(app: Arc<App>, start: Start) {
-    let handle = Handle::current();
-    tokio::task::spawn_blocking(move || {
+    start_blocking(app, &Handle::current(), start);
+}
+
+/// Starts `start`'s run on a blocking thread of `handle`'s runtime, from any thread.
+pub(crate) fn start_blocking(app: Arc<App>, handle: &Handle, start: Start) {
+    let inner = handle.clone();
+    handle.spawn_blocking(move || {
         let key = start.thread.key();
-        execute(&app, &handle, start);
+        execute(&app, &inner, start);
         app.chat.release(&key);
     });
 }
@@ -425,10 +433,7 @@ impl Host for Journaled<'_> {
     }
 
     fn now(&mut self) -> UtcNanos {
-        self.app
-            .clock
-            .now()
-            .unwrap_or_else(|| UtcNanos::from_parts(0, 0).unwrap_or(self.start.gate.now))
+        self.app.clock.now().unwrap_or(self.start.now)
     }
 
     fn call_id(&mut self) -> String {
@@ -870,7 +875,7 @@ impl Tools<'_> {
         else {
             return refusal("unknown_symbol");
         };
-        let now = self.app.clock.now().unwrap_or(self.start.gate.now);
+        let now = self.app.clock.now().unwrap_or(self.start.now);
         match crate::prices::last_close(
             self.app.bars.as_deref(),
             &snapshot.symbol,
@@ -1111,7 +1116,10 @@ impl Tools<'_> {
     /// session for `permission`, and an idempotency key of this run's own, so a retried run
     /// replays rather than repeats.
     fn commit(&mut self, command: &Command, permission: Permission) -> String {
-        let now = self.app.clock.now().unwrap_or(self.start.gate.now);
+        let Some(session) = self.start.gate.as_ref() else {
+            return refusal("no_session");
+        };
+        let now = self.app.clock.now().unwrap_or(self.start.now);
         let Ok(key) = IdempotencyKey::parse(&format!(
             "chat-{}-{}-{}",
             self.start.run, self.turn, self.index
@@ -1119,7 +1127,7 @@ impl Tools<'_> {
             return refusal("idempotency");
         };
         let gate = Gate {
-            admitted: self.start.gate.admitted,
+            admitted: session.admitted,
             now,
             key,
         };
@@ -1191,12 +1199,15 @@ impl Tools<'_> {
     /// The setup's mandate draft: parsed, created as a version through the version route's own
     /// checks, and offered as a confirmation card; its problems otherwise.
     fn draft(&mut self, text: &str) -> String {
+        let Some(session) = self.start.gate.as_ref() else {
+            return refusal("no_session");
+        };
         let Some(document) = parse_document(text) else {
             return refusal("document_not_json");
         };
         match self.handle.block_on(crate::version_routes::create_for_chat(
             self.app,
-            &self.start.gate,
+            session,
             &self.start.workspace,
             document,
         )) {

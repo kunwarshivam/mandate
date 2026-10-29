@@ -110,6 +110,11 @@ pub struct App {
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
 /// Each request is counted in flight on `drain` until its response is ready.
 pub fn api(app: App, drain: Arc<Drain>) -> Router {
+    api_shared(Arc::new(app), drain)
+}
+
+/// [`api`] over an `App` the caller shares, as the chat's watcher does (`chat_watch`).
+pub fn api_shared(app: Arc<App>, drain: Arc<Drain>) -> Router {
     let settings = app.settings.clone();
     let unauthenticated = problem_body(ProblemCode::Unauthenticated);
     let refused = unauthenticated.clone();
@@ -335,7 +340,7 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             post(crate::owner_requests::owner_request).fallback(otherwise.clone()),
         )
         .fallback(otherwise)
-        .with_state(Arc::new(app))
+        .with_state(app)
         .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
     counted(routes, drain)
 }

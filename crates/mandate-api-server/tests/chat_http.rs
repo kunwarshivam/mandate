@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use common::{MemJournal, Reply, WORKSPACE, hosted, send, serve};
 use mandate_api_server::chat::{Chat, ChatModel};
+use mandate_api_server::chat_watch::pass_once;
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
@@ -55,6 +56,8 @@ const UPSTREAM: &str = "anthropic";
 const PROVIDER: &str = "Anthropic";
 
 struct Fixture {
+    app: Arc<App>,
+    clock: Arc<common::ManualClock>,
     addr: std::net::SocketAddr,
     journal: Arc<MemJournal>,
     sessions: Arc<Sessions>,
@@ -246,8 +249,11 @@ fn fixture(gateway: Option<String>) -> Fixture {
         bars: None,
         chat: Arc::new(Chat::new(gateway, vec![model])),
     };
+    let app = Arc::new(app);
     let f = Fixture {
-        addr: serve(http::api(app, Drain::new())),
+        app: Arc::clone(&app),
+        clock,
+        addr: serve(http::api_shared(app, Drain::new())),
         journal,
         sessions,
     };
@@ -280,7 +286,7 @@ fn activated(seq: u64, member: PrincipalId, roles: &[Role]) -> MembershipRecord 
 
 fn signed_in(f: &Fixture) -> String {
     f.sessions
-        .open(alice(), "sha256:aaaa".to_owned(), None, at(T0))
+        .open(alice(), "sha256:aaaa".to_owned(), None, at(f.clock.secs()))
         .expect("opened")
         .value()
         .to_owned()
@@ -291,14 +297,18 @@ fn ctl() -> String {
 }
 
 fn row(seq: u64, event_type: &str, payload: &str) -> StoredEvent {
-    let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    row_on(&ctl(), seq, event_type, payload, "")
+}
+
+/// A row of `stream`, its envelope carrying `extra` members (each followed by a comma) too.
+fn row_on(stream: &str, seq: u64, event_type: &str, payload: &str, extra: &str) -> StoredEvent {
+    let event_id = event_id_at(stream, seq);
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{}"}}"#,
-        ctl()
+        r#"{{{extra}"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
     StoredEvent {
-        stream_id: ctl(),
+        stream_id: stream.to_owned(),
         seq,
         event_id,
         event_type: event_type.to_owned(),
@@ -309,6 +319,16 @@ fn row(seq: u64, event_type: &str, payload: &str) -> StoredEvent {
         hash: Digest::of(&body),
         body,
     }
+}
+
+/// A distinct event id per stream and seq.
+fn event_id_at(stream: &str, seq: u64) -> String {
+    let lane = match stream.split(':').next() {
+        Some("acct") => 'A',
+        Some("agent") => 'G',
+        _ => 'C',
+    };
+    format!("01JBH3BTZ8K2M4N6P8R0S2{lane}{seq:03}")
 }
 
 fn seed(f: &Fixture) {
@@ -612,5 +632,209 @@ fn a_run_past_its_daily_cap_spends_nothing_and_says_so() {
             .last()
             .is_some_and(|t| t.1.contains("spending cap")),
         "{body:?}"
+    );
+}
+
+const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+
+/// One watcher pass, on a blocking thread of a runtime of its own.
+fn pass(f: &Fixture) -> usize {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let app = Arc::clone(&f.app);
+    let posted = runtime.block_on(async move {
+        tokio::task::spawn_blocking(move || pass_once(&app, &tokio::runtime::Handle::current()))
+            .await
+            .expect("the pass ran")
+    });
+    runtime.shutdown_timeout(Duration::from_secs(20));
+    posted
+}
+
+fn push(f: &Fixture, stream: &str, rows: Vec<StoredEvent>) {
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .entry(stream.to_owned())
+        .or_default()
+        .extend(rows);
+}
+
+/// `agt_a`'s connection established on `acct_1`, and on it an order of the agent's own that filled.
+fn seed_fill(f: &Fixture) {
+    let mut established = row(
+        3,
+        "ConnectionEstablished",
+        r#"{"connection_id":"conn_alpaca_paper_01","account_ref":"acct_1"}"#,
+    );
+    established.schema_version = 2;
+    push(f, &ctl(), vec![established]);
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let request = event_id_at(&acct, 2);
+    push(
+        f,
+        &acct,
+        vec![
+            row_on(&acct, 1, "StreamOpened", "{}", ""),
+            row_on(
+                &acct,
+                2,
+                "OrderRequestRecorded",
+                r#"{"agent_id":"agt_a","intent_id":"int_1","purpose":"entry"}"#,
+                "",
+            ),
+            row_on(
+                &acct,
+                3,
+                "OrderSubmitted",
+                &format!(
+                    r#"{{"client_order_id":"co_1","instrument_id":"{AAPL}","side":"buy","qty":"10","type":"limit","tif":"day","limit_price":"191"}}"#
+                ),
+                &format!(r#""causation_id":"{request}","#),
+            ),
+            row_on(
+                &acct,
+                4,
+                "FillApplied",
+                &format!(
+                    r#"{{"fill_id":"f_1","client_order_id":"co_1","instrument_id":"{AAPL}","side":"buy","qty_gross":"10","price":"190.12"}}"#
+                ),
+                "",
+            ),
+        ],
+    );
+}
+
+fn seed_approval(f: &Fixture) {
+    let stream = format!("agent:{WORKSPACE}:agt_a");
+    let hash = format!("sha256:{}", "ab".repeat(32));
+    push(
+        f,
+        &stream,
+        vec![
+            row_on(&stream, 1, "StreamOpened", "{}", ""),
+            row_on(
+                &stream,
+                2,
+                "ApprovalRequested",
+                &format!(
+                    r#"{{"deadline":{},"content_hash":"{hash}","content":{{"action":{{"instrument":"{AAPL}","asset_class":"us_equity","side":"buy","qty":"5","limit":"191","order_usd":"955","purpose":"entry"}}}}}}"#,
+                    T0 + 600
+                ),
+                "",
+            ),
+        ],
+    );
+}
+
+/// Alice writes to `agt_a`, so her thread hears from it, and the run that answers ends.
+fn alice_writes(f: &Fixture) -> String {
+    let cookie = signed_in(f);
+    assert_eq!(post_message(f, &cookie, "hello").status, 202);
+    settled(f, &cookie);
+    cookie
+}
+
+#[test]
+fn a_fill_of_the_agents_own_order_is_said_once_with_the_fill_as_its_source() {
+    let f = fixture(None);
+    let cookie = alice_writes(&f);
+    seed_fill(&f);
+    assert_eq!(pass(&f), 1);
+    assert_eq!(pass(&f), 0, "a second pass says nothing again");
+    let body = thread(&f, &cookie);
+    let said = texts(&body);
+    assert_eq!(
+        said.last().map(|t| t.1.as_str()),
+        Some("Bought 10 AAPL at 190.12.")
+    );
+    let last = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|m| m.last().cloned())
+        .expect("the message");
+    assert_eq!(last.get("proactive"), Some(&Value::Bool(true)));
+    let fill = event_id_at(&format!("acct:{WORKSPACE}:acct_1"), 4);
+    assert_eq!(
+        last.get("sources")
+            .and_then(Value::as_array)
+            .and_then(|s| s.first())
+            .and_then(|s| s.get("ref"))
+            .and_then(Value::as_str),
+        Some(format!("ev:{fill}").as_str())
+    );
+    for row in chat_rows(&f) {
+        assert!(Draft::parse(&row.body).is_ok(), "{}", row.event_type);
+    }
+}
+
+#[test]
+fn an_approval_the_agent_waits_on_is_asked_once_as_a_card() {
+    let f = fixture(None);
+    let cookie = alice_writes(&f);
+    seed_approval(&f);
+    assert_eq!(pass(&f), 1);
+    assert_eq!(pass(&f), 0);
+    let body = thread(&f, &cookie);
+    let last = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|m| m.last().cloned())
+        .expect("the message");
+    assert_eq!(
+        last.get("text").and_then(Value::as_str),
+        Some("I'd like your OK to buy 5 AAPL.")
+    );
+    assert_eq!(
+        last.get("card")
+            .and_then(|c| c.get("kind"))
+            .and_then(Value::as_str),
+        Some("approval")
+    );
+}
+
+#[test]
+fn no_one_has_written_and_nothing_is_said() {
+    let f = fixture(None);
+    seed_approval(&f);
+    assert_eq!(
+        pass(&f),
+        0,
+        "an agent no member deployed or wrote to has no thread to post in"
+    );
+}
+
+#[test]
+fn after_the_close_on_a_weekday_the_daily_note_runs_once_and_its_marker_is_not_shown() {
+    let gateway = gateway_service(vec![
+        turn(
+            &[(
+                name::REPLY,
+                r#"{"sources":[],"text":"Quiet day: nothing filled."}"#,
+            )],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+        turn(&[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    alice_writes(&f);
+    let monday_close = (T0.div_euclid(86_400) + 2) * 86_400 + 21 * 3_600 + 60;
+    f.clock.set(monday_close);
+    let cookie = signed_in(&f);
+    assert_eq!(pass(&f), 1, "the note starts");
+    assert_eq!(pass(&f), 0, "and only once that day");
+    let said = texts(&thread(&f, &cookie));
+    assert!(
+        said.iter().any(|t| t.1 == "Quiet day: nothing filled."),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().all(|t| !t.1.is_empty()),
+        "the marker is not shown: {said:?}"
     );
 }

@@ -43,6 +43,7 @@ use std::time::Duration;
 use mandate_api_server::cache::{CachedJournal, Limits};
 use mandate_api_server::challenges::Challenges;
 use mandate_api_server::chat::{Chat, models_from_registry};
+use mandate_api_server::chat_watch;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
@@ -387,10 +388,12 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         bars: start.bars,
         chat: Arc::new(start.chat),
     };
+    let app = Arc::new(app);
+    tokio::spawn(chat_watch::watch(Arc::clone(&app)));
     let api = spawn_listener(
         serve(
             api,
-            http::api(app, Arc::clone(&drain)),
+            http::api_shared(app, Arc::clone(&drain)),
             wait_for(stop.clone()),
         ),
         wake.clone(),

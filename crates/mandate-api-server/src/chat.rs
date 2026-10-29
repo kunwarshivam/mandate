@@ -336,7 +336,8 @@ async fn posted(
             workspace: reader.workspace.clone(),
             thread: thread.clone(),
             run: run.clone(),
-            gate,
+            now: gate.now,
+            gate: Some(gate),
             deployment,
             cause: stored.event_id.clone(),
             message: text,
@@ -403,7 +404,7 @@ fn thread_response(app: &App, reader: &Reader, thread: &Thread, query: Option<&s
         .iter()
         .filter(|row| row.seq > after && row.event_type == "ChatMessagePosted")
         .filter_map(|row| Some((row, envelope(row)?)))
-        .filter(|(_, e)| thread.holds(e.get("payload")))
+        .filter(|(_, e)| thread.holds(e.get("payload")) && !marker(e))
         .map(|(row, e)| message_value(row, &e))
         .collect();
     let cursor = reader
@@ -419,6 +420,16 @@ fn thread_response(app: &App, reader: &Reader, thread: &Thread, query: Option<&s
         ("cursor", int(cursor)),
     ]);
     served(reader, &[], members)
+}
+
+/// Whether a message is the daily note's marker, which says nothing (`chat_watch`).
+fn marker(envelope: &Value) -> bool {
+    let payload = envelope.get("payload");
+    let kind = payload
+        .and_then(|p| p.get("card"))
+        .and_then(|c| c.get("kind"))
+        .and_then(Value::as_str);
+    kind == Some("brief") && payload.and_then(|p| p.get("text")) == Some(&Value::Null)
 }
 
 fn message_value(row: &StoredEvent, envelope: &Value) -> Value {
