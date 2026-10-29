@@ -1,0 +1,8 @@
+file = "crates/mandate-daemon/tests/gate.rs"
+test = "an_owners_request_clipped_to_the_order_cap_is_one_the_gate_allows"
+reason = """
+E10-30, slice B (DEC-2858): the deployment's `Plan` keeps `OrderPlan::requested`'s default,
+which proposes nothing for a request, because an `Option` cannot carry the order builder's
+`Unimplemented` stub. So this test fails on the plan proposing nothing rather than at a stub,
+until the implementation deletes this file with its `#[ignore]` line.
+"""

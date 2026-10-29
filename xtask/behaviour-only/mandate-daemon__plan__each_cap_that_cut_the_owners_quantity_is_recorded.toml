@@ -1,0 +1,8 @@
+file = "crates/mandate-daemon/tests/plan.rs"
+test = "each_cap_that_cut_the_owners_quantity_is_recorded"
+reason = """
+E10-30, slice B (DEC-2858): the deployment's `Plan` keeps `OrderPlan::requested`'s default,
+which proposes nothing for a request, because an `Option` cannot carry the order builder's
+`Unimplemented` stub. So this test fails on the plan proposing nothing rather than at a stub,
+until the implementation deletes this file with its `#[ignore]` line.
+"""

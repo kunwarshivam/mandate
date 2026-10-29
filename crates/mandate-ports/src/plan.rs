@@ -13,8 +13,8 @@ use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
 use mandate_num::{Price, Qty, Usd, UsdExact};
 use mandate_runtime::{
-    Autonomy, Classified, DecisionClip, ExitOrigin, ModelDirection, OrderExecution, Proposal,
-    Purpose, SignalInputs, TimeInForce,
+    Autonomy, Classified, DecisionClip, ExitOrigin, ModelDirection, OrderExecution, OwnerRequest,
+    Proposal, Purpose, SignalInputs, TimeInForce,
 };
 use mandate_spec::ValidatedMandate;
 use mandate_time::UtcNanos;
@@ -312,6 +312,23 @@ pub fn size(
         now,
     )?;
     runtime_proposal(proposal, builder, &mandate, validated)
+}
+
+/// An owner's or a client's request for a buy (journal spec §2 and §9.9, DEC-2858) as the
+/// runtime's proposal: the order builder's [`mandate_builder::requested_buy`] over `builder`'s
+/// facts, clipped and never sized, at the ask, with no conviction, score, model output or weight
+/// (journal spec §9.1 rule 8) and every limit that cut it in `clips_applied`. `Ok(None)` when the
+/// builder proposes nothing for it.
+///
+/// # Errors
+/// [`PortError::Absent`] for a request in another instrument than `builder`'s market, or an
+/// execution policy the mandate does not derive; [`PortError::Builder`] as the builder refuses.
+pub fn requested(
+    _validated: &ValidatedMandate,
+    _builder: &BuilderContext,
+    _request: &OwnerRequest,
+) -> Result<Option<Proposal>, PortError> {
+    Err(mandate_builder::BuilderError::Unimplemented.into())
 }
 
 /// Mandate spec v0.10 §8.3 step 2's first branch on its own (MI-34, DEC-2391): when `market`'s
