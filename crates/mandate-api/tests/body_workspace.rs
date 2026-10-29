@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 
 use mandate_api::problem::Violation;
 use mandate_api::requests::{
-    AcknowledgeRequest, ApprovalResponseRequest, ConfirmRequest, DelegationPreviewRequest,
-    EndDelegationRequest, HoldRequest, KillSwitchRequest, LiftHoldRequest, OauthStartRequest,
-    OwnerExitRequest, OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest,
-    StepUpChallengeRequest, StopRequest,
+    AcknowledgeRequest, AcknowledgmentRequestRequest, ApprovalResponseRequest, ConfirmRequest,
+    DelegationPreviewRequest, EndDelegationRequest, HoldRequest, KillSwitchRequest,
+    LiftHoldRequest, OauthStartRequest, OwnerExitRequest, OwnerRequest, PauseRequest,
+    ResumeRequest, RevokeRequest, StepUpChallengeRequest, StopRequest,
 };
 use mandate_api::wire::{Refused, Validate, decode};
 use serde::de::DeserializeOwned;
@@ -105,8 +105,12 @@ fn judge<T: DeserializeOwned + Validate + Debug>(body: &[u8]) -> Result<(), Vec<
 }
 
 /// Each request schema's decoder, by the schema's stem.
-const DECODERS: [(&str, Judge); 16] = [
+const DECODERS: [(&str, Judge); 17] = [
     ("acknowledge-request", judge::<AcknowledgeRequest>),
+    (
+        "acknowledgment-request-request",
+        judge::<AcknowledgmentRequestRequest>,
+    ),
     (
         "approval-response-request",
         judge::<ApprovalResponseRequest>,
@@ -135,8 +139,7 @@ const DECODERS: [(&str, Judge); 16] = [
 /// changes, this list naming its stem, then its schema, then its type and decoder row, which
 /// empties the list again. A listed stem has no request type and no row, and may not stay listed
 /// once its type lands.
-const SCHEMA_AHEAD_OF_TYPE: [&str; 5] = [
-    "acknowledgment-request-request",
+const SCHEMA_AHEAD_OF_TYPE: [&str; 4] = [
     "passkey-enrol-request",
     "passkey-registration-challenge-request",
     "reduction-session-challenge-request",
