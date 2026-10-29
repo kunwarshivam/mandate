@@ -22,8 +22,8 @@ use sha2::{Digest, Sha256};
 use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_APP_ORIGIN, DEMO_OWNER,
-    DEPLOY_MANAGER_PROCESS, ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE,
-    RESEARCH_MANAGER_PROCESS, RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART,
+    DEPLOY_MANAGER_PROCESS, ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NEWS_READER_PROCESS,
+    NODE, RESEARCH_MANAGER_PROCESS, RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART,
     api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
     open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
     signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
@@ -1392,6 +1392,19 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             vec![GW_RESEARCH],
         ),
         link(
+            "the news reader stores the recorded news about the thesis's instrument, once",
+            &format!("news:{workspace}"),
+            "NewsItemStored",
+            Some(r#""item_id":"9001:"#),
+            "the news reader, following the research agent on the recording its image carries, \
+             stores recorded item 9001 about SPY, the thesis's instrument, as a typed record and \
+             journals it on the research workspace's news stream; the journal's rule 284 refuses a \
+             second record of the same item, so the one found is the only one (E2-10c, DEC-2085)",
+            "the news reader in the cell on its recording (#2919), polling an active thesis's \
+             instrument once the research agent's thesis is admitted",
+            vec![GW_RESEARCH],
+        ),
+        link(
             "the runtime sizes the opening and the gate and autonomy rules ask",
             &agent,
             "ApprovalRequested",
@@ -2570,25 +2583,38 @@ fn api_unaskable() -> Result<Option<String>> {
 /// The Deployments [`point_api`] points at the run and waits on: the API, the first manager and
 /// the first scheduler on the run's workspace, and the second manager, the second scheduler and the
 /// model gateway on its research workspace (DEC-2070, DEC-2071).
-const POINTED: [&str; 6] = [
+const POINTED: [&str; 7] = [
     API_PROCESS,
     DEPLOY_MANAGER_PROCESS,
     SCHEDULER_PROCESS,
     RESEARCH_MANAGER_PROCESS,
     RESEARCH_SCHEDULER_PROCESS,
     MODEL_GATEWAY_PROCESS,
+    NEWS_READER_PROCESS,
 ];
 
 /// The chart values [`point_api`] sets for the run's `workspace`: the API on it, and the second
 /// manager and the model gateway on its research workspace, the same ULID with `r`, the one value
 /// the chart takes for either (DEC-2070 items 1 and 5).
-fn pointed_values(workspace: &str) -> [String; 3] {
+fn pointed_values(workspace: &str) -> [String; 6] {
     let research = research_workspace_of(workspace);
     [
         format!("api.workspace={workspace}"),
         format!("deployManager.researchWorkspace={research}"),
         format!("modelGateway.workspace={research}"),
+        format!("news.workspace={research}"),
+        format!("news.follows[0].agent={RESEARCH_AGENT}"),
+        format!(
+            "news.follows[0].account={}",
+            research_account_of(run_of(workspace))
+        ),
     ]
+}
+
+/// The run id a workspace of [`workspace_of`]'s layout names, its ten characters after the
+/// prefix; the whole workspace for any other layout, which no account of the run's names.
+fn run_of(workspace: &str) -> &str {
+    workspace.get(6..16).unwrap_or(workspace)
 }
 
 /// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010), and the second
@@ -3958,6 +3984,11 @@ mod tests {
                 ),
                 (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
                 (
+                    "news:demo3r".to_owned(),
+                    "NewsItemStored",
+                    Some(r#""item_id":"9001:"#)
+                ),
+                (
                     agent.clone(),
                     "ApprovalRequested",
                     Some(r#""purpose":"open""#)
@@ -5051,7 +5082,9 @@ mod tests {
 
     /// Each link's event and the member its fragment names are the journal's own: the catalogue row
     /// of the event (journal spec §9) names the member, or, for `FillApplied`'s side, which the row
-    /// leaves to §9.5, the executor's writer journals it; read from those files, not from the plan.
+    /// leaves to §9.5, the executor's writer journals it, or the member's own row closes it, with
+    /// the value the fragment names or, for a fragment that names only a value's start (the news
+    /// item's `item_id`, `<vendor id>:`), as a member; read from those files, not from the plan.
     #[test]
     fn each_link_reads_a_member_its_event_carries() {
         let spec = fs::read_to_string("../docs/specs/journal.md").unwrap();
@@ -5065,7 +5098,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(checks.len(), 11);
+        assert_eq!(checks.len(), 12);
         for check in checks {
             let named = format!("`{}`", check.event_type);
             let row = spec
@@ -5082,7 +5115,8 @@ mod tests {
             let written =
                 check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
             let closed = spec.lines().any(|l| {
-                l.starts_with(&format!("| `{member}` |")) && l.contains(&format!("`{value}`"))
+                l.starts_with(&format!("| `{member}` |"))
+                    && (value.is_empty() || l.contains(&format!("`{value}`")))
             });
             assert!(
                 row.contains(member) || written || closed,
@@ -5094,7 +5128,9 @@ mod tests {
 
     /// DEC-2070 items 1 and 5: the cell is pointed at the run's workspace and, for the second
     /// manager and the model gateway alike, at its research workspace, the run's with `r`, which
-    /// the chart's schema and guard take; and each of those Deployments is waited on.
+    /// the chart's schema and guard take; and each of those Deployments is waited on. The news
+    /// reader serves the research workspace and follows the research agent on the run's research
+    /// account (DEC-2085 item 7).
     #[test]
     fn the_cell_is_pointed_at_the_run_and_its_research_workspace() {
         let run = workspace_of("12");
@@ -5104,6 +5140,9 @@ mod tests {
                 format!("api.workspace={run}"),
                 format!("deployManager.researchWorkspace={run}r"),
                 format!("modelGateway.workspace={run}r"),
+                format!("news.workspace={run}r"),
+                format!("news.follows[0].agent={RESEARCH_AGENT}"),
+                format!("news.follows[0].account={}", research_account_of("12")),
             ]
         );
         assert_eq!(
@@ -5114,7 +5153,8 @@ mod tests {
                 "scheduler",
                 "deploy-manager-research",
                 "scheduler-research",
-                "model-gateway"
+                "model-gateway",
+                "news-reader"
             ]
         );
     }

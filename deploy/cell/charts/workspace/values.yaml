@@ -107,6 +107,9 @@ data:
 # vendor sees, never a secret.
 news:
   recorded: false
+  # The workspace whose news stream it writes and whose agents it follows; empty, the hosted
+  # workspace (`api.workspace`). The demo scenario names its research workspace (DEC-2085 item 7).
+  workspace: ""
   follows: []
   userAgent: "Mandate news reader ops@owlhead.ai"
 

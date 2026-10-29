@@ -23,7 +23,8 @@ hosted workspace's control stream as its own journal role and Postgres, logs in 
 no stream. The news reader's launch gains `--user-agent news.userAgent` and one `--follow
 <agent>=<account>` for each of `news.follows`, the agents whose theses and holdings it polls
 (DEC-2281 item 1, DEC-2084 item 5). With `news.recorded` it runs on the recording its image
-carries in place of the vault's flags, and reaches Postgres alone (DEC-2085). */ -}}
+carries in place of the vault's flags, and reaches Postgres alone (DEC-2085); its `--workspace` is
+`news.workspace` where set, else the hosted workspace (DEC-2085 item 7). */ -}}
 {{- define "mandate.processes" -}}
 {{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
 {{- $out := list -}}
@@ -43,6 +44,13 @@ carries in place of the vault's flags, and reaches Postgres alone (DEC-2085). */
 {{- if $.Values.news.recorded -}}
 {{- $_ := set . "args" (list "run" "--workspace" "{hosted_workspace}" "--allowlist" "/etc/mandate/news/allowlist.toml" "--artifacts" "/var/lib/mandate/artifacts" "--recorded" "/usr/local/share/mandate/news/recorded-news.json" "--probe" "/tmp/process.sock") -}}
 {{- $_ := set . "egress" (list "postgres") -}}
+{{- end -}}
+{{- if $.Values.news.workspace -}}
+{{- $pointed := list -}}
+{{- range $word := .args -}}
+{{- $pointed = append $pointed (ternary $.Values.news.workspace $word (eq $word "{hosted_workspace}")) -}}
+{{- end -}}
+{{- $_ := set . "args" $pointed -}}
 {{- end -}}
 {{- $words := list "--user-agent" $.Values.news.userAgent -}}
 {{- range $.Values.news.follows -}}

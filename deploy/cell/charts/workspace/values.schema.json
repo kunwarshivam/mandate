@@ -492,6 +492,7 @@
       "additionalProperties": false,
       "required": [
         "recorded",
+        "workspace",
         "follows",
         "userAgent"
       ],
@@ -499,6 +500,11 @@
         "recorded": {
           "type": "boolean",
           "description": "Run the reader on the recording its image carries and a fixture key, in the local cell alone (DEC-2085)"
+        },
+        "workspace": {
+          "type": "string",
+          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}r?$",
+          "description": "The workspace the reader serves, a ULID or a research workspace's `<ULID>r`; empty, api.workspace (DEC-2085 item 7)"
         },
         "follows": {
           "type": "array",
