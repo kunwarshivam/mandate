@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DesignPage from "@/app/(app)/design/page.dev";
+import KumoSpecimenPage from "@/app/(app)/kumo-specimen/page";
 import PalettePage from "@/app/(app)/palette/page.dev";
 import { DEV_PAGE_EXTENSION, pageExtensions } from "./dev-routes";
 
@@ -64,6 +65,12 @@ describe("the /design reference, with its sample figures, stays out of productio
 
   it("is not linked from the navigation", () => {
     expect(readFileSync(web("src/components/shell/nav.tsx"), "utf8")).not.toContain("/design");
+  });
+
+  it("leaves the e2e build only its Kumo specimen, which answers 404 in every other build", () => {
+    expect(() => KumoSpecimenPage()).toThrow("NEXT_NOT_FOUND");
+    expect(readFileSync(web("src/app/(app)/kumo-specimen/page.tsx"), "utf8")).toContain("if (!scenariosEnabled) notFound();");
+    expect(readFileSync(web("e2e/flat-fills.spec.ts"), "utf8")).not.toContain('"/design"');
   });
 });
 
