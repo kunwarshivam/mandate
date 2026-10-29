@@ -3177,6 +3177,9 @@ fn the_list_refuses_another_query_and_fails_on_a_record_it_cannot_read() {
         "",
         "?state=closed",
         "?state=open&agent=agt_zz",
+        "?state=open&agent=",
+        "?state=open&agent=agt_a&agent=agt_a",
+        "?agent=agt_a&state=open&agent=agt_a",
         "?state=open&state=open",
         "?state=open&x=1",
     ] {
