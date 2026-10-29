@@ -11,6 +11,7 @@
  */
 import type { WorkspaceClient } from "./client";
 import type { Classification } from "./confirm";
+import { decimal } from "./decode";
 import type { PasskeyStepUp } from "./passkey";
 import { type StepUpChallenge, cliConfirmEvidence } from "./step-up";
 import type { JsonObject, PreparedCommand } from "./types";
@@ -95,6 +96,21 @@ export function prepareOwnerExit(client: WorkspaceClient, agentId: string, instr
   if (!agentId) return { ok: false, reason: "no_agent" };
   if (!isAssetId(instrument)) return { ok: false, reason: "no_asset_id" };
   return one(client.prepare("owner_exit", { agent: agentId }, { instrument, bid: null, bid_size: null, quoted_at: null, floor: null, record: recordRef(record), step_up: null }));
+}
+
+/**
+ * The owner asking an agent to buy (§3.11 item 13, `POST /agents/{id}/requests`, DEC-2151): the
+ * instrument and the size the owner typed, nothing else. It is a request, not an order: the agent's
+ * builder sizes and clips it to the mandate's caps, the gate and the autonomy rules judge it as any
+ * proposal (rule 11), and the server refuses an instrument the agent's mandate does not pin.
+ * `requested_by` is never a member; the server takes it from the session (API-6).
+ */
+export function prepareAskAgent(client: WorkspaceClient, agentId: string, instrument: string, size: string): Prepared {
+  if (!agentId) return { ok: false, reason: "no_agent" };
+  if (!isAssetId(instrument)) return { ok: false, reason: "no_asset_id" };
+  const canonical = decimal(size, "/size");
+  if (!canonical.ok || canonical.value.startsWith("-") || canonical.value === "0") return { ok: false, reason: "invalid_size" };
+  return one(client.prepare("ask_agent", { agent: agentId }, { instrument, side: "buy", size: canonical.value }));
 }
 
 /**
