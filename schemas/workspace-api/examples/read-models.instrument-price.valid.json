@@ -1,0 +1,60 @@
+[
+  {
+    "label": "not reported: untrusted, with no bar",
+    "set": {
+      "/reported": false,
+      "/reason": "untrusted"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported: no store",
+    "set": {
+      "/reported": false,
+      "/reason": "no_store"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported: not covered",
+    "set": {
+      "/reported": false,
+      "/reason": "not_covered"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "not reported: no bars",
+    "set": {
+      "/reported": false,
+      "/reason": "no_bars"
+    },
+    "remove": [
+      "/close",
+      "/bar_start",
+      "/timeframe",
+      "/source"
+    ]
+  },
+  {
+    "label": "the cell's recording",
+    "set": {
+      "/source": "recorded"
+    }
+  }
+]

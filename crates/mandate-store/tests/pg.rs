@@ -173,3 +173,18 @@ fn rows_from_a_held_head_read_only_what_follows_it() {
     };
     assert_eq!(reader.rows_from(&stream(), forked), None);
 }
+
+/// DEC-2292: a Postgres store answers the database server's clock, a time after this suite's
+/// fixtures, read twice in order, while the in-memory store answers none.
+#[test]
+fn a_postgres_store_answers_the_server_s_clock_and_the_in_memory_store_none() {
+    assert_eq!(mandate_store::MemoryStore::default().clock(), None);
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let store = PgStore::connect(&dsn(&db)).unwrap();
+    let first = store.clock().expect("the server's clock");
+    let second = store.clock().expect("the server's clock");
+    assert!(first.secs() > T, "{first}");
+    assert!(first <= second, "{first} then {second}");
+}

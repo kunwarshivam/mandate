@@ -1,6 +1,6 @@
 # E2-10 follow-up: hold the news reader's receipt bound against the hot store's clock
 
-- **E2-10f (Proposed, M5; lane SC)** As the founder, I want the news reader's receipt bound to catch
+- **E2-10f (Done, M5; lane SC; DEC-2292)** As the founder, I want the news reader's receipt bound to catch
   a host clock that is already ahead when the reader starts, so that a skew present at boot cannot
   pin the news stream's last `knowledge_at` in the future. Today the trusted time is the host clock
   read at start plus a monotonic clock's elapsed time (DEC-2289), so a skew at boot passes the

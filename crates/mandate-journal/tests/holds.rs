@@ -6,7 +6,7 @@
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_journal::StoredEvent;
 use mandate_journal::holds::{
-    Hold, Holder, Raised, Reason, Unreadable, independence_required, requests, standing,
+    Hold, Holder, Raised, Reason, Requested, Unreadable, independence_required, requests, standing,
 };
 
 fn caused(
@@ -515,5 +515,75 @@ fn a_hold_is_posted_to_its_request_s_agent_or_its_own_or_the_account_s_first() {
     assert_eq!(
         mandate_journal::holds::holds(&nobody, &[]).map(|h| h.len()),
         Ok(0)
+    );
+}
+
+/// The list attaches to a hold only an unspent request for that very event and subject: a spent
+/// one, another hold's, and one for another subject of the same hold are each left off, and the
+/// hold is posted to its own agent; the latest matching unspent request is attached, and the hold
+/// is posted to the agent that request names (§3.11 item 12).
+#[test]
+fn a_hold_lists_only_an_unspent_request_for_its_own_event_and_subject() {
+    let rows = vec![
+        row(
+            1,
+            "RiskLimitTriggered",
+            1,
+            r#"{"agent_id":"a","limit":"max_daily_loss"}"#,
+        ),
+        row(
+            2,
+            "RiskLimitTriggered",
+            1,
+            r#"{"agent_id":"b","limit":"max_daily_loss"}"#,
+        ),
+    ];
+    let held = rows[0].event_id.clone();
+    let other = rows[1].event_id.clone();
+    let asked = |id: &str, agent: &str, event: &str, subject: &str| Requested {
+        event_id: id.to_owned(),
+        agent: agent.to_owned(),
+        event: event.to_owned(),
+        subject: subject.to_owned(),
+        requested_by: "bob".to_owned(),
+    };
+    let mut requested = vec![
+        (asked("r1", "spent", &held, "limit"), true),
+        (asked("r2", "elsewhere", &other, "limit"), false),
+        (asked("r3", "restricted", &held, "restriction"), false),
+    ];
+    let accounts = [(
+        "acct:w:a".to_owned(),
+        rows,
+        vec!["a".to_owned(), "b".to_owned()],
+    )];
+    let listed = |requested: &[(Requested, bool)]| -> Vec<(String, String, Option<String>)> {
+        mandate_journal::holds::holds(&accounts, requested)
+            .expect("readable")
+            .into_iter()
+            .map(|hold| {
+                (
+                    hold.raised.event,
+                    hold.agent_id,
+                    hold.request.map(|r| r.event_id),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        listed(&requested),
+        [
+            (held.clone(), "a".to_owned(), None),
+            (other.clone(), "elsewhere".to_owned(), Some("r2".to_owned())),
+        ]
+    );
+    requested.push((asked("r4", "first", &held, "limit"), false));
+    requested.push((asked("r5", "latest", &held, "limit"), false));
+    assert_eq!(
+        listed(&requested),
+        [
+            (held, "latest".to_owned(), Some("r5".to_owned())),
+            (other, "elsewhere".to_owned(), Some("r2".to_owned())),
+        ]
     );
 }

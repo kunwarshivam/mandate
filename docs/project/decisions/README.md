@@ -12,6 +12,12 @@ other open PR conflicting. Two PRs that add two different files never conflict. 
 the same number add the same path, which git refuses to merge, so a collision is loud rather than
 silent.
 
+## When to write one
+
+Only for a founder ruling or an architecture choice (the founder, 2026-10-29). An ordinary
+engineering choice goes in its PR description instead. Decisions that nothing in the code, specs or
+plans cited any more were removed on 2026-10-29; git history keeps them.
+
 ## Writing a decision
 
 1. **Take a number** from your category's range ([Numbers by category](#numbers-by-category)):

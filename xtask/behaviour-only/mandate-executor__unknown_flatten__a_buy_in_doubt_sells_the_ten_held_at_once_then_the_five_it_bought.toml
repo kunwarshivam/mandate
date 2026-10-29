@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/unknown_flatten.rs"
+test = "a_buy_in_doubt_sells_the_ten_held_at_once_then_the_five_it_bought"
+reason = """
+DEC-2857 (E7-4): an agent-scoped kill switch's flatten never waits on an `Unknown` order. No stub
+stands in the way: today the switch raises no close while a buy is `Unknown`, so nothing is
+received or sold, and that is the failure. The implementation deletes this file with the test's
+`#[ignore]` line.
+"""

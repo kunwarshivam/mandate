@@ -153,6 +153,20 @@ impl PgJournal {
         Ok(unsigned(epoch)?)
     }
 
+    /// The database server's own clock, `clock_timestamp()`, to the microsecond: a second host's
+    /// clock a process may bound its own against (DEC-2292). `Err` when the server cannot answer
+    /// or its time is past the representable range.
+    pub async fn clock(&self) -> Result<UtcNanos, PgError> {
+        let micros: i64 =
+            sqlx::query_scalar("SELECT (extract(epoch FROM clock_timestamp()) * 1000000)::bigint")
+                .fetch_one(&self.pool)
+                .await?;
+        let secs = micros.div_euclid(1_000_000);
+        let nanos = micros.rem_euclid(1_000_000).saturating_mul(1_000);
+        let nanos = u32::try_from(nanos).map_err(|_| sqlx::Error::Decode("clock".into()))?;
+        Ok(UtcNanos::from_parts(secs, nanos).map_err(|_| sqlx::Error::Decode("clock".into()))?)
+    }
+
     pub async fn head(&self, stream: &StreamId) -> Result<Head, PgError> {
         let row = sqlx::query(
             "SELECT seq, hash, writer_epoch, risk_clock FROM stream_heads WHERE stream_id = $1",

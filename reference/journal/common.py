@@ -127,9 +127,10 @@ def is_ulid(text: str) -> bool:
 
 def is_intent(text: str, skip: frozenset = frozenset()) -> bool:
     """§9.1's `intent`: a ULID, or the executor's own exit's intent of trading spec §2.3, exactly
-    `w-{ulid}` or `k-{ulid}-{n}` with `n` a decimal from 0 to 999 and no leading zero (DEC-2845).
-    Each `types.intent_*` flag in `skip` seeds one bug: `own` reads it as a bare ULID, `any` as any
-    id, `bound` drops the bound of 999, `zero` admits a leading zero, and `ascii` any digit."""
+    `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r` with `n` a decimal from 0 to 999 and no leading
+    zero (DEC-2845; the remainder's `r`, DEC-2857). Each `types.intent_*` flag in `skip` seeds one
+    bug: `own` reads it as a bare ULID, `any` as any id, `bound` drops the bound of 999, `zero`
+    admits a leading zero, `ascii` any digit, and `remainder` refuses the `r`."""
     if "types.intent_any" in skip:
         return bool(IDENT.match(text))
     if is_ulid(text):
@@ -141,6 +142,8 @@ def is_intent(text: str, skip: frozenset = frozenset()) -> bool:
     if not text.startswith("k-"):
         return False
     switch, dash, n = text[2:].partition("-")
+    if n.endswith("r") and "types.intent_remainder" not in skip:
+        n = n[:-1]
     digits = n.isdigit() and (n.isascii() or "types.intent_ascii" in skip)
     short = len(n) <= 3 or "types.intent_bound" in skip
     unpadded = n == "0" or not n.startswith("0") or "types.intent_zero" in skip

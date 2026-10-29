@@ -3,12 +3,13 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
+import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit, prepareAskAgent } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, ownerCommandStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
+import { priceRead, priceRoute } from "@/api/price";
 import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -37,6 +38,7 @@ import {
   type PasskeyPort,
   type AlertsAnswer,
   type PositionsAnswer,
+  type PriceAnswer,
   type RecordsAnswer,
   type Runtime,
   RuntimeContext,
@@ -45,6 +47,12 @@ import {
 
 /** Refusal codes a set-up step names in words of their own rather than as a plain `invalid` (DEC-2809 item 1, DEC-2133). */
 const NAMED_VIOLATIONS: ReadonlySet<string> = new Set(["second_instrument", "second_agent_on_account", "connection_unrecorded"]);
+/** An owner request's refusals by the member they name (DEC-2151): a size that is not above zero, or an instrument the agent's mandate does not pin. */
+const VIOLATED_PATHS: Readonly<Record<string, string>> = { "/size": "invalid_size", "/instrument": "instrument_not_pinned" };
+
+function invalidReason(violations: readonly { path: string; code: string }[]): string | undefined {
+  return violations.find((v) => NAMED_VIOLATIONS.has(v.code))?.code ?? violations.map((v) => VIOLATED_PATHS[v.path]).find((r) => r !== undefined);
+}
 
 /** How many of an agent stream's latest events its screen lists. */
 const JOURNAL_TAIL = 20;
@@ -81,6 +89,8 @@ const SENDS = 4;
 /** How many times a recorded command's status is read before the runtime stops following it (spec §6.3 item 4). */
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
+/** An owner's ask is answered once the agent took it (§5.5 `taken`): its approval, when the mandate asks, is already waiting. */
+const ASK_SETTLED: ReadonlySet<CommandPhase> = new Set(["taken", ...SETTLED]);
 
 /** Why the runtime refused an approval answer: the reason its `ApprovalResponded` step carries (journal spec rule 47), or none. */
 function refusalOf(status: CommandStatus): string | null {
@@ -241,7 +251,7 @@ export function ApiRuntimeProvider({
         if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
         if (error.effect === "none" && ambiguous) return { phase: "unknown", eventId };
-        if (error.effect === "none") return { phase: "undelivered", reason: (error.code === "invalid" ? error.violations.find((v) => NAMED_VIOLATIONS.has(v.code))?.code : undefined) ?? error.code };
+        if (error.effect === "none") return { phase: "undelivered", reason: (error.code === "invalid" ? invalidReason(error.violations) : undefined) ?? error.code };
         ambiguous = true;
         eventId = error.event_id ?? eventId;
         if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
@@ -255,10 +265,10 @@ export function ApiRuntimeProvider({
 
   /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3); the settled status, with its steps. */
   const settle = useCallback(
-    async (eventId: string): Promise<CommandStatus | null> => {
+    async (eventId: string, settled: ReadonlySet<CommandPhase> = SETTLED): Promise<CommandStatus | null> => {
       for (let read = 0; read < STATUS_READS && mounted.current; read += 1) {
         const status = await client.commandStatus(eventId);
-        if (status.ok && SETTLED.has(status.value.phase)) {
+        if (status.ok && settled.has(status.value.phase)) {
           await refresh();
           return status.value;
         }
@@ -366,6 +376,27 @@ export function ApiRuntimeProvider({
       return delivered.phase === "recorded" ? { phase: "recorded" } : { phase: "unknown" };
     },
     [client, deliver, follow],
+  );
+
+  /**
+   * The owner asking an agent to buy (`POST /agents/{id}/requests`, DEC-2151), followed to its outcome:
+   * `applied` once the agent took it (an `ask` then shows in Approvals), `refused` with the reason its
+   * steps give. `onRecorded` runs once the journal holds it.
+   */
+  const askAgent = useCallback<NonNullable<Runtime["askAgent"]>>(
+    async (agentId, instrument, size, onRecorded) => {
+      const prepared = prepareAskAgent(client, agentId, instrument, size);
+      if (!prepared.ok) return { phase: "undelivered", reason: prepared.reason };
+      const delivered = await deliver(prepared.commands[0]);
+      if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
+      if (delivered.phase === "recorded") onRecorded();
+      if (!delivered.eventId) return { phase: "unknown" };
+      const settled = await settle(delivered.eventId, ASK_SETTLED);
+      if (settled?.phase === "refused") return { phase: "refused", reason: refusalOf(settled) };
+      if (settled) return { phase: "taken" };
+      return delivered.phase === "recorded" ? { phase: "recorded" } : { phase: "unknown" };
+    },
+    [client, deliver, settle],
   );
 
   const respond = useCallback(
@@ -565,6 +596,15 @@ export function ApiRuntimeProvider({
     return { ok: true, instruments: instruments.value.instruments, models: models.value.models };
   }, [client]);
 
+  /** `GET /instruments/{id}/price` (§4.1, DEC-2152): the last trusted daily close, read when the instrument's page asks. */
+  const price = useCallback(
+    async (instrumentId: string): Promise<PriceAnswer> => {
+      const read = await client.read(priceRoute(instrumentId), priceRead);
+      return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+    },
+    [client],
+  );
+
   /** `GET /alerts` (§4.7, DEC-2141): the workspace's owner alerts, with only this member's own deliveries. */
   const alerts = useCallback(async (): Promise<AlertsAnswer> => {
     const read = await client.read("/alerts", alertsRead);
@@ -743,8 +783,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

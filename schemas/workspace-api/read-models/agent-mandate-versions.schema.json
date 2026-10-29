@@ -136,7 +136,7 @@
       }
     },
     "Confirmed": {
-      "description": "A later version: a MandateConfirmed naming the agent, with the base_version it replaces. classification is mandate spec §9.2's verdict of base_version to mandate_version, computed by the server from the two stored documents, as the confirm computes it (§5.1); null when the store cannot give either document or they do not classify, never read as reducing or neutral. confirmed_at and confirmation_id are the MandateConfirmed's. application is the first MandateVersionApplied for the agent on the account stream whose causation_id is confirmation_id, or null while none is (not yet applied, or the account stream not found). A later version is never deployed, so deployed_at is null.",
+      "description": "A later version: a MandateConfirmed naming the agent, with the base_version it replaces. classification is mandate spec §9.2's verdict of base_version to mandate_version, computed by the server from the two stored documents, as the confirm computes it (§5.1); null when the store cannot give either document or they do not classify, never read as reducing or neutral. confirmed_at and confirmation_id are the MandateConfirmed's. application is the first MandateVersionApplied for the agent on the account stream whose causation_id is confirmation_id, or null while none is (not yet applied, or the account stream not found). A later version is never deployed, so deployed_at is null. The server also refuses, as journal_unavailable, an application that names another version or base, tells another classification, or answers a confirmation another application already answered (DEC-2148).",
       "type": "object",
       "additionalProperties": false,
       "required": [

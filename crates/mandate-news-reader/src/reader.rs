@@ -25,6 +25,11 @@
 //! an episode as [`RECEIPT_AHEAD`], and pauses the reader as a failed request does. A round within
 //! the bound ends the episode. Every pause runs by the trusted time.
 //!
+//! **The store's clock** (DEC-2292). The bound is judged against the earlier of the trusted time
+//! and the store's own clock ([`mandate_store::Store::clock`], the database server's), so a host
+//! clock already ahead when the reader starts is held too. A store whose clock cannot be read holds
+//! every round, counted and alerted once an episode as [`STORE_CLOCK_UNAVAILABLE`].
+//!
 //! **An item** is stored and journaled as [`crate::items`] says.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,6 +65,10 @@ pub const RECEIPT_LEAD_S: i64 = 60;
 
 /// The alert a reader raises once an episode of receipts past [`RECEIPT_LEAD_S`] begins.
 pub const RECEIPT_AHEAD: &str = "receipt_ahead";
+
+/// The alert a reader raises once an episode of rounds held because the store's clock could not
+/// be read begins (DEC-2292).
+pub const STORE_CLOCK_UNAVAILABLE: &str = "store_clock_unavailable";
 
 /// A step's two readings of the time (DEC-2289): `now`, the host clock, which stamps a receipt,
 /// and `trusted`, what the caller holds to be the time without that clock's word alone. The binary
@@ -145,6 +154,8 @@ pub struct Counts {
     /// Rounds refused because their receipt ran more than [`RECEIPT_LEAD_S`] ahead of the trusted
     /// time (DEC-2289).
     pub receipt_ahead: u64,
+    /// Rounds held because the store's clock could not be read (DEC-2292).
+    pub store_clock_unavailable: u64,
 }
 
 /// One workspace's news reader.
@@ -174,8 +185,10 @@ pub struct NewsReader<S, A, T> {
     pub(crate) counts: Counts,
     /// The operator alerts raised and not yet taken, each a fixed code.
     alerts: Vec<&'static str>,
-    /// Whether the last round judged was held past the receipt lead, already alerted.
-    ahead: bool,
+    /// Why the last round judged was held, [`RECEIPT_AHEAD`] or [`STORE_CLOCK_UNAVAILABLE`],
+    /// already alerted; a round within the bound clears it, and a hold of the other kind alerts its
+    /// own code.
+    hold: Option<&'static str>,
 }
 
 impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
@@ -228,7 +241,7 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             lifecycle: Lifecycle::new(Kind::Writer, config.liveness, now),
             counts: Counts::default(),
             alerts: Vec::new(),
-            ahead: false,
+            hold: None,
         };
         if config.environment != Environment::Paper || this.source.is_none() {
             this.lifecycle.observe(now, Input::Failed);
@@ -300,16 +313,31 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
         if self.not_ready.is_some() || paused || !self.flush(now) {
             return;
         }
-        if !within_lead(clock) {
-            self.counts.receipt_ahead = self.counts.receipt_ahead.saturating_add(1);
-            if !self.ahead {
-                self.ahead = true;
-                self.alerts.push(RECEIPT_AHEAD);
+        let held_for = match self.store.clock() {
+            None => Some(STORE_CLOCK_UNAVAILABLE),
+            Some(store) => {
+                let bounded = Clock {
+                    now: clock.now,
+                    trusted: clock.trusted.min(store),
+                };
+                (!within_lead(bounded)).then_some(RECEIPT_AHEAD)
+            }
+        };
+        if let Some(code) = held_for {
+            let held = if code == RECEIPT_AHEAD {
+                &mut self.counts.receipt_ahead
+            } else {
+                &mut self.counts.store_clock_unavailable
+            };
+            *held = held.saturating_add(1);
+            if self.hold != Some(code) {
+                self.hold = Some(code);
+                self.alerts.push(code);
             }
             self.paused_until = cooldown_until(clock.trusted);
             return;
         }
-        self.ahead = false;
+        self.hold = None;
         let Some(round) = self.round.take().or_else(|| self.next_round(now)) else {
             self.paused_until = cooldown_until(clock.trusted);
             return;

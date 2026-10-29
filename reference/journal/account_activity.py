@@ -43,7 +43,13 @@ ABANDONED = "abandoned"
 RULE_297 = "rule 297"
 RULE_298 = "rule 298"
 RULE_303 = "rule 303"
-REASONS = ("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")
+REASONS = (
+    "intent_too_old",
+    "gate_recheck",
+    "released_to_owner",
+    "unprotected_interval_limit",
+    "flatten_covered",
+)
 # The members whose presence each source decides, in the table's order.
 SOURCED = ("broker_order_id", "fill_id", "client_order_id", "instrument", "side", "qty")
 

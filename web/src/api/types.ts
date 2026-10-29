@@ -84,6 +84,7 @@ export type Operation =
   | "hold_openings"
   | "stop"
   | "owner_exit"
+  | "ask_agent"
   | "acknowledge"
   | "kill_switch"
   | "approval_response"
