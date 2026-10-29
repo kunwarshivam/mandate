@@ -70,6 +70,25 @@ pub enum Command {
         instrument: String,
         bid: Option<[String; 3]>,
     },
+    /// The owner's acknowledgment of a hold (§3.11 item 12, DEC-2144), journal spec §9.28's
+    /// `OwnerAcknowledged` version 2: the hold's `event` and `subject`, the request it answers and
+    /// that request's `requested_by`, and the verified evidence as §9.28 types it.
+    Acknowledge {
+        agent: String,
+        event: String,
+        subject: &'static str,
+        request: Option<String>,
+        requested_by: String,
+        step_up: Value,
+    },
+    /// The owner's request that another user acknowledge a hold, §9.28's
+    /// `OwnerAcknowledgmentRequested` version 2.
+    RequestAcknowledgment {
+        agent: String,
+        event: String,
+        subject: &'static str,
+        step_up: Value,
+    },
 }
 
 /// The warning a Stop with release names (DEC-136, PX-13 (a)), the text `mandate agent stop
@@ -97,6 +116,8 @@ impl Command {
             Self::Resume { .. } => "resume",
             Self::Stop { .. } => "stop",
             Self::OwnerExit { .. } => "owner_exit",
+            Self::Acknowledge { .. } => "acknowledge",
+            Self::RequestAcknowledgment { .. } => "acknowledgment_request",
         }
     }
 
@@ -110,6 +131,9 @@ impl Command {
             Self::Grant { .. } => Permission::Approve,
             Self::Resume { .. } | Self::Stop { .. } => Permission::ResumeOrStop,
             Self::OwnerExit { .. } => Permission::OwnerExit,
+            Self::Acknowledge { .. } | Self::RequestAcknowledgment { .. } => {
+                Permission::Acknowledge
+            }
         }
     }
 
@@ -135,7 +159,18 @@ impl Command {
     fn event_type(&self) -> &'static str {
         match self {
             Self::Skip { .. } | Self::Grant { .. } => "ApprovalResponseSubmitted",
+            Self::Acknowledge { .. } => "OwnerAcknowledged",
+            Self::RequestAcknowledgment { .. } => "OwnerAcknowledgmentRequested",
             _ => "OwnerCommandIssued",
+        }
+    }
+
+    /// Its event's `schema_version`: 2 for an acknowledgment and its request, which name their
+    /// `subject` (journal spec §9.28 version 2), and 1 for the rest.
+    fn schema_version(&self) -> u64 {
+        match self {
+            Self::Acknowledge { .. } | Self::RequestAcknowledgment { .. } => 2,
+            _ => 1,
         }
     }
 
@@ -152,9 +187,56 @@ impl Command {
         }
     }
 
-    /// Its payload: journal spec §9.11's members for an owner command, §9.7's for an answer, as the
-    /// CLI writes each.
-    fn payload(&self, workspace: &str, principal: &str, second: Int) -> Option<Value> {
+    /// Its payload: journal spec §9.11's members for an owner command, §9.7's for an answer, and
+    /// §9.28's for an acknowledgment and its request, as the CLI writes each; `risk_clock` is the
+    /// second as a timestamp, as the CLI writes §9.28's.
+    fn payload(
+        &self,
+        workspace: &str,
+        principal: &str,
+        (second, risk_clock): (Int, &str),
+    ) -> Option<Value> {
+        match self {
+            Self::Acknowledge {
+                agent,
+                event,
+                subject,
+                request,
+                requested_by,
+                step_up,
+            } => {
+                return object(vec![
+                    ("agent", text(agent)),
+                    ("event", text(event)),
+                    ("subject", text(subject)),
+                    ("user", text(principal)),
+                    ("requested_by", text(requested_by)),
+                    ("independent_required", Value::Bool(request.is_some())),
+                    ("request", request.as_deref().map_or(Value::Null, text)),
+                    ("submitted_at", Value::Int(second)),
+                    ("risk_clock", text(risk_clock)),
+                    ("step_up", step_up.clone()),
+                ]);
+            }
+            Self::RequestAcknowledgment {
+                agent,
+                event,
+                subject,
+                step_up,
+            } => {
+                return object(vec![
+                    ("agent", text(agent)),
+                    ("event", text(event)),
+                    ("subject", text(subject)),
+                    ("requested_by", text(principal)),
+                    ("independent_required", Value::Bool(true)),
+                    ("submitted_at", Value::Int(second)),
+                    ("risk_clock", text(risk_clock)),
+                    ("step_up", step_up.clone()),
+                ]);
+            }
+            _ => {}
+        }
         let answer = match self {
             Self::Skip {
                 agent,
@@ -226,7 +308,9 @@ impl Command {
             Self::Skip { agent, .. }
             | Self::Grant { agent, .. }
             | Self::Resume { agent, .. }
-            | Self::Stop { agent, .. } => (Some(agent), "agent", agent),
+            | Self::Stop { agent, .. }
+            | Self::Acknowledge { agent, .. }
+            | Self::RequestAcknowledgment { agent, .. } => (Some(agent), "agent", agent),
             Self::OwnerExit {
                 agent, instrument, ..
             } => (Some(agent), "instrument", instrument),
@@ -242,7 +326,9 @@ impl Command {
             | Self::Grant { agent, .. }
             | Self::Resume { agent, .. }
             | Self::Stop { agent, .. }
-            | Self::OwnerExit { agent, .. } => Some(agent),
+            | Self::OwnerExit { agent, .. }
+            | Self::Acknowledge { agent, .. }
+            | Self::RequestAcknowledgment { agent, .. } => Some(agent),
             Self::KillSwitch(_) => None,
         }
     }
@@ -280,13 +366,16 @@ pub struct Issued<'a> {
 /// The canonical draft of `issued`'s event; `None` only for a value the canonical form cannot
 /// hold.
 pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
-    let second = u64::try_from(issued.now.secs()).ok().and_then(Int::new)?;
-    let payload = issued
-        .command
-        .payload(issued.workspace, issued.principal, second)?;
+    let secs = issued.now.secs();
+    let second = u64::try_from(secs).ok().and_then(Int::new)?;
+    let risk_clock = UtcNanos::from_parts(secs, 0).ok()?.to_string();
+    let payload =
+        issued
+            .command
+            .payload(issued.workspace, issued.principal, (second, &risk_clock))?;
     let event = Event {
         event_type: issued.command.event_type(),
-        schema_version: 1,
+        schema_version: issued.command.schema_version(),
         payload,
         artifact_refs: issued.command.artifact_refs(),
         config_refs: Vec::new(),
@@ -385,7 +474,7 @@ pub(crate) fn envelope_by(
 }
 
 /// What a repeat must match: the event type, the stream, the actor's kind and id, and the payload
-/// without `submitted_at`.
+/// without `submitted_at` and `risk_clock`, the two members a retry's later second changes.
 fn journaled(body: &[u8]) -> Option<[Value; 5]> {
     let event = parse(body).ok()?;
     let member = |path: &[&str]| path.iter().try_fold(&event, |v, k| v.get(k)).cloned();
@@ -393,6 +482,7 @@ fn journaled(body: &[u8]) -> Option<[Value; 5]> {
         return None;
     };
     payload.remove("submitted_at");
+    payload.remove("risk_clock");
     Some([
         member(&["event_type"])?,
         member(&["stream_id"])?,

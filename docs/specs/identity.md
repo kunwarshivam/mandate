@@ -926,7 +926,7 @@ passkey, within the last 300 seconds, for **this** action and no other.
 3. The user verifies on the authenticator (user verification required, not just presence).
 4. Workspace services verify, in order: the challenge exists, is unused, is not expired, and names
    this principal and workspace; the credential belongs to this principal and its enrolment cool-off
-   (§10.1) has ended; the signature verifies; the authenticator's flags show user verification; the
+   (§10.1) has ended, or a test cell waived it (DEC-2146); the signature verifies; the authenticator's flags show user verification; the
    signature counter, where the authenticator keeps one, has not gone backwards; and the submitted
    action's digest equals the challenge's.
 5. On success, the challenge is marked used in the same transaction that commits the action's
@@ -1054,6 +1054,13 @@ After 2 or 3, the new passkey is in an **enrolment cool-off** of 24 hours: it si
 or kill switch, but cannot present step-up until the cool-off ends, and the user's other channels
 receive an opaque notice. An attacker who took over the email or OIDC account therefore cannot move
 money-adding controls for a day, and the real owner is told. Support staff never reset credentials.
+
+Only a `dev` or `ci` test cell may waive this cool-off at step-up, on a route that appends the
+step-up's `StepUpAsserted` ([DEC-2146](../project/decisions/DEC-2146.md) item 3, the founder's
+decision): the API server's setting `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`, which it
+refuses at start in any other tier. The enrolment still records the cool-off, every other check of
+§7.2 step 4 stands, and each waived step-up is journaled as `StepUpCoolOffWaived` (journal spec
+§9.38). Staging and production never waive it.
 
 ### 10.2 An organization whose every owner is locked out
 

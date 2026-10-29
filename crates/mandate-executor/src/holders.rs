@@ -186,13 +186,6 @@ fn ladder_agent<'s>(
 /// I9: every holder's protective coverage Pᵢ. The deficit is charged once, largest lots first,
 /// ties by agent id, each taking as much of what is left as its lots allow, so Σᵢ Pᵢ is
 /// min(N, Σᵢ Lᵢ).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "lane X sizes exits and legs on it (DEC-2849 items 7 and 8)"
-    )
-)]
 pub(crate) fn coverages(
     view: &ExecutorState,
     instrument: &InstrumentId,
@@ -263,18 +256,27 @@ pub(crate) fn uncovered(
 /// its own resting protective legs and its own working exits, floored at zero, for every holder
 /// with a gap. The owner's residual R is in no holder's gap, so no agent's legs cover the owner's
 /// shares, and an unattributed leg counts in no holder's legs.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "pending E7-4 (DEC-2849 item 8): re-placement sends each holder's legs on it"
-    )
-)]
 pub(crate) fn leg_gaps(
-    _view: &ExecutorState,
-    _instrument: &InstrumentId,
+    view: &ExecutorState,
+    instrument: &InstrumentId,
 ) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+    let legs = own_sells(view, instrument, |purpose| purpose == Purpose::Protective)?;
+    let exits = own_sells(view, instrument, |purpose| {
+        purpose != Purpose::Protective && !purpose.adds_risk()
+    })?;
+    let mut gaps = BTreeMap::new();
+    for (agent, covered) in coverages(view, instrument)? {
+        let own = legs
+            .get(&agent)
+            .copied()
+            .unwrap_or(Qty::ZERO)
+            .checked_add(exits.get(&agent).copied().unwrap_or(Qty::ZERO))?;
+        let gap = covered.checked_sub(own).unwrap_or(Qty::ZERO);
+        if gap > Qty::ZERO {
+            gaps.insert(agent, gap);
+        }
+    }
+    Ok(gaps)
 }
 
 /// I9 for the legs a resize cuts (DEC-2849 item 8): each agent's resting protective legs beyond its
@@ -288,10 +290,59 @@ pub(crate) fn leg_gaps(
     )
 )]
 pub(crate) fn leg_excess(
-    _view: &ExecutorState,
-    _instrument: &InstrumentId,
+    view: &ExecutorState,
+    instrument: &InstrumentId,
 ) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+    let covered = coverages(view, instrument)?;
+    let mut excess = BTreeMap::new();
+    for (agent, legs) in own_sells(view, instrument, |purpose| purpose == Purpose::Protective)? {
+        let over = legs
+            .checked_sub(covered.get(&agent).copied().unwrap_or(Qty::ZERO))
+            .unwrap_or(Qty::ZERO);
+        if over > Qty::ZERO {
+            excess.insert(agent, over);
+        }
+    }
+    Ok(excess)
+}
+
+/// What each agent's own sells in `instrument` whose purpose `counts` still have to sell: sent,
+/// not ended, and named for an agent, so an unattributed leg or a `*` exit is no holder's. An
+/// OCO's or a bracket's two legs, `…-tp` and `…-sl`, count once, as the larger (I9).
+fn own_sells(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    counts: impl Fn(Purpose) -> bool,
+) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
+    let mut by_order: BTreeMap<(&AgentId, &str), Qty> = BTreeMap::new();
+    for order in view.orders.values().filter(|order| {
+        &order.instrument == instrument
+            && order.side == Side::Sell
+            && counts(order.purpose)
+            && !order.state.is_terminal()
+            && order.state != OrderState::Intent
+    }) {
+        let Some(agent) = order.agent.as_ref().filter(|agent| agent.0 != EVERY_AGENT) else {
+            continue;
+        };
+        let id = order.client_order_id.as_str();
+        let parent = match order.purpose {
+            Purpose::Protective => id
+                .strip_suffix("-tp")
+                .or_else(|| id.strip_suffix("-sl"))
+                .unwrap_or(id),
+            _ => id,
+        };
+        let left = order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO);
+        let counted = by_order.entry((agent, parent)).or_insert(Qty::ZERO);
+        *counted = (*counted).max(left);
+    }
+    let mut by_agent: BTreeMap<AgentId, Qty> = BTreeMap::new();
+    for ((agent, _), left) in by_order {
+        let sum = by_agent.entry(agent.clone()).or_insert(Qty::ZERO);
+        *sum = sum.checked_add(left)?;
+    }
+    Ok(by_agent)
 }
 
 /// DEC-2849 item 8, §5.4 under shared positions: the resting protective orders an exit of `qty` by
@@ -1633,7 +1684,6 @@ mod tests {
     /// residual and never another holder's legs, and every agent's excess is its legs beyond its
     /// Pᵢ, an agent whose lots are gone included.
     #[test]
-    #[ignore = "pending E7-4"]
     fn holder_legs_are_the_oracles() -> Result<(), String> {
         let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
         runner
@@ -1663,7 +1713,6 @@ mod tests {
     /// legs count once, and one of them cancelled leaves the other covering. A discretionary exit,
     /// an owner exit and a flatten count as working exits beside a risk exit.
     #[test]
-    #[ignore = "pending E7-4"]
     fn each_holders_legs_cover_its_own_coverage() -> Result<(), ExecutorError> {
         let at = instrument(0)?;
         let cases: Vec<LegCase> = vec![

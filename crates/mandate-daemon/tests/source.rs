@@ -86,6 +86,7 @@ struct Journal {
     control: Rc<RefCell<Vec<StoredEvent>>>,
     agent: Rc<RefCell<Vec<StoredEvent>>>,
     meter: Rc<RefCell<Vec<StoredEvent>>>,
+    news: Rc<RefCell<Vec<StoredEvent>>>,
     unreadable: Rc<RefCell<BTreeSet<String>>>,
 }
 
@@ -98,6 +99,7 @@ impl Rows for Journal {
             "ctl:ws1" => Some(self.control.borrow().clone()),
             "agent:ws1:agent-a" => Some(self.agent.borrow().clone()),
             "meter:ws1" => Some(self.meter.borrow().clone()),
+            "news:ws1" => Some(self.news.borrow().clone()),
             _ => None,
         }
     }
@@ -1268,4 +1270,209 @@ fn an_arrival_hangs_on_this_environment_s_deployment_only() {
     let after = source.parts(&state()).unwrap().events;
     assert_eq!(after, before);
     assert_eq!(after.len(), 1);
+}
+
+const LICENSED_ROW: &[u8] = include_bytes!("../../../fixtures/news/licensed.row.json");
+const LICENSED_RECORD: &[u8] = include_bytes!("../../../fixtures/news/licensed.record.json");
+const UNLICENSED_ROW: &[u8] = include_bytes!("../../../fixtures/news/unlicensed.row.json");
+const UNLICENSED_RECORD: &[u8] = include_bytes!("../../../fixtures/news/unlicensed.record.json");
+
+/// A pass after the fixture's items became known (2026-10-26T15:00:00Z).
+const AFTER_THE_NEWS: &str = "2026-10-26T16:00:00Z";
+
+/// A news-stream row whose body is `body`, as the news reader stored it.
+fn news_row(seq: u64, body: &[u8]) -> StoredEvent {
+    let value = parse(body).unwrap();
+    let member = |name: &str| {
+        value
+            .get(name)
+            .and_then(mandate_canon::Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    StoredEvent {
+        stream_id: "news:ws1".into(),
+        seq,
+        event_id: member("event_id"),
+        event_type: member("event_type"),
+        schema_version: 1,
+        environment: "paper".into(),
+        recorded_at: member("recorded_at"),
+        prev_hash: Digest::of(b"prev"),
+        hash: Digest::of(body),
+        body: body.to_vec(),
+    }
+}
+
+/// A journal with `document` deployed and `news` on the news stream, and the source over the
+/// fixture bundle, reading mandate documents and the news records from one artifact store, which
+/// holds `records`.
+fn with_news(document: &Json, news: &[StoredEvent], records: &[&[u8]]) -> (Journal, CellSource) {
+    let journal = Journal::default();
+    let mut documents = BTreeMap::new();
+    let version = store(&mut documents, document);
+    for record in records {
+        documents.insert(Digest::of(record), record.to_vec());
+    }
+    journal.deployed(AGENT, &version, "paper");
+    journal.news.borrow_mut().extend(news.iter().cloned());
+    let source = CellSource::new(
+        &bundle(),
+        who(),
+        Box::new(journal.clone()),
+        Box::new(documents),
+    );
+    (journal, source)
+}
+
+fn both() -> Vec<StoredEvent> {
+    vec![news_row(2, LICENSED_ROW), news_row(3, UNLICENSED_ROW)]
+}
+
+/// DEC-2288 item 2: under news triggers, each item the news reader stored, known by the pass,
+/// reaches it as the core's offer of its row and record, in the stream's order.
+#[test]
+fn the_news_stream_s_items_reach_the_pass_under_news_triggers() {
+    let (_, source) = with_news(&triggered(), &both(), &[LICENSED_RECORD, UNLICENSED_RECORD]);
+    let parts = source.parts(&state_at(AFTER_THE_NEWS)).unwrap();
+    let expected = vec![
+        mandate_runtime::RetrievedObservation::stored(LICENSED_ROW, LICENSED_RECORD).unwrap(),
+        mandate_runtime::RetrievedObservation::stored(UNLICENSED_ROW, UNLICENSED_RECORD).unwrap(),
+    ];
+    assert_eq!(parts.stored.offers, expected);
+    assert_eq!(parts.stored.refused, Vec::new());
+}
+
+/// Without news triggers the pass never reads the news stream: unreadable, it still has its
+/// context, and holds no stored item.
+#[test]
+fn without_news_triggers_the_news_stream_is_not_read() {
+    let (journal, source) = with_news(
+        &researching(),
+        &both(),
+        &[LICENSED_RECORD, UNLICENSED_RECORD],
+    );
+    journal
+        .unreadable
+        .borrow_mut()
+        .insert("news:ws1".to_owned());
+    let parts = source.parts(&state_at(AFTER_THE_NEWS)).unwrap();
+    assert_eq!(parts.stored, mandate_daemon::StoredNews::default());
+}
+
+/// DEC-2288 item 3: a news stream the store cannot answer gives the pass no context, as every
+/// other stream it reads does; one with no items, as a reader with no key leaves it, offers none.
+#[test]
+fn an_unreadable_news_stream_gives_no_context_and_an_empty_one_offers_nothing() {
+    let (journal, source) = with_news(&triggered(), &both(), &[LICENSED_RECORD, UNLICENSED_RECORD]);
+    journal
+        .unreadable
+        .borrow_mut()
+        .insert("news:ws1".to_owned());
+    assert_eq!(
+        source.parts(&state_at(AFTER_THE_NEWS)).err(),
+        Some(ContextUnread::News)
+    );
+    assert_eq!(ContextUnread::News.code(), "news");
+    let (_, empty) = with_news(&triggered(), &[], &[]);
+    assert_eq!(
+        empty.parts(&state_at(AFTER_THE_NEWS)).unwrap().stored,
+        mandate_daemon::StoredNews::default()
+    );
+}
+
+/// An item known after the pass's risk clock is not offered yet, and is no refusal: the pass a
+/// second after its knowledge time offers it (DP-1).
+#[test]
+fn an_item_known_after_the_risk_clock_waits_for_it() {
+    let (_, source) = with_news(&triggered(), &both(), &[LICENSED_RECORD, UNLICENSED_RECORD]);
+    for (clock, offered) in [
+        ("2026-10-26T14:59:59Z", 0),
+        ("2026-10-26T15:00:00Z", 2),
+        ("2026-10-26T15:00:01Z", 2),
+    ] {
+        let stored = source.parts(&state_at(clock)).unwrap().stored;
+        assert_eq!(stored.offers.len(), offered, "{clock}");
+        assert!(stored.refused.is_empty(), "{clock}");
+    }
+}
+
+/// DEC-2288 item 3: an item the pass cannot offer is refused by its row's event id: unreadable
+/// when its record is missing or its row names no record, a mismatch when the store answers bytes
+/// that are not the record the row names. Rows of other types are not items. The rest are offered.
+#[test]
+fn an_item_it_cannot_offer_is_refused_by_event_id_and_the_rest_are_offered() {
+    let licensed = news_row(2, LICENSED_ROW);
+    let unlicensed = news_row(3, UNLICENSED_ROW);
+    let opened = row(
+        "news:ws1",
+        1,
+        "StreamOpened",
+        "paper",
+        r#"{"stream_type":"news","workspace_id":"ws1"}"#,
+    );
+    let refusal = |refused: &[mandate_daemon::RefusedNews]| -> Vec<(String, &'static str)> {
+        refused
+            .iter()
+            .map(|r| (r.event_id.clone(), r.refusal.code()))
+            .collect()
+    };
+    let (_, missing) = with_news(
+        &triggered(),
+        &[opened.clone(), licensed.clone(), unlicensed.clone()],
+        &[UNLICENSED_RECORD],
+    );
+    let stored = missing.parts(&state_at(AFTER_THE_NEWS)).unwrap().stored;
+    assert_eq!(
+        refusal(&stored.refused),
+        vec![(licensed.event_id.clone(), "news_record_unreadable")]
+    );
+    assert_eq!(
+        stored.offers.len(),
+        1,
+        "the unlicensed item is still offered"
+    );
+
+    let journal = Journal::default();
+    let mut documents = BTreeMap::new();
+    let version = store(&mut documents, &triggered());
+    documents.insert(Digest::of(LICENSED_RECORD), UNLICENSED_RECORD.to_vec());
+    documents.insert(Digest::of(UNLICENSED_RECORD), UNLICENSED_RECORD.to_vec());
+    journal.deployed(AGENT, &version, "paper");
+    journal
+        .news
+        .borrow_mut()
+        .extend([licensed.clone(), unlicensed.clone()]);
+    let swapped = CellSource::new(
+        &bundle(),
+        who(),
+        Box::new(journal.clone()),
+        Box::new(documents),
+    );
+    let stored = swapped.parts(&state_at(AFTER_THE_NEWS)).unwrap().stored;
+    assert_eq!(
+        refusal(&stored.refused),
+        vec![(licensed.event_id.clone(), "news_record_mismatch")]
+    );
+    assert_eq!(stored.offers.len(), 1);
+
+    let mut unnamed = licensed.clone();
+    unnamed.body = String::from_utf8(LICENSED_ROW.to_vec())
+        .unwrap()
+        .replacen("\"item_ref\":\"sha256:", "\"item_ref\":\"sha257:", 1)
+        .into_bytes();
+    let (_, unnamed_source) = with_news(
+        &triggered(),
+        &[unnamed.clone(), unlicensed],
+        &[LICENSED_RECORD, UNLICENSED_RECORD],
+    );
+    let stored = unnamed_source
+        .parts(&state_at(AFTER_THE_NEWS))
+        .unwrap()
+        .stored;
+    assert_eq!(
+        refusal(&stored.refused),
+        vec![(unnamed.event_id, "news_record_unreadable")]
+    );
+    assert_eq!(stored.offers.len(), 1);
 }

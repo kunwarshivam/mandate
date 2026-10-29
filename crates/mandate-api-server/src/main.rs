@@ -45,9 +45,9 @@ use mandate_api_server::challenges::Challenges;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
-    INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store, check_bind, check_database_url,
-    check_environment, check_internal_paper, check_key_set_tier, internal_paper_workspace,
-    read_session_key,
+    COOL_OFF_WAIVER, INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store, check_bind,
+    check_database_url, check_environment, check_internal_paper, check_key_set_tier,
+    cool_off_waiver, internal_paper_workspace, read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
@@ -58,7 +58,7 @@ use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
-use mandate_api_server::methods::{Methods, Passkey};
+use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::operator;
 use mandate_api_server::reduction::{self, Reduction, rp_id};
@@ -162,6 +162,8 @@ struct Start {
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
     ingress: Vec<IpAddr>,
     connect: ConnectBinding,
+    /// The test cell's waiver of a first passkey's cool-off, when set (DEC-2146 item 2).
+    cool_off_waiver: Option<CoolOffWaiver>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -222,6 +224,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
             name: reduction::INGRESS_PEERS,
         })?;
     let ingress = reduction::ingress_peers(ingress_setting.as_deref())?;
+    let waiver = cool_off_waiver(tier, env::var_os(COOL_OFF_WAIVER).as_deref())?;
     let start = Start {
         settings,
         key,
@@ -232,6 +235,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         artifacts,
         ingress,
         connect,
+        cool_off_waiver: waiver,
     };
     Ok((args, start))
 }
@@ -306,6 +310,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
                 let store: Arc<dyn ArtifactSource + Send + Sync> = store;
                 store
             }),
+            cool_off_waiver: start.cool_off_waiver,
         },
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),
