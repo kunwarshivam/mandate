@@ -505,8 +505,9 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   that passes stores the assertion as an artifact and appends `ApprovalResponseSubmitted`, its
   `step_up` method `passkey`, and `StepUpAsserted` in one batch, in that order, the assertion's id
   §3.4's under `approval_response_step_up_asserted`; a refused grant appends nothing. The route
-  serves it only once the runtime counts `passkey` evidence at check 6 (mandate spec §6.1): until
-  then a `passkey` grant is `step_up_method`, nothing committed. In the same change, DEC-2104's
+  takes the member no earlier than the runtime counts `passkey` evidence at check 6 (mandate spec
+  §6.1): until then a body carrying it is `invalid` and `passkey` evidence alone is
+  `step_up_missing`, nothing committed, as today. In the change that serves it, DEC-2104's
   `cli_confirm` for a grant ends for each member who holds a passkey past its cool-off, read as
   [DEC-2154](../project/decisions/DEC-2154.md) item 1 reads it: such a member's `cli_confirm`
   grant is `step_up_method` (DEC-2154 item 2). **(planned: E9-4)**
