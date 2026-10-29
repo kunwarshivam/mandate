@@ -9,6 +9,7 @@ import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPa
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
+import { priceRead, priceRoute } from "@/api/price";
 import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -37,6 +38,7 @@ import {
   type PasskeyPort,
   type AlertsAnswer,
   type PositionsAnswer,
+  type PriceAnswer,
   type RecordsAnswer,
   type Runtime,
   RuntimeContext,
@@ -594,6 +596,15 @@ export function ApiRuntimeProvider({
     return { ok: true, instruments: instruments.value.instruments, models: models.value.models };
   }, [client]);
 
+  /** `GET /instruments/{id}/price` (§4.1, DEC-2152): the last trusted daily close, read when the instrument's page asks. */
+  const price = useCallback(
+    async (instrumentId: string): Promise<PriceAnswer> => {
+      const read = await client.read(priceRoute(instrumentId), priceRead);
+      return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+    },
+    [client],
+  );
+
   /** `GET /alerts` (§4.7, DEC-2141): the workspace's owner alerts, with only this member's own deliveries. */
   const alerts = useCallback(async (): Promise<AlertsAnswer> => {
     const read = await client.read("/alerts", alertsRead);
@@ -772,8 +783,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

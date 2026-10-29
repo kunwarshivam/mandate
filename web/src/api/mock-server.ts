@@ -353,6 +353,15 @@ export function createMockServer(options: MockServerOptions): MockServer {
           .map((i) => ({ instrument_id: i.asset_id, symbol: i.symbol, asset_class: i.asset_class, snapshot: `sha256:${sha256Hex(`instrument:${i.asset_id}`)}`, registered_at: servedAt }))
           .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)),
       });
+    const priceOf = route.match(/^\/instruments\/([^/]+)\/price$/);
+    if (priceOf) {
+      const listed = Object.values(INSTRUMENTS).find((i) => i.asset_id === decodeURIComponent(priceOf[1]));
+      if (!listed) return problem(404, "not_found", "none");
+      if (listed.asset_class !== "us_equity") return read({ instrument_id: listed.asset_id, symbol: listed.symbol, reported: false, reason: "not_covered" });
+      const mark = workspace.agents.flatMap((a) => a.positions).find((p) => p.instrument.asset_id === listed.asset_id)?.mark;
+      if (!mark) return read({ instrument_id: listed.asset_id, symbol: listed.symbol, reported: false, reason: "no_bars" });
+      return read({ instrument_id: listed.asset_id, symbol: listed.symbol, reported: true, close: canon(mark), bar_start: `${workspace.now.slice(0, 10)}T04:00:00.000000000Z`, timeframe: "1Day", source: "recorded" });
+    }
     if (route === "/signal-models") return read({ models: [MOCK_MODEL] });
     /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
     if (route === "/alerts") return read({ alerts: [], truncated: false });

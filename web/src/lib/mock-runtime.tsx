@@ -11,6 +11,7 @@ import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView, ReadPosition } from "@/api/read-models";
 import type { Enrolled, ListedPasskey } from "@/api/enrol";
 import type { CatalogueAnswer } from "@/api/catalogue";
+import type { InstrumentPrice } from "@/api/price";
 import type { JournalRecord } from "@/api/records";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
@@ -215,6 +216,8 @@ export interface Runtime {
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
   /** The registered instruments and signal models a version may name (§4.1, DEC-2136); `null` over the fixtures, whose set-up uses the fixture catalogue. */
   catalogue: (() => Promise<CatalogueAnswer>) | null;
+  /** An instrument's last trusted daily close (`GET /instruments/{id}/price`, DEC-2152); `null` over the fixtures. */
+  price: ((instrumentId: string) => Promise<PriceAnswer>) | null;
   /**
    * The owner's exit from one instrument (`POST /agents/{id}/exits`, §5.4, rule 13), followed to its
    * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
@@ -286,6 +289,9 @@ export interface ConnectPort {
  */
 /** Where an owner request ended: the agent took it (§5.5 `taken`, or later), refused it (with the reason its steps give), only recorded it, or never got it. */
 export type AskOutcome = { phase: "taken" | "recorded" } | { phase: "refused"; reason: string | null } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+
+/** An instrument's price as served, or the code of the read that failed. */
+export type PriceAnswer = { ok: true; value: InstrumentPrice } | { ok: false; reason: string };
 
 export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
 
@@ -715,7 +721,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, price: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
