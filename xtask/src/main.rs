@@ -6003,7 +6003,7 @@ fn feature_map_problems(root: &Path, meta: &Metadata) -> Result<Vec<String>> {
             ));
         }
         for path in backticked_paths(text) {
-            if !root.join(path).exists() {
+            if !backticked_path_exists(root, path) {
                 problems.push(format!("{name} names `{path}`, which does not exist"));
             }
         }
@@ -10101,6 +10101,26 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
     })
 }
 
+/// Whether a backticked repository path `path` exists under `root`. A `#fragment`, when the span
+/// carries one, names a decision's stable anchor in the file — an `<a id="dec-<n>"></a>` above
+/// its heading — rather than a file of its own, so the file must exist and hold that anchor
+/// (DEC-2650).
+fn backticked_path_exists(root: &Path, path: &str) -> bool {
+    let (file, fragment) = match path.split_once('#') {
+        Some((file, fragment)) => (file, Some(fragment)),
+        None => (path, None),
+    };
+    let joined = root.join(file);
+    if !joined.exists() {
+        return false;
+    }
+    let Some(fragment) = fragment else {
+        return true;
+    };
+    fs::read_to_string(joined)
+        .is_ok_and(|text| text.contains(&format!("<a id=\"{fragment}\"></a>")))
+}
+
 /// Mutation testing on the diff of safety-critical crates, `tool` crates included (ADR-0001 ES-11,
 /// ES-12, DEC-253). Every mutant in changed source must be caught; approved exclusions live in
 /// `.cargo/mutants.toml`. A crate whose tests are still pending runs the gate as well (DEC-137
@@ -13178,22 +13198,22 @@ mod tests {
         MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES,
         REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, RELEASE_UNSIGNED, SCHEMA_CHECKERS,
         SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
-        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, atomic_exception, backticked_paths,
-        base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
-        codeowners_problems, contains_dec_id, contains_word, decision_numbers, external_oracles,
-        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
-        forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
-        is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
-        live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_judged, mutants_outcome, mutants_plan,
-        mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
-        registry_rows, rehearsal_runs, release_api_refused, release_exchange_refused,
-        release_profile_untouched, release_provisionerd_refused, release_stub_refused, repo_root,
-        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
-        workspace_closure, workspace_packages,
+        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, atomic_exception,
+        backticked_path_exists, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
+        ci, ci_files, classify, codeowners_problems, contains_dec_id, contains_word,
+        decision_numbers, external_oracles, failure_cause, feature_files, feature_map_problems,
+        files_by_extension, first_panic_line, forbidden_reached, gate_diff, gate_diff_path,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
+        metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_judged,
+        mutants_outcome, mutants_plan, mutated_crates, names_a_stub, output_in, pending_nextest,
+        pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
+        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs, release_api_refused,
+        release_exchange_refused, release_profile_untouched, release_provisionerd_refused,
+        release_stub_refused, repo_root, schema_mutants, shard_packages, shellcheck_scripts,
+        simulator_harnesses, simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr,
+        status_flip_problems, test_binary, test_order_config, test_outcomes, unique_temp_path,
+        unjudged_mutants, used_by, verdicts, workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -16011,7 +16031,7 @@ mod tests {
             }
         }
         for path in backticked_paths(text) {
-            if !root.join(path).exists() {
+            if !backticked_path_exists(root, path) {
                 problems.insert(format!("`{path}`, which does not exist"));
             }
         }
@@ -16160,6 +16180,35 @@ mod tests {
             backticked_paths(text).collect::<Vec<_>>(),
             ["crates/a/src/lib.rs", "AGENTS.md"]
         );
+    }
+
+    /// A backticked path's `#fragment` names an `<a id="...">` anchor in the file it is attached
+    /// to: the file exists and the anchor is there, or the span does not exist (DEC-2650).
+    #[test]
+    fn a_backticked_fragment_names_an_anchor() -> Result<()> {
+        let fx = Fixture::new("feature-map-anchors")?;
+        fx.write(
+            "docs/project/decisions/one.md",
+            "# one\n\n<a id=\"dec-9\"></a>\n\n## DEC-9: a decision\n",
+        )?;
+        assert!(backticked_path_exists(
+            &fx.0,
+            "docs/project/decisions/one.md"
+        ));
+        assert!(backticked_path_exists(
+            &fx.0,
+            "docs/project/decisions/one.md#dec-9"
+        ));
+        assert!(
+            !backticked_path_exists(&fx.0, "docs/project/decisions/one.md#dec-8"),
+            "a fragment the file does not hold does not exist"
+        );
+        assert!(
+            !backticked_path_exists(&fx.0, "docs/project/decisions/gone.md#dec-9"),
+            "a fragment on a missing file does not exist"
+        );
+        fs::remove_dir_all(&fx.0).ok();
+        Ok(())
     }
 
     #[test]

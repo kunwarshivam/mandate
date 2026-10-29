@@ -52,36 +52,36 @@ while IFS= read -r path; do
   [ -f "$path" ] || continue
   section_number=
   while IFS= read -r line; do
-    case $line in
-      '<a id="dec-'*'"></a>')
-        digits=${line#'<a id="dec-'}
-        digits=${digits%%[!0-9]*}
-        if [ -n "$digits" ]; then
-          section_number=$((10#$digits))
-        else
-          section_number=
-        fi
-        ;;
-      '## DEC-'[0-9]*:*)
-        digits=${line#'## DEC-'}
-        digits=${digits%%[!0-9]*}
-        [ -n "$digits" ] || continue
-        number=$((10#$digits))
-        if [ -z "${section_number:-}" ] || [ "$section_number" -ne "$number" ]; then
-          echo "    decisions: $path heads DEC-$number with no matching anchor dec-$number above it" >&2
-          problems=1
-        fi
-        slot=taken_$number
-        if [ -n "${!slot:-}" ]; then
-          echo "    decisions: DEC-$number is taken by both ${!slot} and the DEC-$number section of $path; renumber the later one" >&2
-          problems=1
-        else
-          printf -v "$slot" '%s' "the DEC-$number section of $path"
-          sections=$((sections + 1))
-        fi
+    anchor=${line#'<a id="dec-'}
+    if [ "$anchor" != "$line" ]; then
+      # an anchor line runs `<a id="dec-<digits>"></a>`, whole
+      digits=${anchor%%[!0-9]*}
+      if [ "$anchor" = "$digits\"></a>" ]; then
+        section_number=$((10#$digits))
+      else
         section_number=
-        ;;
-    esac
+      fi
+      continue
+    fi
+    heading=${line#'## DEC-'}
+    if [ "$heading" != "$line" ]; then
+      digits=${heading%%[!0-9]*}
+      [ -n "$digits" ] || continue
+      number=$((10#$digits))
+      if [ -z "${section_number:-}" ] || [ "$section_number" -ne "$number" ]; then
+        echo "    decisions: $path heads DEC-$number with no matching anchor dec-$number above it" >&2
+        problems=1
+      fi
+      slot=taken_$number
+      if [ -n "${!slot:-}" ]; then
+        echo "    decisions: DEC-$number is taken by both ${!slot} and the DEC-$number section of $path; renumber the later one" >&2
+        problems=1
+      else
+        printf -v "$slot" '%s' "the DEC-$number section of $path"
+        sections=$((sections + 1))
+      fi
+      section_number=
+    fi
   done < "$path"
 done < <(git ls-files --cached --others --exclude-standard -- 'docs/project/decisions/*.md' | sort)
 [ "$problems" -eq 0 ] && echo "    decisions: $count decision files and $sections folded sections, each number taken once" || exit 1
