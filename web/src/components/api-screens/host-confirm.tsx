@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type ShownChallenge, challengeLifetimeMs } from "@/api/step-up";
+import { STEP_UP_WORKFLOW_URL, type ShownChallenge, challengeLifetimeMs } from "@/api/step-up";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { Panel } from "@/components/screens/common";
 import { cn } from "@/lib/utils";
@@ -17,12 +17,15 @@ import { cn } from "@/lib/utils";
 export function HostConfirm({
   shown,
   command,
+  workflowInput = null,
   submitLabel,
   onSubmit,
   onCancel,
 }: {
   shown: ShownChallenge;
   command: string;
+  /** The same confirmation as staging's step-up workflow input, shown while the code is current; `null` shows none. */
+  workflowInput?: string | null;
   submitLabel: string;
   onSubmit: () => void;
   onCancel: () => void;
@@ -47,6 +50,18 @@ export function HostConfirm({
         <pre className="overflow-x-auto rounded-xl bg-background px-4 py-3 text-xs whitespace-pre-wrap break-all" data-slot="host-confirm-command">
           {command}
         </pre>
+        {workflowInput && current ? (
+          <div className="grid gap-2" data-slot="host-confirm-workflow">
+            <label htmlFor="host-confirm-workflow-input" className="text-sm">
+              On staging, run it from GitHub instead: open the{" "}
+              <a href={STEP_UP_WORKFLOW_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+                step-up workflow
+              </a>
+              , choose Run workflow, paste this as its input, and approve the run.
+            </label>
+            <input id="host-confirm-workflow-input" readOnly value={workflowInput} onFocus={(e) => e.currentTarget.select()} spellCheck={false} className="h-11 w-full rounded-md border border-border bg-background px-3 font-mono text-xs" />
+          </div>
+        ) : null}
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
           {current ? `The code expires ${Math.round(challengeLifetimeMs(shown.challenge) / 60_000)} minutes after it was shown.` : "This code has expired. Cancel and ask for a new one; nothing was approved."}
         </p>

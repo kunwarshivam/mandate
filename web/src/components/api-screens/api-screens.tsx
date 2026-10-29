@@ -9,7 +9,7 @@ import { ModeBadge } from "@/components/domain/mode";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { PAGE_GRID, Panel, Section, WorkspaceGate } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
+import { type ShownChallenge, approvalConfirmCommand, approveWorkflowInput } from "@/api/step-up";
 import { HostConfirm } from "./host-confirm";
 import { APPROVER_SENTENCE, type DeferredChecks, deferredCheckLabel, deferredChecks } from "@/lib/deferred-checks";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
@@ -580,7 +580,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
           </p>
         ) : null}
         {open && approvable && asking?.phase === "shown" && response?.phase !== "sent" ? (
-          <HostConfirm key={asking.shown.challenge.challenge_id} shown={asking.shown} command={asking.command} submitLabel="Approve" onSubmit={() => submit(asking.shown)} onCancel={() => setAsking(null)} />
+          <HostConfirm key={asking.shown.challenge.challenge_id} shown={asking.shown} command={asking.command} workflowInput={approveWorkflowInput({ agentId: approval.agent_id, approvalId: approval.approval_id, shown: asking.shown })} submitLabel="Approve" onSubmit={() => submit(asking.shown)} onCancel={() => setAsking(null)} />
         ) : null}
         {open && (asking?.phase !== "shown" || approveRefused) && asking?.phase !== "asking" ? (
           <div className={cn("grid gap-3", approvable ? "grid-cols-2" : "grid-cols-1")}>

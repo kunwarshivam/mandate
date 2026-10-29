@@ -332,7 +332,7 @@ describe("no order ticket (DEC-528)", () => {
     records: ["recordsRead"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
     theses: ["ADMISSION_REASONS", "thesesOf"],
-    "step-up": ["CLI_CONFIRM_KINDS", "CONNECT_DISCLOSURE", "PASSKEY_KINDS", "approvalConfirmCommand", "challengeLifetimeMs", "cliConfirmEvidence", "confirmCode", "connectConfirmCommand", "connectStepUpDigest", "sessionPrincipal", "stepUpChallenge"],
+    "step-up": ["CLI_CONFIRM_KINDS", "CONNECT_DISCLOSURE", "PASSKEY_KINDS", "STEP_UP_WORKFLOW_URL", "approvalConfirmCommand", "approveWorkflowInput", "challengeLifetimeMs", "cliConfirmEvidence", "confirmCode", "connectConfirmCommand", "connectStepUpDigest", "connectWorkflowInput", "sessionPrincipal", "stepUpChallenge"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
     versions: ["prepareCreateVersion", "readConfirmation", "versionCreated"],
   };

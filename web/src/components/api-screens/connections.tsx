@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { ConnectionDetail } from "@/api/connect";
-import { type ShownChallenge, connectConfirmCommand } from "@/api/step-up";
+import { type ShownChallenge, connectConfirmCommand, connectWorkflowInput } from "@/api/step-up";
 import { ConnectDisclosure } from "@/components/domain/connect-disclosure";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { Panel, Section, WorkspaceGate } from "@/components/screens/common";
@@ -157,7 +157,7 @@ export function ApiConnections({ go = (url: string) => window.location.assign(ur
             ) : null}
             {flow?.phase === "asking" ? <p role="status">Asking your deployment for a code. Nothing is started yet.</p> : null}
             {flow?.phase === "shown" ? (
-              <HostConfirm key={flow.shown.challenge.challenge_id} shown={flow.shown} command={flow.command} submitLabel="Connect with Alpaca" onSubmit={() => start(flow.shown)} onCancel={() => setFlow(null)} />
+              <HostConfirm key={flow.shown.challenge.challenge_id} shown={flow.shown} command={flow.command} workflowInput={connectWorkflowInput(flow.shown)} submitLabel="Connect with Alpaca" onSubmit={() => start(flow.shown)} onCancel={() => setFlow(null)} />
             ) : null}
             {flow?.phase === "starting" ? <p role="status">Starting the connect.</p> : null}
             {flow?.phase === "leaving" ? <p role="status">Taking you to Alpaca.</p> : null}

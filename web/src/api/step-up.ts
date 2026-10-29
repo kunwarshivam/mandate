@@ -200,6 +200,33 @@ export function connectConfirmCommand(input: ConnectConfirm): string {
   ].join(" ");
 }
 
+/** Staging's step-up workflow (lane GO's `step-up.yml`): the founder dispatches it from main with one input, `confirm`. */
+export const STEP_UP_WORKFLOW_URL = "https://github.com/kunwarshivam/mandate/actions/workflows/step-up.yml";
+/** The ids the workflow accepts: 1 to 128 of `[A-Za-z0-9_-]`, so no `:` or space can appear in one. */
+const WORKFLOW_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** `XXXX-XXXX`, as shown. */
+const WORKFLOW_CODE = /^[0-9A-Z]{4}-[0-9A-Z]{4}$/;
+
+function workflowInput(kind: "approve" | "connect", shown: ShownChallenge, ids: readonly string[]): string | null {
+  if (!EVENT_ID.test(shown.challenge.challenge_id) || !WORKFLOW_CODE.test(shown.code) || !ids.every((id) => WORKFLOW_ID.test(id))) return null;
+  return [kind, shown.challenge.challenge_id, shown.code, ...ids].join(":");
+}
+
+/**
+ * The step-up workflow's one input for an approval's grant, `approve:<challenge>:<code>:<agent>:<approval>`:
+ * the same confirmation `approvalConfirmCommand` runs, as a staging Job. The workspace and the
+ * principal come from staging's values, never from the string. `null` when an id is outside what the
+ * workflow accepts, so a string it would refuse is never shown.
+ */
+export function approveWorkflowInput(input: Pick<ApprovalConfirm, "agentId" | "approvalId" | "shown">): string | null {
+  return workflowInput("approve", input.shown, [input.agentId, input.approvalId]);
+}
+
+/** The step-up workflow's one input for a connect's start, `connect:<challenge>:<code>`. */
+export function connectWorkflowInput(shown: ShownChallenge): string | null {
+  return workflowInput("connect", shown, []);
+}
+
 /** `read-models/session`'s `principal_id` (§4.10, DEC-2113): the id the CLI's `--principal` takes. */
 export const sessionPrincipal: Decoder<{ principal_id: string }> = (value, path) => {
   if (!isRecord(value)) return fail(path, "wrong_type");

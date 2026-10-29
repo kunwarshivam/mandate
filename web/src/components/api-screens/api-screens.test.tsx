@@ -307,6 +307,11 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     const command = panel.querySelector("[data-slot=host-confirm-command]")?.textContent ?? "";
     expect(command).toContain(`mandate step-up confirm --workspace ${WS} --principal ${MOCK_PRINCIPAL} --agent ${approval.agent_id} --approval ${approval.approval_id} --challenge `);
     expect(command).toContain(`--code ${code}`);
+    const challenge = /--challenge ([0-9A-Z]{26})/.exec(command)?.[1];
+    const workflow = panel.querySelector<HTMLInputElement>("[data-slot=host-confirm-workflow] input");
+    expect(workflow?.readOnly).toBe(true);
+    expect(workflow?.value).toBe(`approve:${challenge}:${code}:${approval.agent_id}:${approval.approval_id}`);
+    expect(within(panel).getByRole("link", { name: "step-up workflow" }).getAttribute("href")).toBe("https://github.com/kunwarshivam/mandate/actions/workflows/step-up.yml");
     expect(screen.queryByText(/^Recorded in the journal/)).toBeNull();
   });
 

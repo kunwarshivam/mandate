@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type StepUpAction, CONNECT_DISCLOSURE, approvalConfirmCommand, connectConfirmCommand, connectStepUpDigest, challengeLifetimeMs, cliConfirmEvidence, confirmCode, sessionPrincipal, stepUpChallenge } from "./step-up";
+import { type StepUpAction, CONNECT_DISCLOSURE, approvalConfirmCommand, approveWorkflowInput, connectWorkflowInput, connectConfirmCommand, connectStepUpDigest, challengeLifetimeMs, cliConfirmEvidence, confirmCode, sessionPrincipal, stepUpChallenge } from "./step-up";
 
 const DIGEST = `sha256:${"ab".repeat(32)}` as const;
 const ASKED: StepUpAction = { kind: "approve", digest: DIGEST };
@@ -121,6 +121,25 @@ describe("the host command (DEC-2104 item 2)", () => {
       "mandate step-up confirm --workspace ws_1 --principal 01JBR2C4D6E8F0G2H4J6K8M0P3 --agent agt_1 --approval 01JBR2C4D6E8F0G2H4J6K8M0Q4 --challenge 01JBR2C4D6E8F0G2H4J6K8M0N2 --code 0410-6105 --journal <journal DSN> --store <artifact store>",
     );
     expect(line).not.toContain(RISING);
+  });
+});
+
+describe("the step-up workflow's one input (lane GO's step-up.yml)", () => {
+  it("is approve:<challenge>:<code>:<agent>:<approval> and connect:<challenge>:<code>, the same ids the host command names", () => {
+    const read = stepUpChallenge(ASKED)(served(), "");
+    if (!read.ok) throw new Error("decodes");
+    const shown = { challenge: read.value, code: "0410-6105" };
+    expect(approveWorkflowInput({ agentId: "agt_1", approvalId: "01JBR2C4D6E8F0G2H4J6K8M0Q4", shown })).toBe("approve:01JBR2C4D6E8F0G2H4J6K8M0N2:0410-6105:agt_1:01JBR2C4D6E8F0G2H4J6K8M0Q4");
+    expect(connectWorkflowInput(shown)).toBe("connect:01JBR2C4D6E8F0G2H4J6K8M0N2:0410-6105");
+  });
+
+  it("shows no string the workflow would refuse: an id with a colon, a space or over 128 characters, or a malformed code", () => {
+    const read = stepUpChallenge(ASKED)(served(), "");
+    if (!read.ok) throw new Error("decodes");
+    const shown = { challenge: read.value, code: "0410-6105" };
+    for (const agentId of ["agt:1", "agt 1", "", "a".repeat(129)]) expect(approveWorkflowInput({ agentId, approvalId: "01JBR2C4D6E8F0G2H4J6K8M0Q4", shown }), agentId).toBeNull();
+    expect(approveWorkflowInput({ agentId: "a".repeat(128), approvalId: "apr_1", shown })).not.toBeNull();
+    for (const code of ["0410 6105", "04106105", "0410-610"]) expect(connectWorkflowInput({ ...shown, code }), code).toBeNull();
   });
 });
 
