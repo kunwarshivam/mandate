@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use mandate_canon::{Key, Value, parse, to_canonical};
+use mandate_release::startup::Tier;
 use mandate_sources::SourceError;
 use mandate_sources::allowlist::PermittedUrl;
 use mandate_sources::fetch::{NewsAuth, RawResponse, Transport};
@@ -30,6 +31,18 @@ const RECORDED_KEY: &[u8] = b"PKRECORDEDNEWS:recorded-fixture-only";
 /// [`stored_key`]'s, which the fixture key never meets.
 pub fn recorded_key() -> Result<NewsAuth, KeyRefusal> {
     stored_key(Ok(Some(SecretSlice::from(RECORDED_KEY.to_vec()))))
+}
+
+/// Whether a recorded start is admitted at the tier `MANDATE_DEPLOYMENT_TIER` names, read as every
+/// process reads it, with no setting as production: at `dev` and `ci` alone (DEC-2085 item 3).
+///
+/// # Errors
+/// `recorded_outside_dev_and_ci` at any other tier.
+pub fn admitted(tier: Option<&str>) -> Result<(), &'static str> {
+    match Tier::from_setting(tier) {
+        Tier::Dev | Tier::Ci => Ok(()),
+        Tier::Staging | Tier::Production => Err("recorded_outside_dev_and_ci"),
+    }
 }
 
 /// A recording of Alpaca's news items, each with the tickers it names.

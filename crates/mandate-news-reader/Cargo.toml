@@ -15,6 +15,7 @@ mandate-canon.workspace = true
 mandate-gate-context.workspace = true
 mandate-journal.workspace = true
 mandate-process.workspace = true
+mandate-release.workspace = true
 mandate-research.workspace = true
 mandate-research-run.workspace = true
 mandate-sources.workspace = true

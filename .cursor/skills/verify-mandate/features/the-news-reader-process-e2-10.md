@@ -17,8 +17,11 @@
   `NewsItemStored` as drafts with deterministic ids, timed `local`), `src/reader.rs`
   (`NewsReader`: one writer epoch, the stream folded at start, one page a step), `src/items.rs`
   (each new item's typed record stored and journaled, a batch in doubt retried as the same bytes,
-  a refused append stopping the reader), and the `mandate-news-reader` binary (`run` over Postgres
-  and the HTTPS transport, or `--fixture` over an in-memory journal with no key; `probe` for `exec`
+  a refused append stopping the reader), `src/recorded.rs` (DEC-2085: `RecordedNews`, a recording of the vendor's
+  items answered one page per request by the tickers asked, reaching no host; `recorded_key`, the
+  paper fixture key; `admitted`, `dev` and `ci` alone), and the `mandate-news-reader` binary
+  (`run` over Postgres and the HTTPS transport, `--recorded` over Postgres on the recording, or
+  `--fixture` over an in-memory journal with no key; `probe` for `exec`
   probes; the not-ready reason once on standard error as a code; SIGTERM drains). The chart runs
   it as `news-reader` in staging alone (DEC-2084): with `images.news-reader` and `news.follows`,
   as `mandate_news_reader`, with its AppRole copied into its vault directory, the allowlist v3
@@ -29,7 +32,10 @@
   there is none; no byte of the key in any refusal, error or `Debug` output;
   one read, then one end of the session), `tests/vault.rs` (the
   login is the news reader's own mounted AppRole credentials, and without them or the CA no vault
-  is reached), `tests/process.rs` (a start it cannot make refused with its code; no key or no
+  is reached), `tests/recorded.rs` (the recording's pages, its refusal without the key and of
+  a malformed file, and each recorded item about a polled ticker journaled once over many rounds),
+  `tests/process.rs` (a start it cannot make refused with its code; a recorded start at `dev` and
+  `ci` alone; no key or no
   follows: its code, live, not ready, and a drain on SIGTERM), `tests/follows.rs` (follows, tickers, the followed folds), `tests/poll.rs`
   (chunks, pages, cap, cooldown), `tests/start.rs` (not ready and why, paper only, the epoch and
   the fold at start), `tests/rounds.rs` (what is asked as theses and holdings change, counted
