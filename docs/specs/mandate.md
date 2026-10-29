@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.17 (the research agent's model per run kind, `routes`, chosen by the owner from the offered research entries, [DEC-2282](../project/decisions/DEC-2282.md); v0.16 another instrument's mark steps nothing in an agent's fold, and agents share instruments, each folded on its own lots, [DEC-2849](../project/decisions/DEC-2849.md); v0.15 a fold opened flat is unpriced until its first counted sane mark, which prices the own fills before it, [DEC-2834](../project/decisions/DEC-2834.md); v0.14 a version-1 order-state `CompensatingEvent` beside the `OrderStateChanged` it corrects moves no figure, [DEC-2829](../project/decisions/DEC-2829.md); v0.13 fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.18 (an owner's or a client's request is decided without a §8.3 evaluation, an owner's own request is never asked (§6.2 step 5d), and a client's approval shows no score, [DEC-2858](../project/decisions/DEC-2858.md); v0.17 the research agent's model per run kind, `routes`, chosen by the owner from the offered research entries, [DEC-2282](../project/decisions/DEC-2282.md); v0.16 another instrument's mark steps nothing in an agent's fold, and agents share instruments, each folded on its own lots, [DEC-2849](../project/decisions/DEC-2849.md); v0.15 a fold opened flat is unpriced until its first counted sane mark, which prices the own fills before it, [DEC-2834](../project/decisions/DEC-2834.md); v0.14 a version-1 order-state `CompensatingEvent` beside the `OrderStateChanged` it corrects moves no figure, [DEC-2829](../project/decisions/DEC-2829.md); v0.13 fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -20,6 +20,15 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.18 ([DEC-2858](../project/decisions/DEC-2858.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions); owner requests, slice B):** an owner's or a
+  client's request (§6.2 step 5a) is not a §8.3 evaluation. The order builder clips the requested
+  quantity to §8.3's bounds, and its decision records no conviction, score, output or weight, only
+  the clips (journal spec v0.117 rule 8). §6.4's `evidence` shows such a request's approval with
+  `combined_score` `null` and no output, and §6.3 says that a rule reading `combined_score` cannot be
+  evaluated for such a request, which is then denied. It only tightens: no figure that decided
+  nothing is shown to an approver, a missing score never reads as a match, and every gate, autonomy
+  and cap check still applies.
 - **v0.17 ([DEC-2282](../project/decisions/DEC-2282.md), the founder's of 2026-10-27; E21-62):**
   the research agent's signal model gains `routes`, the entry each run kind other than `ideate`
   calls. The model's own pin is the `ideate` entry. A route names another offered research entry
@@ -1076,7 +1085,10 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      rules, an `auto` default, or a live delegation. `requested_by` is `agent` (the order builder's
      own proposal), `owner` (the owner through the web app or CLI), or `client` (through the MCP
      server of E10-6). The platform sets it from the authenticated channel, never from the request's
-     content, and the order builder carries it from the request to the order it proposes.
+     content, and the order builder carries it from the request to the order it proposes. A request
+     the owner or a client made is not a §8.3 evaluation: the builder clips the requested quantity to
+     §8.3's bounds, and the decision records no conviction, score, output or weight, only the clips
+     (journal spec §9.1 rule 8, [DEC-2858](../project/decisions/DEC-2858.md)).
    - **5b. Review ceiling** ([DEC-188](../project/04-decision-log.md#decisions), §6.6). If
      `autonomy.review_by` is set and the risk day (§5.4) of the risk clock is after it, the decision
      becomes the stricter of the result so far and `ask` (MI-32): no `auto` rule, `auto` default, or
@@ -1097,6 +1109,15 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      and `ask`, so no check the dry run could not see is ever passed over unasked ([DEC-2388](../project/decisions/DEC-2388.md)
      item 12). Like the ceilings before it, it names itself (`policy_overlay`) only when it changed
      the decision.
+   - **5d. Owner's request** ([DEC-2159](../project/decisions/DEC-2159.md), the founder's ruling; [DEC-2858](../project/decisions/DEC-2858.md) item 10).
+     If the order was requested by the owner (`requested_by: owner`) and the result so far is
+     `ask`, it becomes `auto`, labelled `owner_request`: the owner's own Send is the confirmation,
+     so no approval is asked of them for their own order, whatever the rules, the default, the
+     ceilings of steps 5b and 5c, or a deferred check would have asked. It applies last and only to
+     an `ask`: a `deny` stays a `deny`, the gate's dry run before it and the binding gate at
+     submission (step 6) run exactly as for any opening, so every limit, cap and account rule
+     still binds, and a clip or a denial is reported to the owner with its reason. A client's
+     request is untouched: step 5a keeps it `ask` (MI-30).
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -1108,7 +1129,7 @@ Conditions are JSON objects: `{"all": [...]}`, `{"any": [...]}`, `{"not": {...}}
 |---|---|---|
 | `purpose` | enum | `open`, `increase` |
 | `order_usd` | decimal | Limit price × quantity |
-| `combined_score` | decimal in [0, 1] | The order builder's combined model score (§8.3); **not a probability of profit** |
+| `combined_score` | decimal in [0, 1] | The order builder's combined model score (§8.3); **not a probability of profit**. An owner's or a client's request has none (§6.2 step 5a), so a rule that reads it cannot be evaluated for one, and the walk that reaches it decides `deny`, labelled with that rule ([DEC-2858](../project/decisions/DEC-2858.md) item 8) |
 | `instrument` | string | Instrument `asset_id` |
 | `asset_class` | enum | `us_equity`, `crypto` |
 | `session` | enum | `pre_market`, `regular`, `after_hours`, `crypto` |
@@ -1147,7 +1168,7 @@ check ([DEC-2515](../project/decisions/DEC-2515.md)); everything an approver is 
 |---|---|
 | `action` | `instrument`, `asset_class`, `side` (`buy`), `qty`, `limit` (the limit price), `order_usd` (limit price × quantity), and `purpose` |
 | `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, or `policy_overlay`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, and `policy_overlay` |
-| `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below) |
+| `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below). For an owner's or a client's request (`trigger.requested_by` `owner` or `client`), no §8.3 evaluation produced the order, so `combined_score` is `null` and `outputs` is empty; no score is invented (journal spec §9.6 rule 319, [DEC-2858](../project/decisions/DEC-2858.md)) |
 | `risk_impact` | One `{field, value, cap}` for each of `order_usd`, `position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`, and `daily_pnl_fraction`: its §6.3 value at the request and the mandate cap it is measured against, respectively `max_order_usd`; min(`max_position_usd`, `max_position_fraction` × E); min(`max_gross_exposure_usd`, E); `null`; the lowest ladder rung's `at`; and `max_daily_loss` (§5.5, §8.3) |
 | `reference_mark` | The last `MarkUpdated` for the instrument as `{price, seq}`, or `null` |
 | `deadline` | A UTC timestamp: the request's risk clock + `autonomy.approval.timeout_s` |

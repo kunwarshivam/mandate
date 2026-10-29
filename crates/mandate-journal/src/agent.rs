@@ -150,7 +150,9 @@ pub(crate) fn subject_and_copy(
 /// `IntentProposed` whose `DecisionMade` is in the batch repeats its action members, decimals
 /// compared by value. Reported at the first such intent, at its first differing member. Rule 292
 /// (v0.92, DEC-2515): an `ApprovalRequested` whose `DecisionMade` is in the batch names exactly
-/// that decision's deferrals, at every version of either. Both event
+/// that decision's deferrals, at every version of either. Rule 319 (v0.117, DEC-2858): its
+/// `combined_score` is `null` exactly when that decision was requested by the owner or a client,
+/// so no score is invented for an owner's request and none dropped from the agent's. Both event
 /// types exist only on an agent stream (§9), so a batch of any other stream passes.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     let decisions: BTreeMap<&str, &Draft> = drafts
@@ -183,6 +185,16 @@ pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
                     return Err((
                         i,
                         Invalid::new(InvalidReason::Schema, "payload.content.deferred_to_binding"),
+                    ));
+                }
+                let unscored = mine
+                    .get("combined_score")
+                    .is_none_or(|score| *score == Value::Null);
+                let owners = theirs.get("requested_by").and_then(Value::as_str) != Some("agent");
+                if unscored != owners {
+                    return Err((
+                        i,
+                        Invalid::new(InvalidReason::Schema, "payload.combined_score"),
                     ));
                 }
             }
@@ -644,6 +656,13 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
         schema,
         "payload.decided_by",
     )?;
+    let owners_own = p.text("requested_by") == "owner" && p.adds_risk();
+    ensure(!(owners_own && asked), schema, "payload.autonomy")?;
+    ensure(
+        decided_by != "owner_request" || (owners_own && autonomy == "auto"),
+        schema,
+        "payload.decided_by",
+    )?;
 
     let discretionary = p.text("purpose") == "discretionary_exit";
     ensure(
@@ -651,12 +670,17 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
         schema,
         "payload.exit_origin",
     )?;
-    let evaluated = p.adds_risk() || p.text("exit_origin") == "signal";
+    let requested = p.text("requested_by") != "agent";
+    let evaluated = !requested && (p.adds_risk() || p.text("exit_origin") == "signal");
     let numbers = ["exit_conviction", "buy_conviction", "combined_score"];
     if let Some(member) = numbers.iter().find(|m| p.is_null(m) == evaluated) {
         return Err(Invalid::new(schema, format!("payload.{member}")));
     }
-    let lists = ["outputs_used", "model_weights", "clips_applied"];
+    let lists: &[&str] = if requested {
+        &["outputs_used", "model_weights"]
+    } else {
+        &["outputs_used", "model_weights", "clips_applied"]
+    };
     if let Some(member) = lists.iter().find(|m| !evaluated && !p.list(m).is_empty()) {
         return Err(Invalid::new(schema, format!("payload.{member}")));
     }
@@ -775,7 +799,12 @@ fn approval_requested_rules(p: Payload<'_>) -> Result<(), Invalid> {
         ("purpose", action.get("purpose")),
         ("mandate_version", trigger.get("mandate_version")),
         ("decided_by", trigger.get("decided_by")),
-        ("combined_score", score.get("value")),
+        (
+            "combined_score",
+            score
+                .get("value")
+                .or((*score == Value::Null).then_some(&Value::Null)),
+        ),
         ("reference_mark", content.get("reference_mark")),
         ("approvers_required", approvers.get("required")),
         ("independent_required", approvers.get("independent")),
@@ -796,6 +825,15 @@ fn approval_requested_rules(p: Payload<'_>) -> Result<(), Invalid> {
     if let Some(deferred) = content.get("deferred_to_binding") {
         requested_deferral_rules(deferred)?;
     }
+    ensure(
+        *score != Value::Null
+            || evidence
+                .get("outputs")
+                .and_then(Value::as_array)
+                .is_none_or(|outputs| outputs.is_empty()),
+        InvalidReason::Schema,
+        "payload.content.evidence.outputs",
+    )?;
     let content_deadline = content
         .get("deadline")
         .and_then(Value::as_str)
@@ -807,8 +845,9 @@ fn approval_requested_rules(p: Payload<'_>) -> Result<(), Invalid> {
         "payload.deadline",
     )?;
     ensure(
-        score.get("label").and_then(Value::as_str)
-            == Some("combined model score, not a probability of profit"),
+        *score == Value::Null
+            || score.get("label").and_then(Value::as_str)
+                == Some("combined model score, not a probability of profit"),
         InvalidReason::Schema,
         "payload.content.evidence.combined_score.label",
     )?;
@@ -848,6 +887,7 @@ fn is_label(label: &str) -> bool {
         "admission_ceiling",
         "client_ceiling",
         "policy_overlay",
+        "owner_request",
     ]
     .contains(&label)
         || ["rule:", DELEGATION]
@@ -1103,7 +1143,7 @@ const REQUESTED_TRIGGER: Ty =
 const REQUESTED_EVIDENCE: Ty = Ty::Record(&[
     (
         "combined_score",
-        Ty::Record(&[("label", Ty::Str), ("value", Ty::Decimal)]),
+        Ty::Nullable(&Ty::Record(&[("label", Ty::Str), ("value", Ty::Decimal)])),
     ),
     (
         "outputs",
@@ -1159,7 +1199,7 @@ static APPROVAL_REQUESTED: Ty = Ty::Record(&[
     ("purpose", Ty::OneOf(&["open", "increase"])),
     ("mandate_version", Ty::DigestRef),
     ("decided_by", Ty::Str),
-    ("combined_score", Ty::Decimal),
+    ("combined_score", Ty::Nullable(&Ty::Decimal)),
     ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
     ("approvers_required", Ty::Int),
     ("independent_required", Ty::Bool),
@@ -1193,7 +1233,7 @@ static APPROVAL_REQUESTED_V2: Ty = Ty::Record(&[
     ("purpose", Ty::OneOf(&["open", "increase"])),
     ("mandate_version", Ty::DigestRef),
     ("decided_by", Ty::Str),
-    ("combined_score", Ty::Decimal),
+    ("combined_score", Ty::Nullable(&Ty::Decimal)),
     ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
     ("approvers_required", Ty::Int),
     ("independent_required", Ty::Bool),
@@ -1229,7 +1269,7 @@ static APPROVAL_REQUESTED_V3: Ty = Ty::Record(&[
     ("purpose", Ty::OneOf(&["open", "increase"])),
     ("mandate_version", Ty::DigestRef),
     ("decided_by", Ty::Str),
-    ("combined_score", Ty::Decimal),
+    ("combined_score", Ty::Nullable(&Ty::Decimal)),
     ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
     ("approvers_required", Ty::Int),
     ("independent_required", Ty::Bool),
