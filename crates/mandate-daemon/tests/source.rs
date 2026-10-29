@@ -1477,7 +1477,8 @@ fn an_item_it_cannot_offer_is_refused_by_event_id_and_the_rest_are_offered() {
     assert_eq!(stored.offers.len(), 1);
 }
 
-/// An artifact store that counts its reads and can answer `Unavailable` for the next few.
+/// An artifact store that counts its reads of the news records and can answer `Unavailable` for
+/// the next few of them; the mandate documents it also holds are read uncounted.
 #[derive(Clone, Default)]
 struct Counted {
     objects: BTreeMap<Digest, Vec<u8>>,
@@ -1490,6 +1491,12 @@ impl mandate_journal::ArtifactSource for Counted {
         &self,
         reference: &ArtifactRef,
     ) -> Result<Vec<u8>, mandate_journal::ArtifactError> {
+        let news = [LICENSED_RECORD, UNLICENSED_RECORD]
+            .iter()
+            .any(|record| Digest::of(record) == reference.digest());
+        if !news {
+            return self.objects.read_artifact(reference);
+        }
         self.reads.set(self.reads.get() + 1);
         if self.unavailable.get() > 0 {
             self.unavailable.set(self.unavailable.get() - 1);
@@ -1664,13 +1671,15 @@ fn a_stream_whose_held_head_is_gone_is_read_again_from_its_first_record() {
         .borrow_mut()
         .extend(chained(vec![news_row(2, LICENSED_ROW)]));
     assert_eq!(offers(&source).len(), 1);
-    *journal.news.borrow_mut() = chained(vec![news_row(2, UNLICENSED_ROW)]);
+    *journal.news.borrow_mut() =
+        chained(vec![news_row(2, UNLICENSED_ROW), news_row(3, LICENSED_ROW)]);
     assert_eq!(
         offers(&source),
         vec![
             mandate_runtime::RetrievedObservation::stored(UNLICENSED_ROW, UNLICENSED_RECORD)
-                .unwrap()
+                .unwrap(),
+            mandate_runtime::RetrievedObservation::stored(LICENSED_ROW, LICENSED_RECORD).unwrap(),
         ],
-        "the new stream's item alone"
+        "the stream it now holds, from its first record"
     );
 }
