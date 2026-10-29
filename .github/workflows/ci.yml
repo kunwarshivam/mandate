@@ -1424,23 +1424,11 @@ jobs:
       - name: Open an issue for the failed run on main (opaque)
         env:
           GH_TOKEN: ${{ github.token }}
-          FAST_RESULT: ${{ needs.fast.result }}
-          FULL_RESULT: ${{ needs.full.result }}
-          CELL_RESULT: ${{ needs.cell.result }}
-          CELL_KILL_SWITCH_RESULT: ${{ needs.cell-kill-switch.result }}
-          CELL_DEMO_RESULT: ${{ needs.cell-demo.result }}
-          CELL_DEMO_WEB_RESULT: ${{ needs.cell-demo-web.result }}
-          CELL_JOURNAL_RESULT: ${{ needs.cell-journal.result }}
-          CELL_FAILOVER_RESULT: ${{ needs.cell-failover.result }}
-          CELL_EXECUTOR_RESULT: ${{ needs.cell-executor.result }}
-          CELL_VAULT_RESULT: ${{ needs.cell-vault.result }}
-          CELL_EXCHANGE_RESULT: ${{ needs.cell-exchange.result }}
-          CELL_SEEDED_RESULT: ${{ needs.cell-seeded.result }}
-          CELL_UPGRADE_RESULT: ${{ needs.cell-upgrade.result }}
+          VERDICTS: fast ${{ needs.fast.result }}, full ${{ needs.full.result }}, cell ${{ needs.cell.result }}, kill-switch ${{ needs.cell-kill-switch.result }}, demo ${{ needs.cell-demo.result }}, demo-web ${{ needs.cell-demo-web.result }}, journal ${{ needs.cell-journal.result }}, failover ${{ needs.cell-failover.result }}, executor ${{ needs.cell-executor.result }}, vault ${{ needs.cell-vault.result }}, exchange ${{ needs.cell-exchange.result }}, seeded ${{ needs.cell-seeded.result }}, upgrade ${{ needs.cell-upgrade.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "ci on main failed at ${GITHUB_SHA}"; then
             echo "An open issue already reports ci on main failing at ${GITHUB_SHA}"
             exit 0
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}, cell ${CELL_RESULT}, kill-switch ${CELL_KILL_SWITCH_RESULT}, demo ${CELL_DEMO_RESULT}, demo-web ${CELL_DEMO_WEB_RESULT}, journal ${CELL_JOURNAL_RESULT}, failover ${CELL_FAILOVER_RESULT}, executor ${CELL_EXECUTOR_RESULT}, vault ${CELL_VAULT_RESULT}, exchange ${CELL_EXCHANGE_RESULT}, seeded ${CELL_SEEDED_RESULT}, upgrade ${CELL_UPGRADE_RESULT}): ${RUN_URL} (DEC-1190, DEC-2610, DEC-2649)"
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (${VERDICTS}): ${RUN_URL} (DEC-1190, DEC-2610, DEC-2649)"
