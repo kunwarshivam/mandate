@@ -1246,6 +1246,31 @@ def test_the_local_cell_runs_the_news_reader_on_its_recording_alone():
     assert reached == {53, 5432}, reached
 
 
+def test_the_news_reader_serves_news_workspace_or_else_the_hosted_one():
+    """DEC-2085 item 7: the reader's `--workspace` is `news.workspace` where it is set, the demo
+    scenario's research workspace, and else `api.workspace`, in the local cell and in staging alike;
+    no other argument changes."""
+    def workspace_of(docs: list[dict]) -> str:
+        reader = next(w for w in workloads(docs) if w["metadata"]["name"] == "news-reader")
+        args = first_container(reader)["args"]
+        return args[args.index("--workspace") + 1]
+
+    assert workspace_of(render_all(*NEWS_LOCAL)) == HOSTED
+    research = f"{HOSTED}r"
+    pointed = render_all(*NEWS_LOCAL, "--set", f"news.workspace={research}")
+    assert workspace_of(pointed) == research
+    expected = [a.replace("{workspace}", research) for a in RECORDED_ARGS]
+    reader = next(w for w in workloads(pointed) if w["metadata"]["name"] == "news-reader")
+    assert first_container(reader)["args"] == expected
+    staging = ("--set", "api.workspace=01KDEM0000000000000000000W", *NEWS)
+    assert workspace_of(documents(iex_staging(*staging).stdout)) == "01KDEM0000000000000000000W"
+    overridden = iex_staging(*staging, "--set", "news.workspace=01KDEM0000000000000000000Wr")
+    assert overridden.returncode == 0, overridden.stderr
+    assert workspace_of(documents(overridden.stdout)) == "01KDEM0000000000000000000Wr"
+    bad = render_all_result(*NEWS_LOCAL, "--set", "news.workspace=not a workspace")
+    assert bad.returncode != 0 and "news" in bad.stderr, bad.stderr
+
+
 def render_all_result(*extra: str) -> subprocess.CompletedProcess:
     """`render_all`'s render, its result whether it renders or not."""
     return helm(
