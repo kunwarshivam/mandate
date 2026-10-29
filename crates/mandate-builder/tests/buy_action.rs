@@ -28,7 +28,7 @@ fn a_flat_agents_buy_is_an_opening_with_its_after_values() {
         ActionContext {
             purpose: Purpose::Open,
             order_usd: usd("300"),
-            combined_score: unit("0.75"),
+            combined_score: Some(unit("0.75")),
             instrument: asset(SWING_INSTRUMENT),
             asset_class: AssetClass::UsEquity,
             session: MarketSession::Regular,

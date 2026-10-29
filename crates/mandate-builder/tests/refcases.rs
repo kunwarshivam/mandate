@@ -323,7 +323,7 @@ fn action_of(c: &Value) -> ActionContext {
     ActionContext {
         purpose,
         order_usd: usd(&decimal("order_usd", "0")),
-        combined_score: unit(&decimal("combined_score", "0")),
+        combined_score: Some(unit(&decimal("combined_score", "0"))),
         instrument: asset(
             a.get("instrument")
                 .and_then(Value::as_str)

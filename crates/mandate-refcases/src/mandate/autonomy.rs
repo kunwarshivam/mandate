@@ -212,7 +212,7 @@ pub(super) fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionCo
     Ok(ActionContext {
         purpose,
         order_usd: usd("order_usd")?,
-        combined_score: unit("combined_score")?,
+        combined_score: Some(unit("combined_score")?),
         instrument,
         asset_class: AssetClass::parse(str_at(stated, "asset_class")?)
             .map_err(|e| format!("`asset_class`: {}", e.code()))?,
@@ -237,7 +237,7 @@ fn unread_facts(risk_day: Date) -> Result<ActionContext, String> {
     Ok(ActionContext {
         purpose: Purpose::Open,
         order_usd: Usd::ZERO,
-        combined_score: Unit::ZERO,
+        combined_score: Some(Unit::ZERO),
         instrument: unread_instrument()?,
         asset_class: AssetClass::Crypto,
         session: MarketSession::Crypto,

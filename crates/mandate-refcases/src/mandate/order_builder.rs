@@ -415,7 +415,7 @@ fn compare_trim(
         &ActionContext {
             purpose: Purpose::RiskExit,
             order_usd,
-            combined_score: proposal.combined.score,
+            combined_score: Some(proposal.combined.score),
             instrument: stated.instrument.clone(),
             asset_class: stated.asset_class,
             session: market_session(clock.session),

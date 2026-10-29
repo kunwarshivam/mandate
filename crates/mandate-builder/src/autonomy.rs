@@ -42,7 +42,10 @@ use crate::builder::{Action, Proposal};
 pub struct ActionContext {
     pub purpose: Purpose,
     pub order_usd: Usd,
-    pub combined_score: Unit,
+    /// The §8.3 combined score, or `None` for an owner's or a client's request, which no model
+    /// output decided (journal spec §9.1 rule 8, DEC-2858 item 1): a rule that reads it cannot be
+    /// evaluated for such a request.
+    pub combined_score: Option<Unit>,
     pub instrument: AssetId,
     pub asset_class: AssetClass,
     pub session: MarketSession,
@@ -110,7 +113,7 @@ impl Facts for ActionContext {
     fn decimal_field(&self, field: ConditionField) -> Option<Ratio> {
         let text = match field {
             ConditionField::OrderUsd => self.order_usd.to_string(),
-            ConditionField::CombinedScore => self.combined_score.to_string(),
+            ConditionField::CombinedScore => self.combined_score?.to_string(),
             ConditionField::ThesisConfidence => self.thesis_confidence.to_string(),
             ConditionField::Drawdown => self.drawdown.to_string(),
             ConditionField::DailyPnlFraction => self.daily_pnl_fraction.to_string(),
@@ -545,7 +548,7 @@ mod tests {
         Ok(ActionContext {
             purpose: Purpose::Open,
             order_usd: Usd::parse(order_usd)?,
-            combined_score: Unit::parse("0.8")?,
+            combined_score: Some(Unit::parse("0.8")?),
             instrument: AssetId::parse("7b4a1c2e-1111-4a2b-9c3d-000000000001")?,
             asset_class: AssetClass::Crypto,
             session: MarketSession::Crypto,
