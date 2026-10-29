@@ -9,6 +9,7 @@ import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPa
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
+import { mandateVersionsRead, mandateVersionsRoute } from "@/api/mandate-versions";
 import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -41,6 +42,7 @@ import {
   type Runtime,
   RuntimeContext,
   type SetUp,
+  type VersionsAnswer,
 } from "./mock-runtime";
 
 /** Refusal codes a set-up step names in words of their own rather than as a plain `invalid` (DEC-2809 item 1, DEC-2133). */
@@ -533,6 +535,15 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** `GET /agents/{id}/mandate-versions` (§4.7, DEC-2147), read when the versions screen asks. */
+  const mandateVersions = useCallback(
+    async (agentId: string): Promise<VersionsAnswer> => {
+      const read = await client.read(mandateVersionsRoute(agentId), mandateVersionsRead);
+      return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+    },
+    [client],
+  );
+
   /** `GET /agents/{id}/orders` and `/positions` (DEC-2111), with the agent stream's tail, read together when the agent's screen asks. */
   const activity = useCallback(
     async (agentId: string): Promise<ActivityAnswer> => {
@@ -743,8 +754,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, mandateVersions, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, mandateVersions, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

@@ -11,6 +11,7 @@ import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView, ReadPosition } from "@/api/read-models";
 import type { Enrolled, ListedPasskey } from "@/api/enrol";
 import type { CatalogueAnswer } from "@/api/catalogue";
+import type { MandateVersions } from "@/api/mandate-versions";
 import type { JournalRecord } from "@/api/records";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
@@ -213,6 +214,8 @@ export interface Runtime {
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
+  /** An agent's mandate version history (`GET /agents/{id}/mandate-versions`, DEC-2147); `null` over the fixtures, whose screen shows the agent's own. */
+  mandateVersions: ((agentId: string) => Promise<VersionsAnswer>) | null;
   /** The registered instruments and signal models a version may name (§4.1, DEC-2136); `null` over the fixtures, whose set-up uses the fixture catalogue. */
   catalogue: (() => Promise<CatalogueAnswer>) | null;
   /**
@@ -289,6 +292,9 @@ export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: str
 
 /** A stream's records with their bodies, and whether they reach back to the stream's first record; or why they were not read. */
 export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boolean } | { ok: false; reason: string };
+
+/** The agent's mandate version history as served, or the code of the read that failed. */
+export type VersionsAnswer = { ok: true; value: MandateVersions } | { ok: false; reason: string };
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
@@ -710,7 +716,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, mandateVersions: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

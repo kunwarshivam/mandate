@@ -237,6 +237,40 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return { ...agentRow(agent), account_positions: positions, openings_held: null };
   }
 
+  /**
+   * `read-models/agent-mandate-versions` (§4.7, DEC-2147) from the fixture agent's confirmed versions:
+   * the first as its deployment, every later one as a confirmation over the one before, a pending one
+   * with no application yet. The fixtures' rejections are prose, so each is served `not_loosening`.
+   */
+  function mandateVersionsBody(agent: Agent) {
+    const [first, ...rest] = agent.versions;
+    const confirmation = (version: string, index: number) => eventId(`confirm:${agent.agent_id}:${version}:${index}`);
+    return {
+      agent_id: agent.agent_id,
+      account_ref: "acct_paper_1",
+      in_effect: agent.mandate_version,
+      stopped_at: null,
+      versions: [
+        { mandate_version: first.mandate_version, base_version: null, classification: "first_version", created_at: null, confirmed_at: canonical(first.confirmed_at), confirmation_id: confirmation(first.mandate_version, 0), deployed_at: canonical(agent.deployed_at), application: null },
+        ...rest.map((v, i) => ({
+          mandate_version: v.mandate_version,
+          base_version: v.previous ?? agent.versions[i].mandate_version,
+          classification: v.classification,
+          created_at: null,
+          confirmed_at: canonical(v.confirmed_at),
+          confirmation_id: confirmation(v.mandate_version, i + 1),
+          deployed_at: null,
+          application:
+            v.application.result === "applied"
+              ? { result: "applied", reason: null, recorded_at: canonical(v.application.at) }
+              : v.application.result === "rejected"
+                ? { result: "rejected", reason: "not_loosening", recorded_at: canonical(v.application.at) }
+                : null,
+        })),
+      ],
+    };
+  }
+
   /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
   const servedId = (approval: Approval) => approval.approval_id.replace(/^apr_/, "");
   const approvalBy = (id: string) => workspace.approvals.find((a) => servedId(a) === id);
@@ -392,6 +426,11 @@ export function createMockServer(options: MockServerOptions): MockServer {
         updated_at: canonical(o.updated),
       }));
       return read({ ...head, orders });
+    }
+    const versionsRoute = route.match(/^\/agents\/([^/]+)\/mandate-versions$/);
+    if (versionsRoute) {
+      const agent = agentOf(decodeURIComponent(versionsRoute[1]));
+      return agent && agent.versions.length > 0 ? read(mandateVersionsBody(agent)) : problem(404, "not_found", "none");
     }
     const agentRoute = route.match(/^\/agents\/([^/]+)$/);
     if (agentRoute) {

@@ -7,7 +7,7 @@ import type { AgentDetail, ApprovalDetail, ApprovalState, BoundOrder, MandateSum
 import { deadlineIso } from "@/api/read-models";
 import { ModeBadge } from "@/components/domain/mode";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
-import { PAGE_GRID, Panel, Section, WorkspaceGate } from "@/components/screens/common";
+import { PAGE_GRID, Panel, Section, SectionLink, WorkspaceGate } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
 import { HostConfirm } from "./host-confirm";
@@ -16,6 +16,7 @@ import { clock, percent, price, quantity, usd } from "@/lib/format";
 import { APPROVE_REFUSED, FINAL_UNDELIVERED, refusedText, undeliveredText } from "@/lib/grant-refusals";
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
+import { agentHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 import { AgentTheses } from "./theses";
 
@@ -239,7 +240,7 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <PauseControl agent={agent} />
             <OpeningsHeldNote held={agent.openings_held} />
           </header>
-          <Section title="Mandate">{agent.mandate ? <MandateFacts mandate={agent.mandate} /> : <p className={NOT_REPORTED}>Mandate not reported</p>}</Section>
+          <Section title="Mandate" action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}>{agent.mandate ? <MandateFacts mandate={agent.mandate} /> : <p className={NOT_REPORTED}>Mandate not reported</p>}</Section>
           <Section title="Account positions">
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />

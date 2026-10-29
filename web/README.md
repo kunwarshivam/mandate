@@ -209,7 +209,12 @@ instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read eve
 state the journal has not given is "not reported", a list that cannot be read is never shown as
 empty, and an agent with no account found says so. It also lists the latest 20 records on the
 agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequence, type and time,
-never a body (DEC-2377). Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
+never a body (DEC-2377). Its Versions link (`/agents/{id}/mandate/versions`) reads `GET
+/agents/{id}/mandate-versions` (§4.7, DEC-2147) every ten seconds and lists the history newest first: the
+deployed version, then each change with the classification the server computed, its times, and what
+the executor did with it, a rejection's reason in words. Only `in_effect` tags a version in effect; a
+stopped agent or an account not found puts none in effect, and a read that fails or breaks the
+history's order shows the versions as not reported, never the fixtures'. Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
 groups the agents by the account their reads name: each agent's own net quantity per instrument, its
 cost basis, risk mark and protection shown as not reported until the API serves them (DEC-2111 item
 5), and the account's holdings at its last reconciliation from the same reads. Audit's Timeline reads the latest 50 records of the control

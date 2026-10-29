@@ -23,6 +23,8 @@ import { cn } from "@/lib/utils";
 import { AGENT_SECTIONS, type AgentSectionKey, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
 import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
+import { ApiMandateVersions } from "@/components/api-screens/mandate-versions";
+import { BySource } from "@/components/api-screens/api-screens";
 import { NEEDS_CARD, NEEDS_ITEM, NEEDS_STRIP, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
 import { MandateVersions } from "./mandate-versions";
@@ -371,6 +373,12 @@ function AgentSection({ agentId, section }: { agentId: string; section: AgentSec
 }
 
 export function AgentSectionScreen({ agentId, section }: { agentId: string; section: AgentSectionKey }) {
+  if (section === "mandate/versions") return <BySource fixtures={<FixtureSectionScreen agentId={agentId} section={section} />} api={<ApiMandateVersions agentId={agentId} />} />;
+  return <FixtureSectionScreen agentId={agentId} section={section} />;
+}
+
+/** A section over the fixtures; over the API, one the deployment does not serve yet says so. */
+function FixtureSectionScreen({ agentId, section }: { agentId: string; section: AgentSectionKey }) {
   return (
     <WorkspaceGate>
       <AgentSection agentId={agentId} section={section} />
