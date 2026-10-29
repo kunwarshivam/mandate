@@ -20,7 +20,7 @@ use crate::gitops::Environment;
 /// fills; the tests' `RELEASED_NOT_PROMOTED` names each one released but held back, with the overlay value it lacks.
 /// A binary not named here (`mandate-agentd`, `mandate-rh-sim`) is not a chart process yet, and
 /// the simulator never is. A lane that publishes a process's binary adds its row here.
-const CHART_IMAGE_FOR_BINARY: [(&str, &str); 9] = [
+const CHART_IMAGE_FOR_BINARY: [(&str, &str); 11] = [
     ("mandate", "mandate"),
     ("mandate-api-server", "api"),
     ("mandate-deployd", "deploy-manager"),
@@ -30,6 +30,8 @@ const CHART_IMAGE_FOR_BINARY: [(&str, &str); 9] = [
     ("mandate-token-exchange", "token-exchange"),
     ("mandate-scheduler", "scheduler"),
     ("mandate-dispatcher", "dispatcher"),
+    ("mandate-datad", "data"),
+    ("mandate-gatewayd", "model-gateway"),
 ];
 
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
@@ -294,23 +296,11 @@ mod tests {
     /// promoting the image alone would stop the whole workspace release from reconciling
     /// (DEC-2079 item 3). A process moves to [`CHART_IMAGE_FOR_BINARY`] in the change that gives the
     /// overlays its value.
-    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 3] = [
-        (
-            "mandate-datad",
-            "data",
-            "platform/news-data-key and vault-approle-bars-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M): without them the IEX source stops at start and holds the whole workspace release unready, so it is promoted in the change after that apply (DEC-2082 item 4)",
-        ),
-        (
-            "mandate-gatewayd",
-            "model-gateway",
-            "platform/model-provider-key in the staging vault, which the founder's apply writes (FOUNDER-STEPS K): without it the gateway stops at start and holds the whole workspace release unready, so it is promoted in the change after that apply (DEC-2081 item 5)",
-        ),
-        (
-            "mandate-news-reader",
-            "news-reader",
-            "news.follows in staging's overlay, platform/news-data-key and vault-approle-news-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M), and the cell's run of the reader against a recorded news fixture (E2-10c): the chart refuses the reader without followed agents, without its key it is never ready and holds the whole workspace release unready, and without the cell's run staging would be the first real run of the chart and the binary together, so it is promoted in the change after all three (DEC-2084 item 8)",
-        ),
-    ];
+    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 1] = [(
+        "mandate-news-reader",
+        "news-reader",
+        "news.follows in staging's overlay, platform/news-data-key and vault-approle-news-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M), and the cell's run of the reader against a recorded news fixture (E2-10c): the chart refuses the reader without followed agents, without its key it is never ready and holds the whole workspace release unready, and without the cell's run staging would be the first real run of the chart and the binary together, so it is promoted in the change after all three (DEC-2084 item 8)",
+    )];
 
     fn digest(c: char) -> String {
         format!("sha256:{}", c.to_string().repeat(64))
@@ -422,6 +412,17 @@ mod tests {
                     )
                 ),
                 (
+                    "data".to_owned(),
+                    format!("ghcr.io/kunwarshivam/mandate/mandate-datad@{}", digest('0'))
+                ),
+                (
+                    "model-gateway".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-gatewayd@{}",
+                        digest('2')
+                    )
+                ),
+                (
                     "deploy-manager".to_owned(),
                     format!(
                         "ghcr.io/kunwarshivam/mandate/mandate-deployd@{}",
@@ -524,6 +525,8 @@ mod tests {
             ("mandate-executord", "executor"),
             ("mandate-provisionerd", "role-provisioner"),
             ("mandate-token-exchange", "token-exchange"),
+            ("mandate-datad", "data"),
+            ("mandate-gatewayd", "model-gateway"),
         ] {
             assert!(
                 CHART_IMAGE_FOR_BINARY.contains(&row),
