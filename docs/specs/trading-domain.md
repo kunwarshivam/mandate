@@ -643,7 +643,7 @@ windows with current status data; otherwise the exit price ladder in §5.6) → 
   - **The certain part,** `k-<switch>-<n>`, has the sub-ledger as its quantity. Each send of it
     sells at most the lower of two quantities:
     - the sub-ledger, less every live non-protective sell the switch reaches and every `Unknown`
-      sell among them;
+      sell the switch reaches, protective or not;
     - the long position, less every live non-protective sell in the instrument and every
       `Unknown` sell there, protective or not.
 
@@ -664,6 +664,9 @@ windows with current status data; otherwise the exit price ladder in §5.6) → 
       covers it.
     - Once none is, the part ends: the remainder is abandoned `flatten_covered` without an alert,
       and the certain part `released_to_owner` with one (DEC-2360).
+    - A certain part that ends unfilled (not a ladder step) after its remainder ended
+      `flatten_covered` leaves the rest to the owner, alerted once, `ExitStalled`, while the agent
+      still holds lots there.
   - When the cap is zero where the close would be raised, only the remainder is raised. A close
     has at most these two parts, and the account and workspace switch is unchanged.
 
