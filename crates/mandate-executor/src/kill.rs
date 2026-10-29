@@ -706,8 +706,10 @@ fn in_doubt_buys(
 /// `Unknown` order turns out to have done the agent's sub-ledger and the position stay at or above
 /// zero. The lower of the sub-ledger less every live non-protective sell the switch reaches and
 /// every `Unknown` one it reaches, protective or not, and the long position less every live
-/// non-protective sell in the instrument and every `Unknown` one, protective or not; neither counts the order of `own` being sized, but an earlier one of it still
-/// `Unknown` is counted.
+/// non-protective sell in the instrument and every `Unknown` one, protective or not; neither counts
+/// `own`'s orders. An earlier order of the part being sized is never `Unknown` when it is sized: a
+/// resubmission is back in `Intent`, and a ladder's next rung follows only its last rung's
+/// confirmed cancel (§5.6, §5.7).
 fn flatten_cap(
     view: &ExecutorState,
     agent: &AgentId,
@@ -720,9 +722,7 @@ fn flatten_cap(
             && order.side == Side::Sell
             && !order.state.is_terminal()
             && order.state != OrderState::Intent
-            && own.is_none_or(|intent| {
-                order.intent_id.as_ref() != Some(intent) || order.state == OrderState::Unknown
-            })
+            && own.is_none_or(|intent| order.intent_id.as_ref() != Some(intent))
     });
     let mut reaching = Qty::ZERO;
     let mut anyone = Qty::ZERO;
@@ -792,8 +792,7 @@ pub(crate) fn awaits_legs(view: &ExecutorState, intent: &IntentId) -> bool {
     };
     view.orders.values().any(|order| {
         &order.instrument == instrument
-            && (order.agent.as_ref() == Some(&switch.agent)
-                || reached(view, order, &switch.agent, &switch.instruments))
+            && reached(view, order, &switch.agent, &switch.instruments)
             && unplaced(view, order)
     })
 }
@@ -802,7 +801,10 @@ pub(crate) fn awaits_legs(view: &ExecutorState, intent: &IntentId) -> bool {
 /// `flatten_covered` leaves the agent's rest in the instrument to the owner, who is alerted once on
 /// the record that ends it, so the rest is never left silently unsold. A rejection or an expiry
 /// ends its sequence; a cancel does only when it is not a ladder step's, whose confirmation sends
-/// the next rung (§5.6 step 2).
+/// the next rung (§5.6 step 2). Any abandonment of the remainder counts, not `flatten_covered`
+/// alone: the state keeps no abandonment's reason, and a remainder abandoned another way (its own
+/// order's confirmed absence, §5.7) leaves the rest just as unsold, so the wider reading only adds
+/// an alert DEC-2857 item 5 would not, and never drops one.
 pub(crate) fn certain_part_ended(
     batch: &mut Batch<'_, '_>,
     id: &ClientOrderId,

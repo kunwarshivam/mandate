@@ -609,8 +609,9 @@ fn another_holder(shell: &mut Shell, quantity: &str) {
     }
 }
 
-/// The owner's release of `quantity` of the agent's `AAPL` (journal spec §9.27, DEC-2354).
-fn released(shell: &mut Shell, quantity: &str) {
+/// The owner's release of `quantity` of the agent's `AAPL` at `clock` (journal spec §9.27,
+/// DEC-2354).
+fn released(shell: &mut Shell, quantity: &str, clock: i64) {
     let at = shell.head().0.saturating_add(1);
     let pairs = [
         ("agent_id", text(common::AGENT)),
@@ -623,7 +624,7 @@ fn released(shell: &mut Shell, quantity: &str) {
             ACCOUNT_STREAM,
             at,
             "PositionReleased",
-            with_clock(&pairs, 10),
+            with_clock(&pairs, clock),
         ))
         .expect("the release folds");
 }
@@ -675,7 +676,7 @@ fn capped_to_zero_beside_a_sell_in_doubt(shell: &mut Shell, ports: &Ports<'_>) -
         sells(&[switch]).is_empty(),
         "the certain part waits on the OCO's cancel"
     );
-    released(shell, "6");
+    released(shell, "6", 10);
     vec![shell.run(
         Input::Broker(Ok(BrokerOutcome::CancelAccepted {
             client_order_id: OCO.to_owned(),
@@ -791,6 +792,186 @@ fn a_certain_part_ending_unfilled_after_its_remainder_was_covered_alerts_the_own
         .filter(|kind| **kind == "exit_stalled")
         .count();
     assert_eq!(alerts, 1, "{:?}", ended.draft_types());
+}
+
+/// The switch beside a sell of four in doubt, its certain six accepted and resting, then the sell
+/// found filled at the tick at 20, which also steps the six's ladder (§5.6 step 2): the remainder
+/// ends `flatten_covered`. Answers the certain part's client order id and quantity.
+fn covered_beside_a_resting_six(shell: &mut Shell, ports: &Ports<'_>) -> (String, Qty) {
+    let runs = switched_beside_a_sell_of_four(shell, ports);
+    let (certain, six) = sells(&runs).first().cloned().expect("the certain part");
+    let text_qty = six.to_string();
+    let accepted = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "new",
+    );
+    shell.run(Input::Broker(Ok(BrokerOutcome::Submitted(accepted))), ports);
+    let covered = resolved(
+        shell,
+        ports,
+        20,
+        (SELL_IN_DOUBT, Side::Sell, "4"),
+        ("filled", "4"),
+    );
+    assert_eq!(abandoned(&covered), ["flatten_covered"]);
+    (certain, six)
+}
+
+/// DEC-2857 item 5: a ladder step's cancel of the certain six, after the remainder ended
+/// `flatten_covered`, does not end them: the step's confirmation sends the next rung (§5.6 step 2),
+/// and the owner is not alerted, since nothing is left unsold.
+#[test]
+fn a_ladder_steps_cancel_of_the_certain_part_alerts_nobody() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    let (certain, _) = covered_beside_a_resting_six(&mut shell, &ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: certain.clone(),
+        })),
+        &ports,
+    );
+    assert!(
+        confirmed
+            .submissions()
+            .iter()
+            .any(|order| order.client_order_id.as_str().starts_with(&certain)),
+        "the step's next rung goes: {:?}",
+        confirmed.draft_types()
+    );
+    assert!(!confirmed.notifications.contains(&"exit_stalled"));
+}
+
+/// DEC-2857 item 5: the broker cancels the certain six, unfilled, before any ladder step was asked,
+/// after the remainder ended `flatten_covered`. That cancel ends them, and the owner is alerted
+/// once that the agent's six are left unsold.
+#[test]
+fn a_broker_cancel_of_the_certain_part_after_its_remainder_was_covered_alerts_the_owner() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    let runs = switched_beside_a_sell_of_four(&mut shell, &ports);
+    let (certain, six) = sells(&runs).first().cloned().expect("the certain part");
+    let text_qty = six.to_string();
+    let accepted = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "new",
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(accepted))),
+        &ports,
+    );
+    let covered = resolved(
+        &mut shell,
+        &ports,
+        12,
+        (SELL_IN_DOUBT, Side::Sell, "4"),
+        ("filled", "4"),
+    );
+    assert_eq!(abandoned(&covered), ["flatten_covered"]);
+    let cancelled = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "canceled",
+    );
+    let ended = shell.run(Input::BrokerUpdate(BrokerUpdate::Order(cancelled)), &ports);
+    let alerts = ended
+        .notifications
+        .iter()
+        .filter(|kind| **kind == "exit_stalled")
+        .count();
+    assert_eq!(alerts, 1, "{:?}", ended.draft_types());
+}
+
+/// DEC-2857 item 5: once a release since (DEC-2354) took the agent's six, a rejection of the
+/// certain part leaves nothing of the agent's unsold, so the owner is not alerted about it.
+#[test]
+fn a_certain_part_ending_unfilled_with_nothing_of_the_agents_left_alerts_nobody() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    let (certain, six) = covered_beside_a_resting_six(&mut shell, &ports);
+    released(&mut shell, "6", 20);
+    let text_qty = six.to_string();
+    let rejected = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        &text_qty,
+        "0",
+        "rejected",
+    );
+    let ended = shell.run(Input::BrokerUpdate(BrokerUpdate::Order(rejected)), &ports);
+    assert!(
+        !ended.notifications.contains(&"exit_stalled"),
+        "{:?}",
+        ended.draft_types()
+    );
+}
+
+/// DEC-2857 item 3, beside another holder: the certain six still rest when the sell in doubt is
+/// found cancelled, so the remainder sells the agent's four left and no more. The six count in its
+/// cap as the agent's own sell; the long position, twenty with the other holder's ten, would allow
+/// fourteen, ten of them the other holder's.
+#[test]
+fn the_remainder_counts_the_certain_part_still_resting_beside_another_holder() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ten_held(&ports);
+    another_holder(&mut shell, "10");
+    let runs = switched_beside_a_sell_of_four(&mut shell, &ports);
+    let (certain, six) = sells(&runs).first().cloned().expect("the certain part");
+    assert_eq!(six, qty("6"));
+    let accepted = broker_order(
+        "b-certain",
+        Some(&certain),
+        AAPL,
+        Side::Sell,
+        "6",
+        "0",
+        "new",
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(accepted))),
+        &ports,
+    );
+    let after = resolved(
+        &mut shell,
+        &ports,
+        12,
+        (SELL_IN_DOUBT, Side::Sell, "4"),
+        ("canceled", "0"),
+    );
+    let remainder = flattens(&runs).last().cloned().expect("the remainder").0;
+    assert_eq!(sells(&after), [(format!("md-{remainder}"), qty("4"))]);
 }
 
 /// How the broker turns out to have handled one order in doubt, once its lookup is answered.
