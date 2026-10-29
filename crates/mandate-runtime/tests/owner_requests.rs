@@ -324,7 +324,8 @@ fn an_owners_request_the_dry_run_deferred_runs_and_a_clients_is_asked() {
     assert_eq!(member(decision, "dry_run"), &text("allow"));
     assert_eq!(member(decision, "autonomy"), &text("auto"));
     assert_eq!(member(decision, "decided_by"), &text("owner_request"));
-    let clients = Request::client_buy(2);
+    let mut shell = started(&ports);
+    let clients = Request::client_buy(1);
     let ran = tail(&mut shell, &clients.event(), &ports);
     let decision = only(&ran, "DecisionMade");
     assert_eq!(member(decision, "autonomy"), &text("ask"));
@@ -746,11 +747,15 @@ fn one_run(case: &Case) -> Result<(), String> {
         if *client && decision.payload.get("autonomy") == Some(&text("auto")) {
             return Err("a client's opening ran AUTO".to_owned());
         }
+        let dry_run_denied = decision.payload.get("dry_run") != Some(&text("allow"));
         let owners_expected = match (case.verdict, case.autonomy) {
-            (Verdict::Denies, _) => (Value::Null, Value::Null),
+            _ if dry_run_denied => (Value::Null, Value::Null),
             (_, Autonomy::Deny) => (text("deny"), text("rule:owner-deny")),
             (Verdict::Allows, Autonomy::Auto) => (text("auto"), text("rule:owner-auto")),
-            _ => (text("auto"), text("owner_request")),
+            (Verdict::Allows | Verdict::Defers, _) => (text("auto"), text("owner_request")),
+            (Verdict::Denies, _) => {
+                return Err("a request the dry run denied is recorded allowed".to_owned());
+            }
         };
         let decided = (
             decision
