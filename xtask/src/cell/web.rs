@@ -611,6 +611,7 @@ pub fn warm_paths(agent: &str) -> Vec<String> {
         "/approvals",
         "/approvals/warm",
         "/positions",
+        "/instruments",
         "/audit/timeline",
         "/alerts",
         "/connections",

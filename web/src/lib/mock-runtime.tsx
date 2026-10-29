@@ -220,6 +220,8 @@ export interface Runtime {
    * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
    */
   ownerExit: ((agentId: string, instrument: string, record: CommandRecord, onRecorded: () => void) => Promise<ExitOutcome>) | null;
+  /** The owner asking an agent to buy `size` of its own instrument (`POST /agents/{id}/requests`, DEC-2151), followed to its outcome; `null` over the fixtures, which ask no agent. */
+  askAgent: ((agentId: string, instrument: string, size: string, onRecorded: () => void) => Promise<AskOutcome>) | null;
   /** A stream's latest `count` records with their bodies, each checked against its hash (§4.8.1), oldest first; `null` over the fixtures. */
   streamRecords: ((streamId: string, count: number) => Promise<RecordsAnswer>) | null;
   /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
@@ -282,6 +284,9 @@ export interface ConnectPort {
  * Where an owner exit came to: settled by the agent's runtime (`applied`, `refused`, `ended`), recorded
  * with no settled outcome read yet, not delivered with the refusal's code, or not known.
  */
+/** Where an owner request ended: the agent took it (§5.5 `taken`, or later), refused it (with the reason its steps give), only recorded it, or never got it. */
+export type AskOutcome = { phase: "taken" | "recorded" } | { phase: "refused"; reason: string | null } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+
 export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
 
 /** The owner alerts the API served (DEC-2141), or why not. */
@@ -710,7 +715,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

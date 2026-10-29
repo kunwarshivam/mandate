@@ -209,7 +209,15 @@ instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read eve
 state the journal has not given is "not reported", a list that cannot be read is never shown as
 empty, and an agent with no account found says so. It also lists the latest 20 records on the
 agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequence, type and time,
-never a body (DEC-2377). Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
+never a body (DEC-2377). Instruments (`/instruments`) lists the instruments `GET /instruments` registers,
+in symbol order, filtered by the symbol typed: display only, with no ranking, suggestion or quote
+the API does not serve (DEC-528 item 2). An instrument's page offers each running agent "Ask agent
+to buy" with a typed quantity, sent as `POST /agents/{id}/requests` (`{instrument, side: "buy",
+size}`, DEC-2151) and followed through `GET /commands/{id}`. It is the owner's request, never an
+order: the agent's builder sizes it within the mandate, the gate and autonomy rules judge it, and an
+`ask` puts it in Approvals, where a request the content's `trigger.requested_by` names `owner`
+reads "Requested by you" (DEC-2858). An instrument the agent's mandate does not pin is refused at
+`/instrument` and shown as such. Over the fixtures the screens say there is nothing to search. Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
 groups the agents by the account their reads name: each agent's own net quantity per instrument, its
 cost basis, risk mark and protection shown as not reported until the API serves them (DEC-2111 item
 5), and the account's holdings at its last reconciliation from the same reads. Audit's Timeline reads the latest 50 records of the control

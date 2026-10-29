@@ -16,6 +16,8 @@ import * as stopAll from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page.dev";
 import * as goLive from "@/app/(app)/go-live/page";
+import * as instrument from "@/app/(app)/instruments/[instrumentId]/page";
+import * as instruments from "@/app/(app)/instruments/page";
 import * as desk from "@/app/(app)/messages/[agentId]/desk/page";
 import * as thread from "@/app/(app)/messages/[agentId]/page";
 import * as messages from "@/app/(app)/messages/page";
@@ -26,6 +28,7 @@ import * as settings from "@/app/(app)/settings/page";
 import { recordHref } from "@/components/stop/commands";
 import type { Scenario } from "@/fixtures/types";
 import { BACKTESTS_BY_AGENT } from "@/fixtures/backtests";
+import { INSTRUMENTS } from "@/fixtures/mandates";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { allOrders } from "@/lib/orders";
 import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
@@ -72,6 +75,10 @@ export async function pageFor(path: string): Promise<ReactNode> {
     case "settings":
       if (!second) return <settings.default />;
       return settingsScreen.default(params({ screen: second }));
+    case "instruments":
+      if (!second) return <instruments.default />;
+      if (rest.length === 0) return instrument.default(params({ instrumentId: second }));
+      throw new Error(`no page for ${path}`);
     case "go-live":
       if (second) throw new Error(`no page for ${path}`);
       return <goLive.default />;
@@ -107,6 +114,7 @@ export function pathsFor(scenario: Scenario): string[] {
       ...SCREENS.map((s) => s.href),
       SECTION_INDEX.audit.href,
       SECTION_INDEX.workspace.href,
+      `/instruments/${INSTRUMENTS.XYZ.asset_id}`,
       "/design",
           recordHref("stop_all", connection),
       recordHref("close_all", connection),

@@ -68,6 +68,7 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
   hold_openings: "§4.2",
   stop: "§4.2, §5.4",
   owner_exit: "§4.2, §5.4",
+  ask_agent: "§3.11 item 13, DEC-2151",
   acknowledge: "§4.2",
   kill_switch: "§4.2, §5.4",
   approval_response: "§4.3, §5.2",
