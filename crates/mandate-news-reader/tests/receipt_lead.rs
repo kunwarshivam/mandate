@@ -17,7 +17,7 @@ mod common;
 
 use std::time::Duration;
 
-use mandate_news_reader::{RECEIPT_AHEAD, RECEIPT_LEAD_S};
+use mandate_news_reader::{RECEIPT_AHEAD, RECEIPT_LEAD_S, STORE_CLOCK_UNAVAILABLE};
 use mandate_process::State;
 use mandate_sources::ingest::FUTURE_SKEW_MS;
 use mandate_time::UtcNanos;
@@ -298,4 +298,115 @@ fn an_idle_round_pauses_until_the_trusted_time_is_a_cooldown_on() {
     assert!(transport.sent().is_empty(), "paused, trusted 29 s on");
     block_on(reader.step(at(30)));
     assert_eq!(transport.sent().len(), 1, "a round, trusted 30 s on");
+}
+
+/// DEC-2292: the bound also holds against the store's clock, a second host's. A host clock already
+/// ahead when the reader starts passes the monotonic trusted time, which starts from it, but not the
+/// store's: the round is held, counted and alerted, and a round within both asks.
+#[test]
+fn a_host_clock_ahead_at_start_is_held_by_the_store_s_clock() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000018)]);
+    journal.store_clock.set(Some(Some(t0())));
+    block_on(reader.step(Clock::agreed(plus(t0(), 3_600))));
+    assert!(
+        transport.sent().is_empty(),
+        "an hour past the store's clock"
+    );
+    assert_eq!(reader.counts().receipt_ahead, 1);
+    assert_eq!(reader.take_alerts(), vec![RECEIPT_AHEAD]);
+    assert!(journal.news().is_empty());
+
+    let (journal, transport, mut reader) = ready(&[one_item(41000019)]);
+    journal.store_clock.set(Some(Some(t0())));
+    block_on(reader.step(Clock::agreed(plus(t0(), RECEIPT_LEAD_S))));
+    assert_eq!(
+        transport.sent().len(),
+        1,
+        "within the lead of the store's clock"
+    );
+    assert_eq!(reader.counts().receipt_ahead, 0);
+}
+
+/// The bound is the earlier of the trusted time and the store's clock: a store clock ahead of the
+/// trusted time lifts nothing.
+#[test]
+fn a_store_clock_ahead_of_the_trusted_time_lifts_nothing() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000020)]);
+    journal.store_clock.set(Some(Some(plus(t0(), 3_600))));
+    block_on(reader.step(ahead(t0(), RECEIPT_LEAD_S + 1)));
+    assert!(transport.sent().is_empty());
+    assert_eq!(reader.counts().receipt_ahead, 1);
+}
+
+/// A store whose clock cannot be read holds every round (`AGENTS.md` rule 3): counted, alerted
+/// `store_clock_unavailable` once an episode, paused by the cooldown, and ended by a round the
+/// store's clock bounds again.
+#[test]
+fn a_store_whose_clock_cannot_be_read_holds_the_round_and_alerts_once() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000021)]);
+    journal.store_clock.set(Some(None));
+    block_on(reader.step(Clock::agreed(t0())));
+    assert!(transport.sent().is_empty());
+    assert_eq!(reader.counts().store_clock_unavailable, 1);
+    assert_eq!(reader.counts().receipt_ahead, 0);
+    assert_eq!(reader.take_alerts(), vec![STORE_CLOCK_UNAVAILABLE]);
+    block_on(reader.step(Clock::agreed(plus(t0(), 29))));
+    assert_eq!(reader.counts().store_clock_unavailable, 1, "paused");
+    block_on(reader.step(Clock::agreed(plus(t0(), 30))));
+    assert_eq!(reader.counts().store_clock_unavailable, 2);
+    assert!(reader.take_alerts().is_empty(), "one alert an episode");
+    journal.store_clock.set(Some(Some(plus(t0(), 60))));
+    block_on(reader.step(Clock::agreed(plus(t0(), 60))));
+    assert_eq!(
+        transport.sent().len(),
+        1,
+        "the store's clock answering again, the round asks"
+    );
+    journal.store_clock.set(Some(None));
+    block_on(reader.step(Clock::agreed(plus(t0(), 200))));
+    assert_eq!(
+        reader.take_alerts(),
+        vec![STORE_CLOCK_UNAVAILABLE],
+        "a new episode alerts again"
+    );
+}
+
+/// Switching from one hold to the other is a new episode: each alerts once.
+#[test]
+fn a_held_round_of_the_other_kind_alerts_its_own_code() {
+    let (journal, _, mut reader) = ready(&[]);
+    journal.store_clock.set(Some(None));
+    block_on(reader.step(Clock::agreed(t0())));
+    journal.store_clock.set(Some(Some(t0())));
+    block_on(reader.step(ahead(plus(t0(), 30), RECEIPT_LEAD_S + 1)));
+    assert_eq!(
+        reader.take_alerts(),
+        vec![STORE_CLOCK_UNAVAILABLE, RECEIPT_AHEAD]
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// With a store clock anywhere from ten minutes behind the trusted time to ten ahead, no stored
+    /// `knowledge_at` runs past the earlier of the two by more than the lead and the skew.
+    #[test]
+    fn no_item_is_known_past_the_store_s_clock_and_the_lead(
+        steps in prop::collection::vec((0i64..120, -300i64..600, -600i64..600), 1..30),
+    ) {
+        let pages: Vec<Vec<u8>> = (0..steps.len())
+            .map(|n| page(&[item(41000300 + n as u64, "2026-10-26T10:00:00Z", "2026-10-26T10:00:00Z", &["SPY"])], None))
+            .collect();
+        let (journal, _, mut reader) = ready(&pages);
+        let mut trusted = t0();
+        for (forward, offset, store) in steps {
+            trusted = plus(trusted, forward);
+            let store_now = plus(trusted, store);
+            journal.store_clock.set(Some(Some(store_now)));
+            let clock = Clock { now: plus(trusted, offset), trusted };
+            block_on(reader.step(clock));
+            let earlier = Clock::agreed(trusted.min(store_now));
+            prop_assert_eq!(breach(&journal, earlier), None);
+        }
+    }
 }

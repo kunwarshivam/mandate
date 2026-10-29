@@ -61,6 +61,10 @@ pub const RECEIPT_LEAD_S: i64 = 60;
 /// The alert a reader raises once an episode of receipts past [`RECEIPT_LEAD_S`] begins.
 pub const RECEIPT_AHEAD: &str = "receipt_ahead";
 
+/// The alert a reader raises once an episode of rounds held because the store's clock could not
+/// be read begins (DEC-2292).
+pub const STORE_CLOCK_UNAVAILABLE: &str = "store_clock_unavailable";
+
 /// A step's two readings of the time (DEC-2289): `now`, the host clock, which stamps a receipt,
 /// and `trusted`, what the caller holds to be the time without that clock's word alone. The binary
 /// takes the host clock at start plus a monotonic clock's elapsed time since.
@@ -145,6 +149,8 @@ pub struct Counts {
     /// Rounds refused because their receipt ran more than [`RECEIPT_LEAD_S`] ahead of the trusted
     /// time (DEC-2289).
     pub receipt_ahead: u64,
+    /// Rounds held because the store's clock could not be read (DEC-2292).
+    pub store_clock_unavailable: u64,
 }
 
 /// One workspace's news reader.
