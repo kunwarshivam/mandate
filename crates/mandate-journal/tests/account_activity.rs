@@ -107,7 +107,6 @@ const FLATTEN_COVERED: &str = "abandoned_flatten_covered";
 /// abandoned `flatten_covered`. Before it the journal refuses the reason as `non_canonical`, so the
 /// batch that abandons the remainder never commits.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_flattens_remainder_is_abandoned_flatten_covered() {
     let section = section();
     let case = list(&section, "valid_drafts")

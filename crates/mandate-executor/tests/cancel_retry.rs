@@ -517,7 +517,6 @@ fn a_protective_cancel_is_never_retried_by_this_rule() {
 /// once, beside the sell in the other instrument, and nothing is denied. The opening is then found
 /// cancelled with nothing bought, so its remainder finds nothing more to sell.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unknown_opening_holds_no_flatten_and_leaves_its_remainder_nothing_more() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, FRAC]);

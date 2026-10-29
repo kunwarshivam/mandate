@@ -280,6 +280,9 @@ pub(crate) struct Proposal<'s> {
     pub(crate) tif: TimeInForce,
     /// Whether the order is a kill switch's own flatten (§5.5), which the agent's mode never holds.
     pub(crate) flatten: bool,
+    /// Whether the order is a kill switch flatten's certain part, which no `Unknown` order holds
+    /// (§5.3 rule 9, DEC-2857 item 3).
+    pub(crate) certain: bool,
     /// The bid the owner confirmed for an owner's exit, which lets it go outside the regular
     /// session (§5.5, DEC-2040 item 3); it overrides the snapshot's.
     pub(crate) owner_confirmed_bid: Option<Price>,
@@ -314,9 +317,10 @@ pub(crate) fn account_stream_checks(
 
     record("account_state", account_failure(state.account_state, adds));
     record("agent_mode", mode_failure(state, proposal, adds));
-    let unknown = state.orders.values().any(|order| {
-        order.state == OrderState::Unknown && &order.instrument == proposal.instrument
-    });
+    let unknown = !proposal.certain
+        && state.orders.values().any(|order| {
+            order.state == OrderState::Unknown && &order.instrument == proposal.instrument
+        });
     record(
         "unknown_order_in_flight",
         unknown.then_some(("unknown_order_in_flight", !adds)),
@@ -1006,6 +1010,7 @@ mod attribution_tests {
                     market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
+                    certain: false,
                     owner_confirmed_bid: None,
                 },
                 &ports,
@@ -1152,6 +1157,7 @@ mod remainder_tests {
                 market: false,
                 tif: crate::types::TimeInForce::Day,
                 flatten: false,
+                certain: false,
                 owner_confirmed_bid: None,
             },
             &ports,
@@ -1399,6 +1405,7 @@ mod sell_authority_tests {
                 market: false,
                 tif: crate::types::TimeInForce::Day,
                 flatten: false,
+                certain: false,
                 owner_confirmed_bid: None,
             },
             &ports,
@@ -1648,6 +1655,7 @@ mod sell_authority_tests {
                 market: false,
                 tif: crate::types::TimeInForce::Day,
                 flatten: false,
+                certain: false,
                 owner_confirmed_bid: None,
             },
             &ports,

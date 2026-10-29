@@ -124,7 +124,6 @@ fn remainder(case: &Value) -> bool {
 /// record version, as the first, a middle and the last ordinal. Before it the journal refuses the
 /// remainder's `IntentReceived` as `non_canonical`, so the batch that raises it never commits.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_flattens_remainder_parses_on_every_record_version() {
     let section = section();
     let cases: Vec<&Value> = list(&section, "valid_drafts")

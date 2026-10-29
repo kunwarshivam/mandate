@@ -1672,6 +1672,7 @@ static ORDER_ABANDONED: Ty = Ty::Record(&[
             "gate_recheck",
             "released_to_owner",
             "unprotected_interval_limit",
+            "flatten_covered",
         ]),
     ),
     ("risk_clock", Ty::RiskClock),

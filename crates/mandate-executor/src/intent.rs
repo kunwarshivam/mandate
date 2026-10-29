@@ -18,8 +18,8 @@ use crate::ids::{ClientOrderId, IntentId};
 use crate::kill::{confirmed_bid, flatten_room, is_flatten};
 use crate::payload::{int, text};
 use crate::protection::{
-    ExitPrice, alone, awaits_cancel, begin_exit, changed, crypto_add, exit_limit, fallback,
-    passive_exit, reference_price, reprotect_unpriced, rests, whole_shares,
+    ExitPrice, alone, begin_exit, changed, crypto_add, exit_limit, fallback, passive_exit,
+    reference_price, reprotect_unpriced, rests, whole_shares,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
@@ -281,7 +281,7 @@ fn decide(
             agent: &agent,
             instrument,
             side: *side,
-            qty: *qty,
+            qty: flatten_room(&batch.view, intent, *qty)?,
             purpose: *purpose,
             protection: if fractional(batch, instrument, *qty)? {
                 None
@@ -292,6 +292,7 @@ fn decide(
             market: limit.is_none(),
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
+            certain: crate::kill::is_certain(&batch.view, intent),
             owner_confirmed_bid: confirmed_bid(&batch.view, intent, batch.at()),
         },
         pass,
@@ -518,13 +519,20 @@ fn submit(
     else {
         return Ok(());
     };
-    if awaits_cancel(&batch.view, &agent, &instrument, purpose)
+    if crate::protection::exit_awaits(&batch.view, intent, &agent, &instrument, purpose)
         || passive_exit(batch, intent, &instrument, qty, limit)?
     {
         return Ok(());
     }
     let room = flatten_room(&batch.view, intent, qty)?;
     if room == Qty::ZERO {
+        if crate::kill::capped_waits(&batch.view, intent)? {
+            return Ok(());
+        }
+        if crate::kill::is_remainder(&batch.view, intent) {
+            abandon_record(batch, intent, "flatten_covered")?;
+            return Ok(());
+        }
         let abandoned = abandon_record(batch, intent, "released_to_owner")?;
         batch.notify(abandoned, OwnerAlertKind::ExitStalled);
         return Ok(());

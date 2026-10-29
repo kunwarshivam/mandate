@@ -195,7 +195,8 @@ pub(crate) fn is_ulid(s: &str) -> bool {
 }
 
 /// §9.1's `intent`: a ULID, `w-` and a ULID (the triggered-stop watchdog's exit), or `k-`, a ULID,
-/// `-` and an ordinal from 0 to 999 written with no leading zero (a kill switch's flatten).
+/// `-` and an ordinal from 0 to 999 written with no leading zero (a kill switch's flatten),
+/// optionally followed by `r` (that flatten's remainder, DEC-2857).
 pub(crate) fn is_intent(s: &str) -> bool {
     if is_ulid(s) {
         return true;
@@ -206,6 +207,7 @@ pub(crate) fn is_intent(s: &str) -> bool {
     let Some((switch, n)) = s.strip_prefix("k-").and_then(|rest| rest.split_once('-')) else {
         return false;
     };
+    let n = n.strip_suffix('r').unwrap_or(n);
     let ordinal = !n.is_empty()
         && n.len() <= 3
         && n.bytes().all(|b| b.is_ascii_digit())

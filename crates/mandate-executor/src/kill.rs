@@ -544,7 +544,10 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// After every step: an order the switch reaches that the broker acknowledged since is cancelled,
 /// and each close not yet raised is raised as the executor's own flatten intent,
 /// `k-<switch>-<n>` (DEC-485 item 2), once nothing the switch reaches is live in the instrument
-/// any more, the session admits the sell, the agent holds lots there, and a limit can be named.
+/// any more but in `Unknown`, the session admits the sell, the agent holds lots there, and a limit
+/// can be named. With an `Unknown` order in the instrument it never waits for it: the close goes
+/// in two parts, the certain one where [`flatten_cap`] leaves anything to sell and the remainder
+/// `k-<switch>-<n>r` that §5.3 rule 9 holds (DEC-2857 items 3 and 4).
 /// One that waits only for a limit is journaled `exit_unpriced` and alerted, once per switch and
 /// instrument (DEC-2361), and so is one whose intent cannot be journaled yet because its agent's
 /// mandate version or its deployment's references do not read (DEC-2846): the journal takes no
@@ -571,7 +574,8 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 &order.instrument == instrument
                     && (order.agent.as_ref() == Some(&switch.agent)
                         || reached(&batch.view, order, &switch.agent, &switch.instruments))
-                    && (live(order) || unplaced(&batch.view, order))
+                    && ((live(order) && order.state != OrderState::Unknown)
+                        || unplaced(&batch.view, order))
             }) || batch.view.intents.iter().any(|(intent, record)| {
                 record.outcome == IntentOutcome::Received
                     && is_flatten(&batch.view, intent)
@@ -628,26 +632,116 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 batch.notify(alerted, OwnerAlertKind::ExitStalled);
             }
             let tif = Some(order_tif(batch, instrument));
-            received(
-                batch,
-                IntentHandoff {
-                    intent_id: IntentId(EventId(format!("{FLATTEN}{}-{ordinal}", id.0))),
-                    agent: switch.agent.clone(),
-                    tif,
-                    body: IntentBody::Order {
-                        instrument: instrument.clone(),
-                        side: Side::Sell,
-                        qty,
-                        limit: Some(limit),
-                        purpose: switch.purpose,
-                        protection: None,
-                    },
-                    confirmation: None,
-                },
+            let in_doubt =
+                batch.view.orders.values().any(|order| {
+                    &order.instrument == instrument && order.state == OrderState::Unknown
+                });
+            let certain = flatten_cap(
+                &batch.view,
+                &switch.agent,
+                instrument,
+                &switch.instruments,
+                None,
             )?;
+            let mut parts = Vec::new();
+            if !in_doubt || certain > Qty::ZERO {
+                parts.push((format!("{FLATTEN}{}-{ordinal}", id.0), qty));
+            }
+            if in_doubt {
+                let buying = in_doubt_buys(&batch.view, &switch.agent, instrument)?;
+                parts.push((
+                    format!("{FLATTEN}{}-{ordinal}{REMAINDER}", id.0),
+                    qty.checked_add(buying)?,
+                ));
+            }
+            for (intent, qty) in parts {
+                received(
+                    batch,
+                    IntentHandoff {
+                        intent_id: IntentId(EventId(intent)),
+                        agent: switch.agent.clone(),
+                        tif,
+                        body: IntentBody::Order {
+                            instrument: instrument.clone(),
+                            side: Side::Sell,
+                            qty,
+                            limit: Some(limit),
+                            purpose: switch.purpose,
+                            protection: None,
+                        },
+                        confirmation: None,
+                    },
+                )?;
+            }
         }
     }
     Ok(())
+}
+
+/// The suffix that names a close's remainder, `k-<switch>-<n>r` (DEC-2857 items 4 and 7).
+const REMAINDER: char = 'r';
+
+/// What the agent's own `Unknown` buys in `instrument` could still fill: the most its remainder
+/// may find to sell beyond the sub-ledger once they resolve (DEC-2857 item 4).
+fn in_doubt_buys(
+    view: &ExecutorState,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    Ok(view
+        .orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && order.side == Side::Buy
+                && order.state == OrderState::Unknown
+                && order.agent.as_ref() == Some(agent)
+        })
+        .try_fold(Qty::ZERO, |total, order| {
+            total.checked_add(order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO))
+        })?)
+}
+
+/// DEC-2857 item 3: the most a send of a switch's flatten may sell, so that whatever each
+/// `Unknown` order turns out to have done the agent's sub-ledger and the position stay at or above
+/// zero. The lower of the sub-ledger less every live non-protective sell the switch reaches, and
+/// the long position less every live non-protective sell in the instrument and every `Unknown`
+/// protective one; neither counts `own`'s orders.
+fn flatten_cap(
+    view: &ExecutorState,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+    closing: &[InstrumentId],
+    own: Option<&IntentId>,
+) -> Result<Qty, ExecutorError> {
+    let selling = view.orders.values().filter(|order| {
+        &order.instrument == instrument
+            && order.side == Side::Sell
+            && !order.state.is_terminal()
+            && order.state != OrderState::Intent
+            && own.is_none_or(|intent| order.intent_id.as_ref() != Some(intent))
+    });
+    let mut reaching = Qty::ZERO;
+    let mut anyone = Qty::ZERO;
+    for order in selling {
+        let left = order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO);
+        let protective = order.purpose == Purpose::Protective;
+        if !protective
+            && (order.agent.as_ref() == Some(agent) || reached(view, order, agent, closing))
+        {
+            reaching = reaching.checked_add(left)?;
+        }
+        if !protective || order.state == OrderState::Unknown {
+            anyone = anyone.checked_add(left)?;
+        }
+    }
+    let held = sub_ledger(view, agent, instrument)?
+        .checked_sub(reaching)
+        .unwrap_or(Qty::ZERO);
+    let long = crate::protection::long(view, instrument)?
+        .checked_sub(anyone)
+        .unwrap_or(Qty::ZERO);
+    Ok(held.min(long))
 }
 
 /// §5.5: exactly the agent's sub-ledger quantity, min(Lᵢ, N) on DEC-2849's holders ([`holders`]):
@@ -662,10 +756,40 @@ pub(crate) fn sub_ledger(
     holders::sub_ledger(view, agent, instrument)
 }
 
-/// The switch and close a flatten intent's id names, `k-<switch>-<n>`, or `None` for any other.
+/// The switch and close a flatten intent's id names, `k-<switch>-<n>` or its remainder
+/// `k-<switch>-<n>r` (DEC-2857 item 7), or `None` for any other.
 pub(crate) fn close_named(intent: &IntentId) -> Option<(EventId, usize)> {
     let (switch, ordinal) = intent.0.0.strip_prefix(FLATTEN)?.rsplit_once('-')?;
+    let ordinal = ordinal.strip_suffix(REMAINDER).unwrap_or(ordinal);
     Some((EventId(switch.to_owned()), ordinal.parse().ok()?))
+}
+
+/// Whether `intent` is a switch's flatten remainder, `k-<switch>-<n>r`, which an `Unknown` order
+/// in its instrument still holds (DEC-2857 items 1 and 4).
+pub(crate) fn is_remainder(view: &ExecutorState, intent: &IntentId) -> bool {
+    is_flatten(view, intent) && intent.0.0.ends_with(REMAINDER)
+}
+
+/// Whether `intent` is a switch flatten's certain part, which no `Unknown` order holds (DEC-2857
+/// items 1 and 3).
+pub(crate) fn is_certain(view: &ExecutorState, intent: &IntentId) -> bool {
+    is_flatten(view, intent) && !intent.0.0.ends_with(REMAINDER)
+}
+
+/// DEC-2857 item 5: whether a switch's flatten capped to nothing waits, because other sells hold
+/// what the agent still has, rather than ending.
+pub(crate) fn capped_waits(view: &ExecutorState, intent: &IntentId) -> Result<bool, ExecutorError> {
+    let Some(switch) = switch_of(view, intent) else {
+        return Ok(false);
+    };
+    let Some(IntentBody::Order {
+        instrument, qty, ..
+    }) = view.bodies.get(intent)
+    else {
+        return Ok(false);
+    };
+    Ok(flatten_room(view, intent, *qty)? == Qty::ZERO
+        && sub_ledger(view, &switch.agent, instrument)? > Qty::ZERO)
 }
 
 /// Whether `switch`'s close `ordinal` is `agent`'s sell of `instrument`: what makes an intent
@@ -691,9 +815,10 @@ fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switc
     closes_with(switch, ordinal, &record.agent, instrument).then_some(switch)
 }
 
-/// DEC-2360 item 1: what a send of `intent` may sell at most, `qty` for any exit but a switch's
-/// own flatten, and for one at most the agent's sub-ledger in its instrument now, so a release
-/// written since the flatten was sized is taken off every send, the first and each rung.
+/// DEC-2360 item 1 and DEC-2857 item 3: what a send of `intent` may sell at most, `qty` for any exit
+/// but a switch's own flatten, and for one at most [`flatten_cap`] now, so a release written since
+/// the flatten was sized, and every sell an `Unknown` order could still make, is taken off every
+/// send, the first and each rung.
 pub(crate) fn flatten_room(
     view: &ExecutorState,
     intent: &IntentId,
@@ -705,7 +830,13 @@ pub(crate) fn flatten_room(
     let Some(IntentBody::Order { instrument, .. }) = view.bodies.get(intent) else {
         return Ok(qty);
     };
-    Ok(qty.min(sub_ledger(view, &switch.agent, instrument)?))
+    Ok(qty.min(flatten_cap(
+        view,
+        &switch.agent,
+        instrument,
+        &switch.instruments,
+        Some(intent),
+    )?))
 }
 
 /// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for an

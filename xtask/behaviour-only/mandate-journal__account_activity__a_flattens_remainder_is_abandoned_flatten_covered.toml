@@ -1,8 +1,0 @@
-file = "crates/mandate-journal/tests/account_activity.rs"
-test = "a_flattens_remainder_is_abandoned_flatten_covered"
-reason = """
-Journal spec v0.114 (DEC-2857) adds `OrderAbandoned`'s reason `flatten_covered`. The journal's
-closed reason list has no stub: until E7-4's implementation adds the value, it refuses it
-`non_canonical`, and that refusal is the failure. The implementation deletes this file with the
-test's `#[ignore]` line.
-"""

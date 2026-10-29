@@ -305,7 +305,6 @@ fn switched_beside_a_sell_of_four(shell: &mut Shell, ports: &Ports<'_>) -> Vec<c
 /// `rung_short` with six sent, and raises its remainder `k-…-0r` of ten, which the gate holds
 /// `unknown_order_in_flight`.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_sell_in_doubt_leaves_the_certain_six_sold_at_once_and_the_remainder_held() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -356,7 +355,6 @@ fn a_sell_in_doubt_leaves_the_certain_six_sold_at_once_and_the_remainder_held() 
 /// remainder is released with no new approval and sells the four it left, beside the certain six
 /// still resting: ten in all, never more.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_remainder_sells_what_a_cancelled_sell_in_doubt_left() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -387,7 +385,6 @@ fn the_remainder_sells_what_a_cancelled_sell_in_doubt_left() {
 /// agent's is left, so the remainder is abandoned `flatten_covered`, never sent, and the owner is
 /// not alerted about it.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_remainder_left_nothing_is_abandoned_flatten_covered_without_an_alert() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -427,7 +424,6 @@ fn a_remainder_left_nothing_is_abandoned_flatten_covered_without_an_alert() {
 /// held at once. The remainder, ten plus the five the buy could fill, is held until the buy is
 /// found filled, and then sells those five.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_buy_in_doubt_sells_the_ten_held_at_once_then_the_five_it_bought() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -460,7 +456,6 @@ fn a_buy_in_doubt_sells_the_ten_held_at_once_then_the_five_it_bought() {
 /// DEC-2857 items 2 and 3: the OCO's own answer was lost, and a stop that may have fired could
 /// sell all ten, so nothing is certainly held. Only the remainder is raised, and the gate holds it.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_protective_order_in_doubt_over_the_whole_position_raises_only_the_remainder() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -489,7 +484,6 @@ fn a_protective_order_in_doubt_over_the_whole_position_raises_only_the_remainder
 /// DEC-2857 item 6: the remainder still held past `max_intent_age_s` (120 s) is journaled
 /// `held_long` once and alerted once, `exit_stalled`, the alert carrying no quantity or price.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_remainder_held_past_the_intent_age_is_alerted_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -799,7 +793,6 @@ fn doubt() -> impl Strategy<Value = Doubt> {
 /// order), the flatten never leaves the position able to go short, sells exactly what was
 /// certainly held before anything resolved, and ends flat.
 #[test]
-#[ignore = "pending E7-4"]
 fn across_random_resolutions_the_flatten_never_goes_short_and_ends_flat() {
     let mut runner = proptest::test_runner::TestRunner::new(proptest::test_runner::Config {
         cases: 48,

@@ -888,9 +888,16 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 /// rather than waiting on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
 /// The exits the gate holds are left out of that fit, as they are of `overtaken`'s, so the wait
 /// and the cancel always agree (DEC-425 item 1).
-fn protection_holds(state: &ExecutorState, instrument: &InstrumentId) -> bool {
+fn protection_holds(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+    counts: &dyn Fn(&ClientOrderId) -> bool,
+) -> bool {
     state.exiting.get(instrument).is_some_and(|sequence| {
-        rests(state, instrument)
+        state
+            .protection
+            .get(instrument)
+            .is_some_and(|protection| protection.resting.iter().any(counts))
             && (!handed(state, sequence) || !matches!(fits(state, instrument), Ok(true)))
     })
 }
@@ -908,6 +915,39 @@ pub(crate) fn awaits_cancel(
     instrument: &InstrumentId,
     purpose: Purpose,
 ) -> bool {
+    waits_on(state, agent, instrument, purpose, &|_| true)
+}
+
+/// [`awaits_cancel`] for `intent`. A switch flatten's certain part waits on no `Unknown` order,
+/// neither an opening of its agent's nor a protective order in §5.4's sequence: what either could
+/// still sell is off its send already (DEC-2857 item 3).
+pub(crate) fn exit_awaits(
+    state: &ExecutorState,
+    intent: &IntentId,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+) -> bool {
+    if !crate::kill::is_certain(state, intent) {
+        return awaits_cancel(state, agent, instrument, purpose);
+    }
+    let known = |id: &ClientOrderId| {
+        state
+            .orders
+            .get(id)
+            .is_none_or(|order| order.state != OrderState::Unknown)
+    };
+    waits_on(state, agent, instrument, purpose, &known)
+}
+
+/// The waits of [`awaits_cancel`], on the orders `counts` keeps.
+fn waits_on(
+    state: &ExecutorState,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+    counts: &dyn Fn(&ClientOrderId) -> bool,
+) -> bool {
     let released = |id: &ClientOrderId| {
         state
             .details
@@ -915,8 +955,9 @@ pub(crate) fn awaits_cancel(
             .is_some_and(|detail| detail.cancel_overdue)
     };
     exits(purpose)
-        && (protection_holds(state, instrument)
-            || openings(state, Some(agent), Some(instrument), false).any(|id| !released(&id)))
+        && (protection_holds(state, instrument, counts)
+            || openings(state, Some(agent), Some(instrument), false)
+                .any(|id| !released(&id) && counts(&id)))
 }
 
 /// Rule 5's bound, on a tick: once an exit has waited `unknown_absent_window_s` from the moment
@@ -1402,7 +1443,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, sequence)| (instrument.clone(), sequence.clone()))
         .collect();
     for (instrument, sequence) in sequences {
-        if protection_holds(&batch.view, &instrument) {
+        if protection_holds(&batch.view, &instrument, &|_| true) {
             if !handed(&batch.view, &sequence) {
                 cancel_resting(batch, &instrument)?;
             }
@@ -2236,7 +2277,14 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
     for exit in waiting_exits(&batch.view) {
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
         overtaken(batch, &exit.instrument)?;
-        if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
+        if !exit_awaits(
+            &batch.view,
+            &exit.intent,
+            &exit.agent,
+            &exit.instrument,
+            exit.purpose,
+        ) && !crate::kill::capped_waits(&batch.view, &exit.intent)?
+        {
             crate::intent::holds_alone(gate_and_submit(batch, &exit.intent))?;
         }
     }
@@ -16964,6 +17012,7 @@ mod remainder_pins {
                     market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
+                    certain: false,
                     owner_confirmed_bid: None,
                 },
                 ports,

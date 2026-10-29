@@ -1,8 +1,0 @@
-file = "crates/mandate-executor/tests/cancel_retry.rs"
-test = "an_unknown_opening_holds_no_flatten_and_leaves_its_remainder_nothing_more"
-reason = """
-DEC-2857 (E7-4): an agent-scoped kill switch's flatten never waits on an `Unknown` order. No stub
-stands in the way: today the switch raises no close in the instrument whose opening is `Unknown`,
-so only the other instrument sells, and that is the failure. The implementation deletes this file
-with the test's `#[ignore]` line.
-"""
