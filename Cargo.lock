@@ -2332,6 +2332,7 @@ dependencies = [
 name = "mandate-news-reader"
 version = "0.0.0"
 dependencies = [
+ "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-connections",
  "mandate-gate-context",
@@ -2340,11 +2341,13 @@ dependencies = [
  "mandate-research",
  "mandate-research-run",
  "mandate-sources",
+ "mandate-sources-http",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
  "proptest",
  "secrecy",
+ "tokio",
 ]
 
 [[package]]
