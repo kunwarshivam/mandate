@@ -292,9 +292,13 @@ pub(crate) fn leg_excess(
 /// DEC-2849 item 8, §5.4 under shared positions: the resting protective orders an exit of `qty` by
 /// `agent` cancels before it sells. They are the agent's own legs and every leg no holder owns
 /// (unattributed, or `*`). Another holder's legs keep resting while they fit beside the exit: what
-/// they have left to sell (an OCO's two legs once, as the larger), every working sell and `qty`
-/// together within N. Otherwise they are cancelled too, so a rule-13 exit is never cut by another
-/// holder's legs (I4) and the sequence re-places them after it. An exit of no agent (`*`) cancels
+/// they have left to sell (an OCO's two legs once, as the larger), every sell already sent and
+/// `qty` together within N. Otherwise they are cancelled too, so a rule-13 exit is never cut by
+/// another holder's legs (I4). A holder whose legs would cover more than its coverage left after
+/// the exit (Pᵢ with `agent`'s lots and N each less `qty`) has its legs cancelled too, so the
+/// sequence resizes them to that coverage (I4's "resizes them to the coverage left after it") and
+/// the exiting agent's re-placement is never starved of room. A holder's own working exits count
+/// with its legs there, as they do in its gap. An exit of no agent (`*`) cancels
 /// every leg.
 #[cfg_attr(
     not(test),
@@ -765,9 +769,11 @@ mod tests {
         }
 
         /// Item 8b's cancels for an exit of `q` by agent `a`, or by no agent for `None`: its own
-        /// live legs and every live leg of no holder; and every other holder's live legs as well
-        /// when what those have left (an OCO's pair once, as the larger), the working sells and
-        /// `q` pass the position. An exit of no agent cancels every live leg.
+        /// live legs and every live leg of no holder; every other holder's live legs as well when
+        /// what those have left (an OCO's pair once, as the larger), the working sells and `q`
+        /// pass the position; and a holder's live legs when they and its own live exits pass its
+        /// coverage after the exit ([`Oracle::coverage_after`]). An exit of no agent cancels every
+        /// live leg.
         fn exit_cancels(&self, a: Option<u8>, q: i64) -> BTreeSet<ClientOrderId> {
             let live: Vec<&Resting> = self
                 .resting
@@ -780,23 +786,68 @@ mod tests {
             let (others, mine): (Vec<&Resting>, Vec<&Resting>) = live
                 .into_iter()
                 .partition(|rest| rest.agent.is_some_and(|b| b != a));
-            let mut by_order: BTreeMap<String, i64> = BTreeMap::new();
+            let mut by_order: BTreeMap<(u8, String), i64> = BTreeMap::new();
             for rest in &others {
                 let key = rest
                     .pair
                     .clone()
                     .unwrap_or_else(|| rest.id.as_str().to_owned());
-                let counted = by_order.entry(key).or_insert(0);
+                let holder = rest.agent.unwrap_or(a);
+                let counted = by_order.entry((holder, key)).or_insert(0);
                 *counted = (*counted).max(rest.left());
             }
-            let kept = by_order
+            let mut held: BTreeMap<u8, i64> = BTreeMap::new();
+            for ((holder, _), left) in &by_order {
+                let sum = held.entry(*holder).or_insert(0);
+                *sum = sum.saturating_add(*left);
+            }
+            let kept = held
                 .values()
                 .fold(0_i64, |sum, left| sum.saturating_add(*left));
             let fits = kept.saturating_add(self.working).saturating_add(q) <= self.position();
+            let after = self.coverage_after(a, q);
+            let exits = self.exits();
+            let over = |holder: u8| {
+                held.get(&holder)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(exits.get(&holder).copied().unwrap_or(0))
+                    > after.get(&holder).copied().unwrap_or(0)
+            };
             mine.into_iter()
-                .chain(others.into_iter().filter(|_| !fits))
+                .chain(
+                    others
+                        .into_iter()
+                        .filter(|rest| !fits || rest.agent.is_some_and(over)),
+                )
                 .map(|rest| rest.id.clone())
                 .collect()
+        }
+
+        /// Each holder's coverage once agent `a` has sold `q`: its lots and the position each less
+        /// `q`, the deficit charged again largest lots first, ties by agent id.
+        fn coverage_after(&self, a: u8, q: i64) -> BTreeMap<u8, i64> {
+            let mut lots: BTreeMap<u8, i64> = (0..AGENTS)
+                .map(|holder| (holder, self.lots(holder)))
+                .filter(|(_, lots)| *lots > 0)
+                .collect();
+            if let Some(mine) = lots.get_mut(&a) {
+                *mine = mine.saturating_sub(q).max(0);
+            }
+            let position = self.position().saturating_sub(q);
+            let total = lots
+                .values()
+                .fold(0_i64, |sum, lots| sum.saturating_add(*lots));
+            let mut left = total.saturating_sub(position).max(0);
+            let mut order: Vec<(u8, i64)> = lots.into_iter().filter(|(_, l)| *l > 0).collect();
+            order.sort_by(|(x, l), (y, m)| m.cmp(l).then(x.cmp(y)));
+            let mut covered = BTreeMap::new();
+            for (holder, lots) in order {
+                let charged = lots.min(left);
+                covered.insert(holder, lots.saturating_sub(charged));
+                left = left.saturating_sub(charged);
+            }
+            covered
         }
 
         /// Item 8's gaps: each holder's Pᵢ less its own legs and exits, where that is above zero.
@@ -1703,6 +1754,13 @@ mod tests {
     /// sold three outside Mandate, agent 1's five no longer fit beside the ten within N = 12, so
     /// they go as well; so do they beside agent 1's own working exit of two. An exit of no agent
     /// cancels every leg. An OCO's two legs count once in what agent 1 keeps.
+    ///
+    /// The acceptance fuzz's case: agent 0's six and agent 1's five with the owner's sale of one
+    /// are covered five and five. Agent 0's exit of two fits, but after it the deficit falls on
+    /// agent 1, whose coverage is four: its leg of five is cancelled to be resized, so it never
+    /// starves agent 0's re-placement (I4's "resizes them to the coverage left after it"). A
+    /// holder's own working exit counts with its legs there: agent 0's leg of one beside its own
+    /// exit of one is cancelled for agent 1's exit, though it fits, its coverage after being one.
     #[test]
     #[ignore = "pending E7-4"]
     fn an_exit_cancels_its_own_legs_and_keeps_another_holders_that_fit() -> Result<(), ExecutorError>
@@ -1742,6 +1800,31 @@ mod tests {
                 Some(0),
                 10,
                 vec![0],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 6),
+                    Event::Buy(1, 0, 5),
+                    Event::OwnerSell(0, 1),
+                    Event::Protect(0, 0, 5),
+                    Event::Protect(1, 0, 5),
+                ],
+                Some(0),
+                2,
+                vec![0, 1],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 1),
+                    Event::Buy(1, 0, 5),
+                    Event::OwnerBuy(0, 4),
+                    Event::Protect(0, 0, 1),
+                    Event::Protect(1, 0, 5),
+                    Event::Exit(0, 0, 1, 0),
+                ],
+                Some(1),
+                1,
+                vec![0, 1],
             ),
         ];
         for (events, exiting, qty, cancelled) in cases {
