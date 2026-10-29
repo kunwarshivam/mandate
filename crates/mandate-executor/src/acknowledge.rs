@@ -628,4 +628,188 @@ mod tests {
         assert_eq!(request_subject(&not_text), None);
         Ok(())
     }
+
+    mod differential {
+        use std::collections::BTreeSet;
+
+        use mandate_canon::{Digest, Value, to_canonical};
+        use mandate_journal::StoredEvent;
+        use mandate_journal::holds::{Holder, Reason, standing};
+        use proptest::prelude::*;
+
+        use super::super::{fold, named_stands};
+        use super::state;
+        use crate::payload::{object, text};
+        use crate::types::{AcknowledgmentHandoff, EventId, FoldedEvent, RiskClock, Seq};
+
+        const AGENTS: [&str; 2] = ["agent_a", "agent_b"];
+        const LIMITS: [&str; 2] = ["max_daily_loss", "profit_stop"];
+        const MODE_AGENTS: [&str; 3] = ["agent_a", "agent_b", "*"];
+        const RESTRICTIONS: [&str; 3] =
+            ["reconciliation:cash", "reconciliation:SPY", "kill_switch"];
+        const MODES: [&str; 4] = ["exits_only", "paused", "normal", "stopped"];
+
+        fn pick<const N: usize>(names: &[&'static str; N], at: usize) -> &'static str {
+            names.get(at).copied().unwrap_or_default()
+        }
+
+        #[derive(Debug, Clone)]
+        enum Op {
+            Trigger(usize, usize),
+            Lift(usize, usize),
+            Mode(usize, usize, usize, bool),
+            Copy(usize, usize),
+            Refuse(bool, usize),
+        }
+
+        fn op() -> impl Strategy<Value = Op> {
+            prop_oneof![
+                (0..2usize, 0..2usize).prop_map(|(a, l)| Op::Trigger(a, l)),
+                (0..2usize, 0..2usize).prop_map(|(a, l)| Op::Lift(a, l)),
+                (0..3usize, 0..3usize, 0..4usize, any::<bool>())
+                    .prop_map(|(a, r, t, o)| Op::Mode(a, r, t, o)),
+                (any::<usize>(), 0..3usize).prop_map(|(e, c)| Op::Copy(e, c)),
+                (any::<bool>(), 0..3usize).prop_map(|(ack, c)| Op::Refuse(ack, c)),
+            ]
+        }
+
+        /// One generated record, as the executor folds it and as the journal stores it.
+        fn record(
+            id: &str,
+            kind: &str,
+            causation: Option<&str>,
+            pairs: Vec<(&str, Value)>,
+        ) -> (FoldedEvent, StoredEvent) {
+            let payload = object(pairs).unwrap_or(Value::Null);
+            let body = to_canonical(
+                &object(vec![
+                    ("causation_id", causation.map_or(Value::Null, text)),
+                    ("event_id", text(id)),
+                    ("payload", payload.clone()),
+                ])
+                .unwrap_or(Value::Null),
+            );
+            let folded = FoldedEvent {
+                stream: "acct:ws1:acct-1".to_owned(),
+                seq: Seq(1),
+                event_id: EventId(id.to_owned()),
+                event_type: kind.to_owned(),
+                causation_id: causation.map(|c| EventId(c.to_owned())),
+                payload,
+            };
+            let stored = StoredEvent {
+                stream_id: "acct:ws1:acct-1".to_owned(),
+                seq: 1,
+                event_id: id.to_owned(),
+                event_type: kind.to_owned(),
+                schema_version: 1,
+                environment: "paper".to_owned(),
+                recorded_at: "2026-10-26T12:00:00.000000000Z".to_owned(),
+                prev_hash: Digest::ZERO,
+                hash: Digest::of(&body),
+                body,
+            };
+            (folded, stored)
+        }
+
+        fn handoff(event: &str, subject: &str, agent: &str) -> AcknowledgmentHandoff {
+            AcknowledgmentHandoff {
+                original: FoldedEvent {
+                    stream: "ctl:ws1".to_owned(),
+                    seq: Seq(1),
+                    event_id: EventId("probe".to_owned()),
+                    event_type: "OwnerAcknowledged".to_owned(),
+                    causation_id: None,
+                    payload: object(vec![
+                        ("agent", text(agent)),
+                        ("event", text(event)),
+                        ("subject", text(subject)),
+                    ])
+                    .unwrap_or(Value::Null),
+                },
+                schema_version: 2,
+                processed_at: RiskClock::from_secs(0),
+                spent: BTreeSet::new(),
+                request_spent: None,
+                independent_overlay: false,
+                methods: BTreeSet::new(),
+            }
+        }
+
+        proptest! {
+            /// E7-4b, DEC-2144: over any account stream of triggers, lifts, mode records,
+            /// acknowledgment copies and refusals, `mandate_journal::holds::standing` lists a
+            /// limit's trigger or a reconciliation hold exactly when the executor's §9.28 checks 1
+            /// and 2 pass for an acknowledgment naming it, so every reader lists what the executor
+            /// would lift.
+            #[test]
+            fn the_shared_fold_lists_exactly_what_the_executor_s_checks_let_stand(
+                ops in prop::collection::vec(op(), 1..32)
+            ) {
+                let mut executor = state();
+                let mut stored = Vec::new();
+                let mut triggers: Vec<(String, &str)> = Vec::new();
+                let mut ids: Vec<String> = Vec::new();
+                for (i, op) in ops.iter().enumerate() {
+                    let id = format!("e{i}");
+                    let (folded, row) = match *op {
+                        Op::Trigger(a, l) | Op::Lift(a, l) => {
+                            let kind = if matches!(op, Op::Trigger(..)) {
+                                triggers.push((id.clone(), pick(&AGENTS, a)));
+                                "RiskLimitTriggered"
+                            } else {
+                                "RiskLimitLifted"
+                            };
+                            record(&id, kind, None, vec![
+                                ("agent_id", text(pick(&AGENTS, a))),
+                                ("limit", text(pick(&LIMITS, l))),
+                            ])
+                        }
+                        Op::Mode(a, r, t, originated) => record(&id, "AgentModeApplied", None, vec![
+                            ("agent", text(pick(&MODE_AGENTS, a))),
+                            ("originated", Value::Bool(originated)),
+                            ("restriction", text(pick(&RESTRICTIONS, r))),
+                            ("to", text(pick(&MODES, t))),
+                        ]),
+                        Op::Copy(named, c) => {
+                            let event = named.checked_rem(ids.len()).and_then(|at| ids.get(at)).cloned().unwrap_or_default();
+                            record(&id, "OwnerAcknowledged", Some(&format!("ctl{c}")), vec![
+                                ("event", text(&event)),
+                                ("request", Value::Null),
+                            ])
+                        }
+                        Op::Refuse(acknowledge, c) => record(
+                            &id,
+                            "OwnerCommandRefused",
+                            Some(&format!("ctl{c}")),
+                            vec![("command", text(if acknowledge { "acknowledge" } else { "resume" }))],
+                        ),
+                    };
+                    fold(&mut executor, &folded).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                    stored.push(row);
+                    ids.push(id);
+                }
+                let listed = standing(&stored).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                let held = &executor.acknowledgments;
+                for (id, _) in &triggers {
+                    for agent in AGENTS {
+                        let lifts = named_stands(held, &handoff(id, "limit", agent)).is_none();
+                        let lists = listed.iter().any(|h| {
+                            h.event == *id
+                                && matches!(h.reason, Reason::Limit(_))
+                                && h.holder == Holder::Agent(agent.to_owned())
+                        });
+                        prop_assert_eq!(lifts, lists, "the trigger {} acknowledged as {}", id, agent);
+                    }
+                }
+                for id in &ids {
+                    let lifts = named_stands(held, &handoff(id, "reconciliation", "agent_a")).is_none();
+                    let lists = listed
+                        .iter()
+                        .any(|h| h.event == *id && matches!(h.reason, Reason::Reconciliation { .. }));
+                    prop_assert_eq!(lifts, lists, "the hold {}", id);
+                }
+            }
+        }
+    }
 }
