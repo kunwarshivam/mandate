@@ -550,7 +550,6 @@ fn owners(qty: &str) -> OwnerRequest {
 /// DEC-2858: holding five, an owner's three at the 100 ask is $300, within every room, so it is
 /// the owner's three, an increase, with the mandate's execution and nothing scored or clipped.
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_request_is_the_builders_requested_buy_unscored() {
     let proposal = requested(&validated(), &request_builder(), &owners("3"))
         .unwrap()
@@ -569,7 +568,6 @@ fn an_owners_request_is_the_builders_requested_buy_unscored() {
 /// A request in another instrument than the builder's market, or an execution the mandate does
 /// not derive (no protection where the mandate requires it, or another asset class), is refused.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_the_builders_facts_do_not_describe_is_refused() {
     let mut elsewhere = owners("3");
     elsewhere.instrument = InstrumentId::new(OTHER).unwrap();
