@@ -738,6 +738,69 @@ fn a_run_past_its_daily_cap_spends_nothing_and_says_so() {
     );
 }
 
+/// Whether a message to `agt_a` under a `cap` set with the message's own key, after the turn
+/// records `spent`, each `(agent, cost, seconds before now, event type)`, is held by the cap.
+fn capped(cap: &str, spent: &[(&str, &str, i64, &str)]) -> bool {
+    let gateway = gateway_service(vec![turn(
+        &[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)],
+        None,
+    )]);
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    let body = format!(r#"{{"chat_model":"llm.chat_sonnet","daily_cap_usd":"{cap}"}}"#);
+    let (status, _) = put_settings(&f, &cookie, "agt_a", body.as_bytes(), KEY);
+    assert_eq!(status, 200);
+    let rows = spent
+        .iter()
+        .zip(3_u64..)
+        .map(|((agent, cost, ago, event_type), seq)| {
+            let mut row = row(
+                seq,
+                event_type,
+                &format!(r#"{{"agent_id":"{agent}","cost_usd":"{cost}"}}"#),
+            );
+            row.recorded_at = UtcNanos::from_parts(T0 - ago, 0)
+                .expect("a time")
+                .to_string();
+            row
+        })
+        .collect();
+    push(&f, &ctl(), rows);
+    assert_eq!(post_message(&f, &cookie, "anything new?").status, 202);
+    let thread = settled(&f, &cookie);
+    let said = texts(&thread);
+    assert!(
+        said.iter()
+            .any(|t| t.0 == "owner" && t.1 == "anything new?"),
+        "the message is its own record though it reuses the settings write's key: {said:?}"
+    );
+    said.last().is_some_and(|t| t.1.contains("spending cap"))
+}
+
+#[test]
+fn today_s_turns_of_the_agent_that_reach_its_cap_hold_its_next_run() {
+    assert!(capped(
+        "0.02",
+        &[
+            ("agt_a", "0.01", 0, "ChatTurnRecorded"),
+            ("agt_a", "0.01", 60, "ChatTurnRecorded"),
+        ]
+    ));
+}
+
+#[test]
+fn another_day_another_agent_or_another_record_does_not_count_toward_the_cap() {
+    assert!(!capped(
+        "0.02",
+        &[
+            ("agt_a", "0.01", 0, "ChatTurnRecorded"),
+            ("agt_a", "1.00", 86_400, "ChatTurnRecorded"),
+            ("agt_b", "1.00", 0, "ChatTurnRecorded"),
+            ("agt_a", "1.00", 0, "ChatToolResultsRecorded"),
+        ]
+    ));
+}
+
 const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 
 /// One watcher pass, on a blocking thread of a runtime of its own.
@@ -1271,7 +1334,7 @@ fn the_owner_s_stop_ends_the_run_before_its_next_call() {
         404,
         "only the run in flight stops"
     );
-    let stopped = stop(&run, "k1Z-9_gggggggggg");
+    let stopped = stop(&run, KEY);
     assert_eq!(
         stopped.status,
         202,
@@ -1282,7 +1345,10 @@ fn the_owner_s_stop_ends_the_run_before_its_next_call() {
     let body = settled(&f, &cookie);
     assert_eq!(texts(&body).last().map(|t| t.1.as_str()), Some("Stopped."));
     let rows = chat_rows(&f);
-    assert!(rows.iter().any(|r| r.event_type == "ChatRunStopRequested"));
+    assert!(
+        rows.iter().any(|r| r.event_type == "ChatRunStopRequested"),
+        "the Stop is its own record though it reuses the message's key"
+    );
     let reasons: Vec<String> = rows
         .iter()
         .filter(|r| r.event_type == "ChatRunEnded")

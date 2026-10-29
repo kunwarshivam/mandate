@@ -12,7 +12,6 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::http::StatusCode;
 use mandate_api::idempotency::IdempotencyKey;
 use mandate_canon::{Digest, Value, parse};
 use mandate_chat::engine::{arg_text, parse_document};
@@ -41,6 +40,9 @@ const THREAD_MESSAGES: usize = 30;
 
 /// The longest a tool result the model reads may be, in bytes; a longer one is cut.
 const RESULT_BYTES: usize = 48 * 1024;
+
+/// The most of an owner command's answer a tool reads back.
+const COMMAND_ANSWER_BYTES: usize = 65_536;
 
 /// How long a connection to the gateway service may take.
 const CONNECT: Duration = Duration::from_secs(5);
@@ -1141,7 +1143,10 @@ impl Tools<'_> {
         let status = response.status();
         let body = self
             .handle
-            .block_on(axum::body::to_bytes(response.into_body(), 64 * 1024))
+            .block_on(axum::body::to_bytes(
+                response.into_body(),
+                COMMAND_ANSWER_BYTES,
+            ))
             .unwrap_or_default();
         let answer = parse(&body).ok();
         if status.is_success() {
@@ -1165,7 +1170,7 @@ impl Tools<'_> {
             let code = answer
                 .as_ref()
                 .and_then(|a| a.get("code").and_then(Value::as_str).map(str::to_owned))
-                .unwrap_or_else(|| status_code(status));
+                .unwrap_or_else(|| "not_accepted".to_owned());
             refusal(&code)
         }
     }
@@ -1234,10 +1239,6 @@ fn arg_decimal(call: &ToolCall, name: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn status_code(status: StatusCode) -> String {
-    format!("http_{}", status.as_u16())
-}
-
 fn ok(members: Vec<(&str, Value)>) -> String {
     let mut all = vec![("ok", Value::Bool(true))];
     all.extend(members);
@@ -1264,10 +1265,7 @@ fn refusal_with(problems: Value) -> String {
 /// A result cut to [`RESULT_BYTES`] on a character boundary.
 fn cut(mut text: String) -> String {
     if text.len() > RESULT_BYTES {
-        let mut end = RESULT_BYTES;
-        while !text.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
+        let end = text.floor_char_boundary(RESULT_BYTES);
         text.truncate(end);
         text.push_str("…(cut)");
     }
@@ -1281,7 +1279,22 @@ mod pure {
     use mandate_canon::{Digest, Value, parse, to_canonical};
     use mandate_journal::StoredEvent;
 
-    use super::{THREAD_MESSAGES, Thread, micros, references, transcript};
+    use super::{RESULT_BYTES, THREAD_MESSAGES, Thread, cut, micros, references, transcript};
+
+    #[test]
+    fn a_result_up_to_the_limit_is_whole_and_a_longer_one_is_cut_on_a_character() {
+        assert_eq!(cut("short".to_owned()), "short");
+        let full = "a".repeat(RESULT_BYTES);
+        assert_eq!(cut(full.clone()), full, "a result at the limit is whole");
+        let over = "a".repeat(RESULT_BYTES + 1);
+        assert_eq!(cut(over), format!("{}…(cut)", "a".repeat(RESULT_BYTES)));
+        let straddling = format!("{}é", "a".repeat(RESULT_BYTES - 1));
+        assert_eq!(
+            cut(straddling),
+            format!("{}…(cut)", "a".repeat(RESULT_BYTES - 1)),
+            "a character across the limit is left out whole"
+        );
+    }
 
     fn payload(text: &str) -> Option<Value> {
         parse(text.as_bytes()).ok()

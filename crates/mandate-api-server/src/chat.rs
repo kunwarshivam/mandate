@@ -91,7 +91,7 @@ impl Chat {
             .saturating_mul(1_000)
             .saturating_add(u128::from(now.nanos() / 1_000_000));
         let count = u128::from(self.ids.fetch_add(1, Ordering::Relaxed));
-        encode_ulid((millis << 80) | count)
+        encode_ulid((millis << 80).saturating_add(count))
     }
 
     pub fn stop(&self, run: &str) {
@@ -983,6 +983,15 @@ mod pure {
         let second = chat.ulid(now);
         assert_eq!(first.len(), 26);
         assert!(second > first, "{first} {second}");
+        let Ok(later) = mandate_time::UtcNanos::from_parts(1_791_000_000, 123_456_789) else {
+            return;
+        };
+        let millis: u128 = 1_791_000_000_123;
+        assert_eq!(
+            chat.ulid(later),
+            mandate_canon::encode_ulid((millis << 80).saturating_add(2)),
+            "the millisecond leads and the counter follows"
+        );
     }
 
     #[test]
