@@ -44,4 +44,4 @@ pub mod watch;
 
 pub use follows::{Follow, parse_follows};
 pub use key::{KeyRefusal, read_key, read_then_end, stored_key, vault_key};
-pub use reader::{Config, Counts, NewsReader};
+pub use reader::{Clock, Config, Counts, NewsReader, RECEIPT_AHEAD, RECEIPT_LEAD_S};

@@ -29,7 +29,7 @@ use common::*;
 /// A reader that cannot run: not ready with `code`, alive, and doing nothing in five steps.
 fn holds_still(mut reader: Reader, journal: &Journal, transport: &Recorded, code: &str) {
     for second in 0..5 {
-        block_on(reader.step(plus(t0(), second)));
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
     }
     assert_eq!(reader.not_ready(), Some(code));
     assert_eq!(
@@ -140,7 +140,7 @@ fn only_a_paper_workspace_s_reader_starts() {
     let mut config = config();
     config.environment = Environment::Live;
     let mut reader = started_with(&journal, &shelf, &transport, &config, t0());
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(exit(&reader), Some(Exit::Refused));
     assert!(transport.sent().is_empty());
     assert!(journal.news().is_empty());
@@ -289,7 +289,7 @@ fn a_stored_item_it_cannot_read_at_start_stops_it_with_nothing_fetched_or_journa
         let before = journal.news();
         let mut reader = started(&journal, &shelf, &transport, plus(t0(), 1));
         for second in 2..7 {
-            block_on(reader.step(plus(t0(), second)));
+            block_on(reader.step(Clock::agreed(plus(t0(), second))));
         }
         assert_eq!(reader.not_ready(), Some("news_stream_unreadable"), "{case}");
         assert_ne!(reader.lifecycle().state(), State::Ready, "{case}");
@@ -393,7 +393,7 @@ fn an_item_stored_between_the_reads_is_held_and_never_stored_again() {
     let before = journal.news();
     assert_eq!(before.len(), 3, "the item stored between the reads");
     for second in 2..7 {
-        block_on(reader.step(plus(t0(), second)));
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
     }
     assert!(
         !transport.sent().is_empty(),
@@ -414,7 +414,7 @@ fn a_row_unreadable_at_the_read_after_the_epoch_stops_the_start() {
     let mut reader = started(&journal, &shelf, &transport, plus(t0(), 1));
     let before = journal.news();
     for second in 2..7 {
-        block_on(reader.step(plus(t0(), second)));
+        block_on(reader.step(Clock::agreed(plus(t0(), second))));
     }
     assert_eq!(reader.not_ready(), Some("news_stream_unreadable"));
     assert_eq!(
