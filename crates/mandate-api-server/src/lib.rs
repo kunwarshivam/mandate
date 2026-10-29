@@ -97,6 +97,7 @@ pub mod opening;
 pub mod operator;
 pub mod owner_requests;
 pub mod passkeys;
+pub mod prices;
 pub mod reads;
 pub mod real_money;
 pub mod reduction;

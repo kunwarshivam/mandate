@@ -24,6 +24,7 @@ use mandate_journal::{ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
 use mandate_spec::context::registry;
 
 use crate::http::App;
+use crate::prices::last_close;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, object, path_refused, session, string,
     watermark,
@@ -77,21 +78,54 @@ pub async fn instruments(
 }
 
 /// `GET /v1/workspaces/{ws}/instruments/{id}/price`: `read-models/instrument-price` (DEC-2152).
-/// The route, a stub until E10-11's price read lands; its tests come first (DEC-77). It is mounted
-/// in debug builds only (`http::api`): a release build aborts on a panic, so a release server never
-/// routes to this stub, and answers the path the one 401 until the read mounts the route itself.
-#[expect(
-    clippy::todo,
-    reason = "E10-11's price read stub: its tests land first (DEC-77, DEC-137)"
-)]
+/// The instrument is one [`instruments`] lists, authorized, folded and refused as that read is; an
+/// id it does not list is the one 404. Its last trusted daily close is read at the request's
+/// clock, the instant the envelope serves as `served_at`, else `reported` `false` with why.
 pub async fn price(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Response {
-    let _ = (app, headers, path);
-    todo!()
+    let Ok(Path((workspace, instrument))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let read = match catalogue(&app, &headers, &workspace).await {
+        Ok(read) => read,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(listed) = pinnable_snapshots(&read.0.control, read.1.as_ref()) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let Some(snapshot) = listed.iter().find(|s| s.instrument_id == instrument) else {
+        return Refused::NotFound.response();
+    };
+    let mut members = vec![
+        ("instrument_id", string(&snapshot.instrument_id)),
+        ("symbol", string(&snapshot.symbol)),
+    ];
+    match last_close(
+        app.bars.as_deref(),
+        &snapshot.symbol,
+        snapshot.asset_class.as_deref(),
+        read.0.now,
+    ) {
+        Ok(close) => members.extend([
+            ("reported", Value::Bool(true)),
+            ("close", string(&close.close)),
+            ("bar_start", string(&close.bar_start.to_string())),
+            ("timeframe", string(DAILY)),
+            ("source", string(close.source.as_str())),
+        ]),
+        Err(why) => members.extend([
+            ("reported", Value::Bool(false)),
+            ("reason", string(why.as_str())),
+        ]),
+    }
+    served(&read.0, members)
 }
+
+/// The one timeframe the price read serves in v1 (DEC-2152 item 2).
+const DAILY: &str = "1Day";
 
 /// `GET /v1/workspaces/{ws}/signal-models`: `read-models/signal-models`.
 pub async fn signal_models(
@@ -146,6 +180,20 @@ fn served(reader: &Reader, mut members: Vec<(&str, Value)>) -> Response {
 /// The pinnable instruments of [`snapshots`], sorted by symbol then id; `None` when the create's
 /// fold cannot read the control stream or any snapshot.
 fn listed_instruments(control: &[StoredEvent], store: &dyn ArtifactSource) -> Option<Vec<Value>> {
+    Some(
+        pinnable_snapshots(control, store)?
+            .iter()
+            .map(instrument_value)
+            .collect(),
+    )
+}
+
+/// The pinnable snapshots [`listed_instruments`] serves, in its order; `None` when the create's
+/// fold cannot read the control stream or any snapshot.
+fn pinnable_snapshots(
+    control: &[StoredEvent],
+    store: &dyn ArtifactSource,
+) -> Option<Vec<Snapshot>> {
     control_facts(control, store).ok()?;
     let mut pinnable: Vec<Snapshot> = snapshots(control, store)
         .ok()?
@@ -153,7 +201,7 @@ fn listed_instruments(control: &[StoredEvent], store: &dyn ArtifactSource) -> Op
         .filter(pinnable)
         .collect();
     pinnable.sort_by(|a, b| (&a.symbol, &a.instrument_id).cmp(&(&b.symbol, &b.instrument_id)));
-    Some(pinnable.iter().map(instrument_value).collect())
+    Some(pinnable)
 }
 
 /// Whether a mandate document's `instrument_ref` can name `snapshot`: an asset id, a symbol of 1 to

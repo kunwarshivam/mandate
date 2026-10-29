@@ -1099,7 +1099,7 @@ def test_staging_stores_iex_bars_as_bars_reader_and_its_own_journal_role():
     assert {k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true"} == {
         "mandate.dev/egress-postgres", "mandate.dev/egress-vault", "mandate.dev/egress-market-data",
     }
-    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor", "api")]
     assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/alpaca-iex") for w in readers)
 
 
@@ -1227,7 +1227,7 @@ def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():
     data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
     assert "MANDATE_JOURNAL_DSN" not in env_of(data)
     assert "--source" not in first_container(data)["args"]
-    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor", "api")]
     assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/cell-recorded") for w in readers)
     local = helm(
         CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()), *IEX,

@@ -218,6 +218,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(catalogue::instruments).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/instruments/{instrument}/price",
+            get(catalogue::price).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/signal-models",
             get(catalogue::signal_models).fallback(otherwise.clone()),
         )
@@ -291,11 +295,6 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
     let routes = routes.route(
         "/v1/workspaces/{workspace}/agents/{agent}/requests",
         post(crate::owner_requests::owner_request).fallback(otherwise.clone()),
-    );
-    #[cfg(debug_assertions)]
-    let routes = routes.route(
-        "/v1/workspaces/{workspace}/instruments/{instrument}/price",
-        get(catalogue::price).fallback(otherwise.clone()),
     );
     let routes = routes
         .fallback(otherwise)

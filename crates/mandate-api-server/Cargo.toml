@@ -16,6 +16,7 @@ mandate-accounting.workspace = true
 mandate-api.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-authn.workspace = true
+mandate-bars.workspace = true
 mandate-canon.workspace = true
 mandate-connections.workspace = true
 mandate-gate-context.workspace = true
@@ -23,6 +24,7 @@ mandate-identity.workspace = true
 mandate-identity-seal.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
+mandate-marketdata.workspace = true
 mandate-num.workspace = true
 mandate-passkey.workspace = true
 mandate-release.workspace = true
@@ -37,8 +39,6 @@ rustix.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "signal", "sync", "time"] }
 
 [dev-dependencies]
-mandate-bars.workspace = true
-mandate-marketdata.workspace = true
 axum.workspace = true
 mandate-release.workspace = true
 mandate-artifacts-fs.workspace = true

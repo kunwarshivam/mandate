@@ -1782,7 +1782,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn the_last_trusted_session_s_close_is_served_from_the_recording() {
         let root = bars_dir("recorded", "cell-recorded");
         let stored_closes = daily(&root, "QQQ", last());
@@ -1811,7 +1810,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn a_generations_root_reads_its_session_s_generation_and_names_alpaca_iex() {
         let root = bars_dir("generations", "alpaca-iex");
         let generation = root.join("daily").join(last().to_string());
@@ -1827,7 +1825,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn no_root_or_a_missing_root_is_no_store() {
         for bars in [None, Some(bars_dir("missing", "cell-recorded"))] {
             let (f, control) = registered(bars);
@@ -1836,7 +1833,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn a_crypto_instrument_is_not_covered_even_with_bars_stored() {
         let root = bars_dir("crypto", "cell-recorded");
         daily(&root, "QQQ", last());
@@ -1851,7 +1847,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn the_store_is_checked_before_the_asset_class() {
         let (f, control) = registered(None);
         unreported(
@@ -1864,7 +1859,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn a_root_with_no_dataset_for_the_symbol_is_no_bars() {
         let root = bars_dir("nobars", "cell-recorded");
         daily(&root, "SPY", last());
@@ -1873,7 +1867,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn a_generations_root_without_the_session_s_generation_is_no_bars() {
         let root = bars_dir("nogeneration", "alpaca-iex");
         let earlier = Date::new(2026, 10, 1).expect("a date");
@@ -1887,7 +1880,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn bars_that_stop_before_the_last_session_are_untrusted_never_a_stale_close() {
         let root = bars_dir("stale", "cell-recorded");
         daily(&root, "QQQ", Date::new(2026, 10, 1).expect("a date"));
@@ -1896,7 +1888,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn a_corrupt_partition_is_untrusted() {
         let root = bars_dir("corrupt", "cell-recorded");
         daily(&root, "QQQ", last());
@@ -1907,7 +1898,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn an_id_the_catalogue_does_not_list_is_the_one_404() {
         let root = bars_dir("unlisted", "cell-recorded");
         daily(&root, "SPY", last());
@@ -1917,7 +1907,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn it_is_authorized_as_the_catalogue_is() {
         let (f, _) = registered(None);
         let path = ws(&format!("/instruments/{QQQ_ID}/price"));
@@ -1932,7 +1921,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn an_unreadable_snapshot_is_journal_unavailable_as_the_catalogue_answers() {
         let f = built_with(true, None);
         let missing = reference(b"never stored");
@@ -1955,7 +1943,6 @@ mod price_read {
     }
 
     #[test]
-    #[ignore = "pending E10-11"]
     fn a_deployment_with_no_store_is_journal_unavailable() {
         let f = built_with(false, None);
         seed(&f, &[]);
