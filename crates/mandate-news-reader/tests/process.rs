@@ -226,3 +226,86 @@ fn with_no_follows_or_a_malformed_one_it_says_why_and_stays_not_ready() {
         "follow_malformed",
     );
 }
+
+/// The process run with `args` at `tier`, or with no tier set, without `MANDATE_JOURNAL_DSN`.
+fn refused_at(tier: Option<&str>, args: &[String]) -> (ExitStatus, String) {
+    let mut command = Command::new(BIN);
+    command
+        .args(args)
+        .env_remove("MANDATE_JOURNAL_DSN")
+        .env_remove("MANDATE_DEPLOYMENT_TIER")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    if let Some(tier) = tier {
+        command.env("MANDATE_DEPLOYMENT_TIER", tier);
+    }
+    let mut child = Guard(command.spawn().unwrap());
+    let mut stderr = BufReader::new(child.0.stderr.take().unwrap());
+    child.exited(&mut stderr)
+}
+
+/// DEC-2085: `--recorded` runs the reader on the recording and the fixture key at the `dev` and
+/// `ci` tiers alone, with no tier set read as production; an unreadable or malformed recording
+/// refuses the start with its code; and a recorded start still runs on the journal
+/// `MANDATE_JOURNAL_DSN` names, never an in-memory one.
+#[test]
+fn a_recorded_start_runs_at_dev_and_ci_alone_on_a_readable_recording_over_the_journal() {
+    let socket = scratch("recorded.sock");
+    let recording = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/cell/news-reader/recorded-news.json"
+    );
+    let recorded = run_args(
+        &socket,
+        &["--recorded", recording, "--follow", "agent_a=acct_1"],
+    );
+    for tier in [None, Some("staging"), Some("production"), Some("demo")] {
+        let (status, stderr) = refused_at(tier, &recorded);
+        assert_eq!(
+            stderr, "news_reader_start_failed: recorded_outside_dev_and_ci\n",
+            "{tier:?}"
+        );
+        assert_eq!(status.code(), Some(2));
+    }
+    for tier in ["dev", "ci"] {
+        let (status, stderr) = refused_at(Some(tier), &recorded);
+        assert_eq!(
+            stderr, "news_reader_start_failed: journal_dsn_missing\n",
+            "{tier}: past the tier and the recording, to the journal"
+        );
+        assert_eq!(status.code(), Some(2));
+    }
+    let missing = scratch("no-recording.json");
+    let missing = missing.to_string_lossy();
+    let (_, stderr) = refused_at(
+        Some("ci"),
+        &run_args(
+            &socket,
+            &["--recorded", &missing, "--follow", "agent_a=acct_1"],
+        ),
+    );
+    assert_eq!(
+        stderr,
+        "news_reader_start_failed: recorded_news_unreadable\n"
+    );
+    let malformed = scratch("malformed-recording.json");
+    std::fs::write(&malformed, b"{\"news\": [{\"id\": 1}]}").unwrap();
+    let (_, stderr) = refused_at(
+        Some("ci"),
+        &run_args(
+            &socket,
+            &[
+                "--recorded",
+                &malformed.to_string_lossy(),
+                "--follow",
+                "agent_a=acct_1",
+            ],
+        ),
+    );
+    assert_eq!(
+        stderr,
+        "news_reader_start_failed: recorded_news_malformed\n"
+    );
+    std::fs::remove_file(&malformed).ok();
+}
