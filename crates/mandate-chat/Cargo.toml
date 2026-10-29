@@ -1,0 +1,18 @@
+[package]
+name = "mandate-chat"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The agent's chat (DEC-2293): the pinned chat entry, its tools, and the turn loop over the model gateway, which proposes only through the tools the caller serves"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-gateway.workspace = true
+mandate-time.workspace = true
+
+[dev-dependencies]
+mandate-gateway = { workspace = true }

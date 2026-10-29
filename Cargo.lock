@@ -1839,6 +1839,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-chat"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-gateway",
+ "mandate-time",
+]
+
+[[package]]
 name = "mandate-cli"
 version = "0.0.0"
 dependencies = [

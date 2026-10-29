@@ -516,6 +516,16 @@ pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-artifacts-fs"]
 
+# The agent's chat (DEC-2293): the pinned chat entry, its tool declarations, and the turn loop over
+# the gateway. Pure and above the gateway; it serves no tool itself, so it reaches no journal,
+# builder, gate, or broker crate, and every read and action is the caller's (the workspace API).
+[crates.mandate-chat]
+layer = 5
+safety_critical = false
+pure = true
+allowed_external = []
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell"]
+
 [crates.mandate-sim]
 layer = 6
 safety_critical = true
