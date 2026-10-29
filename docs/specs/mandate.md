@@ -1109,7 +1109,7 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      and `ask`, so no check the dry run could not see is ever passed over unasked ([DEC-2388](../project/decisions/DEC-2388.md)
      item 12). Like the ceilings before it, it names itself (`policy_overlay`) only when it changed
      the decision.
-   - **5d. Owner's request** ([DEC-2858](../project/decisions/DEC-2858.md) item 10, founder-ruled).
+   - **5d. Owner's request** ([DEC-2159](../project/decisions/DEC-2159.md), the founder's ruling; [DEC-2858](../project/decisions/DEC-2858.md) item 10).
      If the order was requested by the owner (`requested_by: owner`) and the result so far is
      `ask`, it becomes `auto`, labelled `owner_request`: the owner's own Send is the confirmation,
      so no approval is asked of them for their own order, whatever the rules, the default, the
