@@ -179,9 +179,11 @@ pub enum Unanswered {
 /// Whether `principal` holds a passkey past its cool-off at `now` on `workspace`'s control stream
 /// as the request read it ([DEC-2126](../../../docs/project/decisions/DEC-2126.md) item 6),
 /// judged as the step-up verifier counts one: from the same fold, a `CredentialEnrolled` version 2
-/// passkey whose cool-off has ended or that has none. A version 1 enrolment never counts (DEC-2122
-/// item 3), so it holds nothing here. Such a member's `cli_confirm` for a connect has ended, and a
-/// paper connect needs their passkey.
+/// passkey that `past_cool_off` finds past its cool-off at `now`. That is the verifier's own rule,
+/// the server's cool-off waiver included (DEC-2146, DEC-2150), so a waived deployment adds no
+/// second wait before `cli_confirm` ends. A version 1 enrolment never counts (DEC-2122 item 3), so
+/// it holds nothing here. Such a member's `cli_confirm` for a connect has ended, and a paper
+/// connect needs their passkey.
 ///
 /// # Errors
 /// [`Unanswered`].
@@ -190,6 +192,7 @@ pub fn passkey_held(
     _principal: PrincipalId,
     _control: &[StoredEvent],
     _now: UtcNanos,
+    _past_cool_off: impl Fn(Option<UtcNanos>, UtcNanos) -> bool,
 ) -> Result<bool, Unanswered> {
     Err(Unanswered::Unimplemented { story: "E9-4" })
 }

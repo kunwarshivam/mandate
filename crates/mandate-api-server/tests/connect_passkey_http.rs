@@ -729,6 +729,7 @@ fn a_cli_confirm_start_by_a_member_holding_a_passkey_past_its_cool_off_is_step_u
         principal(ALICE),
         &w.f.journal.rows_of(&ctl()),
         at(T0 + 5),
+        |ends: Option<UtcNanos>, now: UtcNanos| ends.is_none_or(|e| e <= now),
     );
     assert_eq!(
         reply.status,

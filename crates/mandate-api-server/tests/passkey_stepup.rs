@@ -38,6 +38,7 @@ use mandate_identity::{
 use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::StoredEvent;
 use mandate_passkey::stepup::{self, ChallengeRecord, permission_for, reverify};
+use mandate_time::UtcNanos;
 use serde_json::json;
 use support_passkey::{
     CREDENTIAL, OTHER_CREDENTIAL, Signed, Signer, assert_by, asserted, backup_eligible, enrol,
@@ -936,7 +937,23 @@ fn only_a_cooling_passkey_under_the_waiver_is_waived() {
 
 /// DEC-2126 item 6: what [`passkey_held`] answers for the owner over `w`'s rows at `secs`.
 fn held_at(w: &World, secs: i64) -> Result<bool, Unanswered> {
-    passkey_held(workspace(WORKSPACE), OWNER, &w.rows.rows, at(secs))
+    passkey_held(
+        workspace(WORKSPACE),
+        OWNER,
+        &w.rows.rows,
+        at(secs),
+        unwaived,
+    )
+}
+
+/// The verifier's cool-off rule on a server that waives none: a cool-off that has ended, or none.
+fn unwaived(cool_off_ends: Option<UtcNanos>, now: UtcNanos) -> bool {
+    cool_off_ends.is_none_or(|ends| ends <= now)
+}
+
+/// The verifier's cool-off rule on a server whose waiver holds now (DEC-2146, DEC-2150).
+fn waived(_cool_off_ends: Option<UtcNanos>, _now: UtcNanos) -> bool {
+    true
 }
 
 /// The world with the owner's only passkey enrolled by `payload` at `version`.
@@ -965,6 +982,45 @@ fn a_passkey_past_its_cool_off_is_held_and_one_cooling_off_is_not() {
     assert_eq!(held_at(&cooling, ends), Ok(true), "the instant it ends");
     let none = holding(2, |signer| enrolled(OWNER, CREDENTIAL, signer, 0, None));
     assert_eq!(held_at(&none, ISSUED), Ok(true), "no cool-off at all");
+}
+
+/// DEC-2126 item 6 read beside DEC-2146 and DEC-2150 (the coordinator, 2026-10-29): "past its
+/// cool-off" is the verifier's rule, waiver included. So where the server waives the cool-off, a
+/// version 2 passkey still cooling is held and `cli_confirm` ends at once, while a version 1 one
+/// still holds nothing.
+#[test]
+#[ignore = "pending E9-4"]
+fn under_the_servers_cool_off_waiver_a_cooling_passkey_is_held() {
+    let ends = ISSUED + 30;
+    let cooling = holding(2, |signer| {
+        enrolled(OWNER, CREDENTIAL, signer, 0, Some(ends))
+    });
+    let rows = &cooling.rows.rows;
+    let at_issue = at(ends - 1);
+    assert_eq!(
+        passkey_held(workspace(WORKSPACE), OWNER, rows, at_issue, waived),
+        Ok(true),
+        "the waiver holds, so the cooling passkey counts"
+    );
+    assert_eq!(
+        passkey_held(workspace(WORKSPACE), OWNER, rows, at_issue, unwaived),
+        Ok(false),
+        "without it, the same passkey is still cooling"
+    );
+    let old = holding(1, |signer| {
+        version_1(enrolled(OWNER, CREDENTIAL, signer, 0, Some(ends)))
+    });
+    assert_eq!(
+        passkey_held(
+            workspace(WORKSPACE),
+            OWNER,
+            &old.rows.rows,
+            at_issue,
+            waived
+        ),
+        Ok(false),
+        "a version 1 passkey holds nothing, waiver or not"
+    );
 }
 
 #[test]
