@@ -2338,6 +2338,7 @@ dependencies = [
  "mandate-gate-context",
  "mandate-journal",
  "mandate-process",
+ "mandate-release",
  "mandate-research",
  "mandate-research-run",
  "mandate-sources",

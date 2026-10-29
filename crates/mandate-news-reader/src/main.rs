@@ -12,10 +12,11 @@
 //!
 //! `mandate-news-reader run --workspace <id> --probe <socket> --allowlist <file> --artifacts <dir>
 //! --user-agent <text> [--follow <agent>=<account>]... (--vault-address <address> --vault-dir <dir>
-//! | --fixture)` runs it over Postgres (`MANDATE_JOURNAL_DSN`) and the HTTPS transport, logged in
+//! | --recorded <file> | --fixture)` runs it over Postgres (`MANDATE_JOURNAL_DSN`) and the HTTPS transport, logged in
 //! to the vault by AppRole as the news reader, with the role and secret ids and the vault's CA
 //! mounted in `--vault-dir`; with `--fixture`, over an in-memory journal and no vault, so it holds
-//! no key and stays not ready. It asks for a page at most once a second,
+//! no key and stays not ready; with `--recorded`, at the `dev` and `ci` tiers alone, over Postgres
+//! on the recording `<file>` and the fixture key, reaching no vault and no host (DEC-2085). It asks for a page at most once a second,
 //! drains on SIGTERM, and exits with its lifecycle's status. A reason it is not ready is written
 //! once on its standard error, as a code alone (DEC-2280 item 6).
 //! `mandate-news-reader probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5).
@@ -32,8 +33,10 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_journal::{ArtifactStore, Environment};
 use mandate_news_reader::parse_follows;
 use mandate_news_reader::reader::exit;
+use mandate_news_reader::recorded::{RecordedNews, admitted, recorded_key};
 use mandate_news_reader::{Config, KeyRefusal, NewsReader, vault_key};
 use mandate_process::probe::{self, Probe, Status};
+use mandate_release::startup::TIER_VAR;
 use mandate_sources::allowlist::Allowlist;
 use mandate_sources::fetch::{NewsAuth, Transport};
 use mandate_sources_http::HttpsTransport;
@@ -105,7 +108,6 @@ fn run(
     let artifacts = FsArtifactStore::open_existing(Path::new(&artifacts))
         .map_err(|_| "artifact_store_unavailable")?;
     let user_agent = flag("--user-agent").ok_or("user_agent_missing")?;
-    let transport = HttpsTransport::new(&user_agent).map_err(|e| e.code())?;
     let config = Config {
         workspace,
         environment: Environment::Paper,
@@ -117,6 +119,23 @@ fn run(
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
+    if let Some(recording) = flag("--recorded") {
+        admitted(std::env::var(TIER_VAR).ok().as_deref())?;
+        let recording = std::fs::read(recording).map_err(|_| "recorded_news_unreadable")?;
+        let recording = RecordedNews::parse(&recording)?;
+        let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
+        let store = PgStore::connect(&dsn)?;
+        let reader = NewsReader::start(
+            store,
+            artifacts,
+            recording,
+            &config,
+            recorded_key(),
+            host_now(),
+        );
+        return serve(reader, &runtime, socket, &terminate);
+    }
+    let transport = HttpsTransport::new(&user_agent).map_err(|e| e.code())?;
     if args.iter().any(|a| a == "--fixture") {
         let reader = NewsReader::start(
             MemoryStore::default(),
