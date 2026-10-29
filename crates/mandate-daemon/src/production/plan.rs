@@ -50,24 +50,36 @@ impl Plan {
     /// any is missing: the fold holds the opening, the agent holds the instrument or has an
     /// order working in it, the session admits no opening, or the mandate does not validate.
     fn context(&self, opened: Opened<'_>) -> Option<(ValidatedMandate, BuilderContext)> {
+        self.context_with(opened, Holding::Flat)
+    }
+
+    /// [`Plan::context`] for `holding`: an owner's request (DEC-2858 item 10) is clipped against
+    /// the position the fold says the agent holds, marked at the sane bid, where an opening
+    /// requires none; neither is sized while an order of the agent's works in the instrument.
+    fn context_with(
+        &self,
+        opened: Opened<'_>,
+        holding: Holding,
+    ) -> Option<(ValidatedMandate, BuilderContext)> {
         let instrument = opened.asset_id.as_str();
-        let (facts, flat, models) = self.facts.read(|journaled| {
-            let flat = !journaled.held().contains_key(instrument)
-                && !journaled
-                    .working()
-                    .values()
-                    .any(|named| named == instrument);
+        let (facts, held, working, models) = self.facts.read(|journaled| {
             (
                 journaled.facts(instrument, self.fresh),
-                flat,
+                journaled.held().get(instrument).copied(),
+                journaled
+                    .working()
+                    .values()
+                    .any(|named| named == instrument),
                 journaled.models(),
             )
         })?;
-        let facts = facts.ok().filter(|_| flat)?;
+        let admitted = !working && (holding == Holding::Held || held.is_none());
+        let facts = facts.ok().filter(|_| admitted)?;
         let session = opening_session(opened.asset_class, facts.now)?;
         let validation = validation_context(facts.account.equity, facts.now)?;
         let validated = ValidatedMandate::new(self.mandate.clone(), &validation, &[]).ok()?;
-        let builder = builder_context(&self.mandate, opened, &facts, session, &models)?;
+        let held = held.unwrap_or(Qty::ZERO);
+        let builder = builder_context(&self.mandate, opened, &facts, session, &models, held)?;
         Some((validated, builder))
     }
 }
@@ -109,11 +121,20 @@ impl OrderPlan for Plan {
             .pinned_instruments
             .iter()
             .find(|pinned| pinned.asset_id.as_str() == request.instrument.as_str())?;
-        let (validated, builder) = self.context(Opened::pinned(pinned))?;
+        let (validated, builder) = self.context_with(Opened::pinned(pinned), Holding::Held)?;
         mandate_ports::requested(&validated, &builder, request)
             .ok()
             .flatten()
     }
+}
+
+/// What a context admits of the agent's position in the instrument: an opening only while the agent
+/// is flat, so it never sizes on a cost basis or a P&L the daemon cannot see; an owner's request on
+/// top of what it holds, which is clipped, never sized.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Holding {
+    Flat,
+    Held,
 }
 
 /// The instrument an opening is sized and classified for: a pin, or an unpinned mandate's
@@ -313,12 +334,16 @@ impl Plan {
 
 impl Plan {
     fn classified(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<Classified> {
-        let (validated, builder) = self.context(opened)?;
         let score = match &proposal.combined_score {
             Value::Null => None,
             Value::Str(score) => Some(Unit::parse(score).ok()?),
             _ => return None,
         };
+        let holding = match score {
+            Some(_) => Holding::Flat,
+            None => Holding::Held,
+        };
+        let (validated, builder) = self.context_with(opened, holding)?;
         let mut action = buy_action(
             &builder.account,
             &builder.market,
@@ -427,7 +452,8 @@ fn validation_context(account_equity: Usd, now: UtcNanos) -> Option<ValidationCo
     })
 }
 
-/// The builder's facts for a first opening, flat and with nothing working (DEC-2378 item 10):
+/// The builder's facts for a first opening, flat and with nothing working (DEC-2378 item 10), or
+/// for an owner's request on top of the `held` position, which is its gross exposure at the bid:
 /// the agent's equity is its allocation, the risk mark is the sane bid, and the ask is that same
 /// bid, so a buy never pays above it. A whole share is the increment, which never buys a
 /// fraction the instrument may not admit.
@@ -437,16 +463,17 @@ fn builder_context(
     facts: &mandate_gate_context::Facts,
     session: MarketSession,
     models: &BTreeMap<(String, String), String>,
+    held: Qty,
 ) -> Option<BuilderContext> {
     let allocation = mandate.capital.allocation_usd.to_usd().ok()?;
     let bid = facts.mark.bid;
     let increment = Qty::parse("1").ok()?;
     let account = BuilderAccountSnapshot {
         agent_equity: allocation,
-        position_qty: Qty::ZERO,
+        position_qty: held,
         cost_basis: CostBasis::ZERO,
         risk_mark: MarkPrice::from(bid),
-        gross_usd: Usd::ZERO,
+        gross_usd: held.notional(bid).ok()?,
         working_opening_cost: Usd::ZERO,
         goal_spent_usd: Usd::ZERO,
     };

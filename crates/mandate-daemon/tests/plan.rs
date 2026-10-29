@@ -1341,7 +1341,6 @@ fn a_request_the_plan_could_not_have_opened_on_proposes_nothing() {
 /// caps, as an increase; the plan classifies it on the held position as any opening (DEC-2858
 /// item 10 makes the runtime run it as the owner's own).
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_request_while_holding_is_clipped_against_the_held_position() {
     let held = holding(journaled(REGULAR), "3", REGULAR);
     let plan = plan_over(&held);
