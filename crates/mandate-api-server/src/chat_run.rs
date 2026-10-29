@@ -667,6 +667,7 @@ impl Toolbox for Tools<'_> {
             ),
             name::PROPOSE => self.propose(call),
             name::DRAFT => self.draft(arg_text(call, "document")),
+            name::TEMPLATE => template(),
             _ => refusal("unknown_tool"),
         };
         cut(result)
@@ -1214,6 +1215,14 @@ impl Tools<'_> {
             }
             Err(problems) => refusal_with(problems),
         }
+    }
+}
+
+/// The example mandate document a setup starts from ([`mandate_chat::entry::TEMPLATE`]).
+fn template() -> String {
+    match parse(mandate_chat::entry::TEMPLATE.as_bytes()) {
+        Ok(document) => ok(vec![("document", document)]),
+        Err(_) => refusal("no_template"),
     }
 }
 

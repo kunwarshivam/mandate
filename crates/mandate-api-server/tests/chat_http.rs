@@ -2155,3 +2155,216 @@ fn the_daily_note_waits_for_a_weekday_s_close_a_model_and_an_active_agent() {
         "an agent made active again"
     );
 }
+
+/// `text` as a JSON string's members, escaped for a tool call's arguments.
+fn json_text(text: &str) -> String {
+    String::from_utf8_lossy(&to_canonical(&Value::Str(text.to_owned()))).into_owned()
+}
+
+#[test]
+fn a_setup_run_offers_the_template_and_the_models_and_turns_a_valid_draft_into_a_card() {
+    const CONTENT: &str = r#"{"authorship":"platform","code":[{"path":"crates/mandate-modelhost/src/ma_crossover.rs","sha256":"3434343434343434343434343434343434343434343434343434343434343434"}],"content_version":1,"inputs":{"bars":"daily_close"},"kind":"quant_model_content","methodology":"Long when the fast mean is above the slow mean.","model_id":"quant.ma_crossover","model_version":"1.0.0","output":{"flat":"none"},"params_schema":{"constraints":["fast_periods < slow_periods"],"params":[{"max":1000,"min":1,"name":"fast_periods","type":"integer"},{"max":1000,"min":2,"name":"slow_periods","type":"integer"}]}}"#;
+    let content = format!(
+        "sha256:{}",
+        Digest::of(&to_canonical(&parse(CONTENT.as_bytes()).expect("JSON"))).to_hex()
+    );
+    let draft = |document: &str| format!(r#"{{"document":{}}}"#, json_text(document));
+    let pinned = String::from_utf8_lossy(&to_canonical(
+        &parse(PINNED_DOCUMENT.as_bytes()).expect("JSON"),
+    ))
+    .replace(AAPL, MSFT)
+    .replace(r#""symbol":"AAPL""#, r#""symbol":"MSFT""#)
+    .replace(
+        "sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc",
+        &content,
+    );
+    let gateway = gateway_service(vec![
+        turn(
+            &[
+                (name::MODELS, "{}"),
+                (name::TEMPLATE, "{}"),
+                (name::DRAFT, &draft("not json")),
+                (name::DRAFT, &draft(r#"{"name":"half"}"#)),
+                (name::DRAFT, &draft(&pinned)),
+            ],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    seed_fill(&f);
+    seed_catalogue(&f);
+    assert_eq!(store(&f, CONTENT), content);
+    push(
+        &f,
+        &ctl(),
+        vec![row(
+            12,
+            "ConfigSnapshotRegistered",
+            &format!(
+                r#"{{"admits_instruments":false,"content_hash":"{content}","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}}"#
+            ),
+        )],
+    );
+    let cookie = signed_in(&f);
+    let sent = post_setup(&f, &cookie, "?setup_id=setup_draft", "setupkey00000000011");
+    assert_eq!(sent.status, 202, "{}", String::from_utf8_lossy(&sent.body));
+    for _ in 0..800 {
+        if chat_rows(&f).iter().any(|r| r.event_type == "ChatRunEnded") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let found = results(&f);
+    let names: Vec<&str> = found.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            name::MODELS,
+            name::TEMPLATE,
+            name::DRAFT,
+            name::DRAFT,
+            name::DRAFT
+        ]
+    );
+    assert!(
+        found[0]
+            .1
+            .starts_with(r#"{"models":[{"admits_instruments":false,"#),
+        "{}",
+        found[0].1
+    );
+    assert!(
+        found[0].1.contains(r#""model_id":"quant.ma_crossover""#),
+        "{}",
+        found[0].1
+    );
+    assert!(
+        found[1].1.starts_with(r#"{"document":{"autonomy":"#),
+        "{}",
+        found[1].1
+    );
+    assert!(
+        found[1].1.contains(r#""name":"example-agent""#),
+        "{}",
+        found[1].1
+    );
+    assert!(found[1].1.ends_with(r#""ok":true}"#), "{}", found[1].1);
+    assert_eq!(found[2].1, r#"{"ok":false,"refused":"document_not_json"}"#);
+    assert!(
+        found[3].1.contains(r#""refused":"invalid_mandate""#),
+        "{}",
+        found[3].1
+    );
+    assert!(found[3].1.contains(r#""problems":[{"#), "{}", found[3].1);
+    assert!(
+        found[4].1.starts_with(r#"{"message_id":""#),
+        "{}",
+        found[4].1
+    );
+    assert!(
+        found[4]
+            .1
+            .ends_with("\nThe draft is valid; the owner now sees a confirmation card."),
+        "{}",
+        found[4].1
+    );
+    let (_, body) = get_json(&f, &cookie, "/setup/setup_draft/messages");
+    let card = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|m| m.last())
+        .and_then(|m| m.get("card").cloned())
+        .unwrap_or(Value::Null);
+    assert_eq!(member_text(&card, &["kind"]), Some("confirm_mandate"));
+    assert!(
+        member_text(&card, &["version"]).is_some_and(|v| v.starts_with("sha256:")),
+        "{card:?}"
+    );
+    assert!(
+        card.get("summary").is_some_and(|s| s != &Value::Null),
+        "{card:?}"
+    );
+}
+
+#[test]
+fn a_proactive_run_proposes_an_order_as_a_card_and_places_nothing() {
+    let gateway = gateway_service(vec![
+        turn(&[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+        turn(
+            &[(
+                name::PROPOSE,
+                r#"{"quantity":"3","reason":"It dipped below its average.","side":"buy","symbol":"aapl"}"#,
+            )],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":["AAPL"]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    alice_writes(&f);
+    let monday_close = (T0.div_euclid(86_400) + 2) * 86_400 + 21 * 3_600 + 60;
+    f.clock.set(monday_close);
+    let cookie = signed_in(&f);
+    let before: Vec<String> = f
+        .journal
+        .rows_of(&ctl())
+        .iter()
+        .map(|r| r.event_type.clone())
+        .collect();
+    assert_eq!(pass(&f), 1);
+    for _ in 0..800 {
+        if chat_rows(&f)
+            .iter()
+            .filter(|r| r.event_type == "ChatRunEnded")
+            .count()
+            == 2
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let found = results(&f);
+    let proposed = results_of(&found, name::PROPOSE);
+    assert_eq!(proposed.len(), 1, "{found:?}");
+    assert!(
+        proposed[0].starts_with(r#"{"message_id":""#),
+        "{}",
+        proposed[0]
+    );
+    let body = thread(&f, &cookie);
+    let last = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|m| m.last().cloned())
+        .unwrap_or(Value::Null);
+    assert_eq!(last.get("text"), Some(&Value::Null));
+    assert_eq!(last.get("proactive"), Some(&Value::Bool(true)));
+    assert_eq!(
+        last.get("card").map(|c| String::from_utf8_lossy(&to_canonical(c)).into_owned()),
+        Some(r#"{"kind":"proposal","qty":"3","reason":"It dipped below its average.","side":"buy","symbol":"AAPL"}"#.to_owned())
+    );
+    let after: Vec<String> = f
+        .journal
+        .rows_of(&ctl())
+        .iter()
+        .map(|r| r.event_type.clone())
+        .collect();
+    assert!(
+        after[before.len()..].iter().all(|t| t.starts_with("Chat")),
+        "a proactive run writes nothing but its own records: {:?}",
+        &after[before.len()..]
+    );
+    let kinds: Vec<String> = chat_rows(&f)
+        .iter()
+        .filter(|r| r.event_type == "ChatTurnRecorded")
+        .filter_map(|r| parse(&r.body).ok())
+        .filter_map(|e| {
+            e.get("payload")
+                .and_then(|p| p.get("kind"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(kinds, ["agent", "agent", "proactive", "proactive"]);
+}
