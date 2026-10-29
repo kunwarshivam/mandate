@@ -244,3 +244,61 @@ fn the_key_is_read_once_and_the_session_ended_once_after_whatever_the_read_answe
     );
     assert_eq!(*unended.ended.borrow(), [1]);
 }
+
+/// The crate's non-test source, file by file: each `src/` file up to its `#[cfg(test)] mod tests`,
+/// so a pin never matches its own text.
+fn non_test_sources() -> Vec<(String, String)> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == "rs"))
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let code = text
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            (
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+                code,
+            )
+        })
+        .collect()
+}
+
+/// E2-22, R2 on #2901: the one call of `read_then_end` outside the tests ends the session with
+/// the real source's own `end_session`, so a no-op end, which every test of `read_then_end` would
+/// pass, cannot ship: the vault token would then live out its whole lifetime.
+#[test]
+fn the_vault_s_own_end_session_is_the_one_end_the_reader_ever_passes() {
+    let sources = non_test_sources();
+    assert!(
+        sources
+            .iter()
+            .any(|(name, code)| name == "key.rs" && code.contains("pub async fn vault_key")),
+        "the pin reads the code it pins"
+    );
+    let calls: Vec<(&str, usize)> = sources
+        .iter()
+        .map(|(name, code)| (name.as_str(), code.matches("read_then_end(").count()))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    assert_eq!(
+        calls,
+        [("key.rs", 1)],
+        "one call of read_then_end, in key.rs"
+    );
+    let key = &sources.iter().find(|(name, _)| name == "key.rs").unwrap().1;
+    assert_eq!(
+        key.matches("read_then_end(&vault, OpenBaoSource::end_session)")
+            .count(),
+        1,
+        "the session is ended by OpenBaoSource::end_session"
+    );
+}
