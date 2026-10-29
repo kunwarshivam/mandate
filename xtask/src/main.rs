@@ -296,7 +296,10 @@ const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)"
 const ATOMIC_EXCEPTIONS: [(u64, &str); 3] = [
     (2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)"),
     (2200, "ES-22-atomic-exception: J2 PR #2200 (DEC-2335)"),
-    (2979, "ES-22-atomic-exception: owner requests PR #2979 (DEC-2858)"),
+    (
+        2979,
+        "ES-22-atomic-exception: owner requests PR #2979 (DEC-2858)",
+    ),
 ];
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
