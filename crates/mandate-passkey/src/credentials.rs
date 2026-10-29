@@ -373,7 +373,7 @@ impl CredentialFold {
     /// holds none.
     ///
     /// # Errors
-    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for `member`.
+    /// [`CredentialError::Broken`] when a record breaks rule 251, 254 or 318 for `member`.
     pub fn passkeys(&self, member: PrincipalId) -> Result<Vec<&Enrolment>, CredentialError> {
         let folded = self.fold();
         if let Some(seq) = folded.broken.get(&member) {
@@ -390,7 +390,7 @@ impl CredentialFold {
     /// 254 carried, else the enrolment's; `None` when it is not held.
     ///
     /// # Errors
-    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for its holder.
+    /// [`CredentialError::Broken`] when a record breaks rule 251, 254 or 318 for its holder.
     pub fn last_count(&self, credential: &str) -> Result<Option<u32>, CredentialError> {
         let folded = self.fold();
         let Some(holder) = folded.holder(credential) else {
