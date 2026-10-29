@@ -17,6 +17,7 @@ use serde::Deserialize;
 mod admission_drill;
 mod cell;
 mod deferring;
+mod flux_reset;
 mod founding;
 mod gitops;
 mod image;
@@ -2283,6 +2284,9 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         &founder_subject,
     )?;
     eprintln!("    founding: {linked} (DEC-2114)");
+    for word in flux_reset::reset_stalled(&in_cluster, &format!("infra-{run}"))? {
+        eprintln!("    flux: {word}");
+    }
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
@@ -20574,6 +20578,12 @@ mod tests {
                 && linked < at(&staging, "infra_verify::verify("),
             "the founder's subject is masked before any other use, and the founder is linked after \
              the vault is provisioned and before staging's verify (DEC-2114)"
+        );
+        let reset = at(&staging, concat!("flux_reset::", "reset_stalled("));
+        assert!(
+            linked < reset && reset < at(&staging, "infra_verify::verify("),
+            "a stalled release is reset once every secret and link it needs is written, and before \
+             staging's verify reads it"
         );
         assert_eq!(
             include_str!("main.rs")
