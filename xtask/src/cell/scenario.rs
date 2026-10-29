@@ -5082,9 +5082,11 @@ mod tests {
 
     /// Each link's event and the member its fragment names are the journal's own: the catalogue row
     /// of the event (journal spec §9) names the member, or, for `FillApplied`'s side, which the row
-    /// leaves to §9.5, the executor's writer journals it, or the member's own row closes it, with
-    /// the value the fragment names or, for a fragment that names only a value's start (the news
-    /// item's `item_id`, `<vendor id>:`), as a member; read from those files, not from the plan.
+    /// leaves to §9.5, the executor's writer journals it, or the member's own row closes it with
+    /// the value the fragment names. A fragment that names only a value's start, up to a `:` (the
+    /// news item's `item_id`, `<vendor id>:`), needs the member's row in the section the event's
+    /// catalogue row says closes it, and that row's colon-joined form (`<vendor id>:<vendor
+    /// version>`); read from those files, not from the plan.
     #[test]
     fn each_link_reads_a_member_its_event_carries() {
         let spec = fs::read_to_string("../docs/specs/journal.md").unwrap();
@@ -5114,16 +5116,44 @@ mod tests {
             let value = fragment.rsplit(':').next().unwrap().trim_matches('"');
             let written =
                 check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
-            let closed = spec.lines().any(|l| {
-                l.starts_with(&format!("| `{member}` |"))
-                    && (value.is_empty() || l.contains(&format!("`{value}`")))
-            });
+            let closed = if value.is_empty() {
+                closing_section(&spec, row)
+                    .lines()
+                    .any(|l| l.starts_with(&format!("| `{member}` |")) && l.contains(">:<"))
+            } else {
+                spec.lines().any(|l| {
+                    l.starts_with(&format!("| `{member}` |")) && l.contains(&format!("`{value}`"))
+                })
+            };
             assert!(
                 row.contains(member) || written || closed,
                 "{}: {member}",
                 check.event_type
             );
         }
+    }
+
+    /// The section of `spec` the catalogue `row` says closes its event (`closed in §9.37`): from
+    /// that section's heading to the next heading of its level, or nothing when the row names none.
+    fn closing_section<'a>(spec: &'a str, row: &str) -> &'a str {
+        let Some(number) = row
+            .split("closed in §")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                    .next()
+            })
+            .map(|n| n.trim_end_matches('.'))
+        else {
+            return "";
+        };
+        let heading = format!("### {number} ");
+        let Some(start) = spec.find(&heading) else {
+            return "";
+        };
+        let body = &spec[start + heading.len()..];
+        let end = body.find("\n### ").unwrap_or(body.len());
+        &body[..end]
     }
 
     /// DEC-2070 items 1 and 5: the cell is pointed at the run's workspace and, for the second
