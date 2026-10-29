@@ -63,6 +63,7 @@ fn credential_of(record: &CredentialRecord) -> (&str, PrincipalId) {
         CredentialRecord::Enrolled(e) => (&e.credential, e.member),
         CredentialRecord::Removed(r) => (&r.credential, r.member),
         CredentialRecord::Asserted(a) => panic!("no credential record at seq {}", a.seq),
+        CredentialRecord::Waived(w) => panic!("no credential record at seq {}", w.seq),
     }
 }
 
@@ -108,7 +109,7 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
             match record {
                 CredentialRecord::Enrolled(_) => kept.push((member, credential.to_owned())),
                 CredentialRecord::Removed(_) => kept.retain(|(_, c)| c != credential),
-                CredentialRecord::Asserted(_) => {}
+                CredentialRecord::Asserted(_) | CredentialRecord::Waived(_) => {}
             }
         }
         let fold = CredentialFold::new(all.iter().cloned());
@@ -423,6 +424,7 @@ fn credential_record_maps_every_valid_vector_draft() {
             CredentialRecord::Enrolled(e) => Some((e.alg, e.sign_count)),
             CredentialRecord::Removed(_) => None,
             CredentialRecord::Asserted(a) => panic!("a valid draft is no assertion: {}", a.seq),
+            CredentialRecord::Waived(w) => panic!("a valid draft is no waiver: {}", w.seq),
         };
         match text(case, "name") {
             "eddsa" => assert_eq!(enrolled.map(|e| e.0), Some(PasskeyAlg::EdDsa)),
@@ -451,6 +453,7 @@ fn route_two_holds_through_a_step_up_assertion() {
         credential: credential.clone(),
         challenge: "01JAA3P0A000000000000000H1".to_owned(),
         sign_count: 7,
+        event_time: UtcNanos::EPOCH,
     });
     let fold = CredentialFold::new([enrolment, asserted]);
     assert_eq!(fold.held(&credential).map(|e| e.member), Some(member));

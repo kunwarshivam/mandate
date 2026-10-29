@@ -97,7 +97,9 @@ const TARGET_CC: &str = "gcc";
 /// dispatcher, the data process and the model gateway a hosted cell runs, released the same way so
 /// every process the chart builds has a signed digest to promote (DEC-2079); the gateway's image
 /// holds no recorded research bundle, which only the local cell's interim image carries.
-pub(crate) const BINARIES: [(&str, &str); 13] = [
+/// `mandate-news-reader` is the news reader staging runs once its key and followed agents are set
+/// (DEC-2084 item 8).
+pub(crate) const BINARIES: [(&str, &str); 14] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
@@ -111,6 +113,7 @@ pub(crate) const BINARIES: [(&str, &str); 13] = [
     ("mandate-dispatcher", "mandate-dispatcher"),
     ("mandate-datad", "mandate-datad"),
     ("mandate-gatewayd", "mandate-gatewayd"),
+    ("mandate-news-reader", "mandate-news-reader"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
@@ -1466,6 +1469,7 @@ mod tests {
                 ("mandate-dispatcher", "mandate-dispatcher"),
                 ("mandate-datad", "mandate-datad"),
                 ("mandate-gatewayd", "mandate-gatewayd"),
+                ("mandate-news-reader", "mandate-news-reader"),
             ]
             .as_slice()
         );

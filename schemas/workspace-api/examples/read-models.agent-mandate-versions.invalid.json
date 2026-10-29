@@ -1,0 +1,366 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a malformed agent_id",
+    "set": {
+      "/agent_id": "a b"
+    }
+  },
+  {
+    "label": "a malformed account_ref",
+    "set": {
+      "/account_ref": "a b"
+    }
+  },
+  {
+    "label": "a malformed in_effect",
+    "set": {
+      "/in_effect": "sha256:xyz"
+    }
+  },
+  {
+    "label": "a malformed stopped_at",
+    "set": {
+      "/stopped_at": "yesterday"
+    }
+  },
+  {
+    "label": "versions empty",
+    "set": {
+      "/versions": []
+    }
+  },
+  {
+    "label": "versions not an array",
+    "set": {
+      "/versions": {}
+    }
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/agent_id"
+    ]
+  },
+  {
+    "label": "a missing account_ref",
+    "remove": [
+      "/account_ref"
+    ]
+  },
+  {
+    "label": "a missing in_effect",
+    "remove": [
+      "/in_effect"
+    ]
+  },
+  {
+    "label": "a missing stopped_at",
+    "remove": [
+      "/stopped_at"
+    ]
+  },
+  {
+    "label": "a missing versions",
+    "remove": [
+      "/versions"
+    ]
+  },
+  {
+    "label": "the deployment missing mandate_version",
+    "remove": [
+      "/versions/0/mandate_version"
+    ]
+  },
+  {
+    "label": "the deployment missing base_version",
+    "remove": [
+      "/versions/0/base_version"
+    ]
+  },
+  {
+    "label": "the deployment missing classification",
+    "remove": [
+      "/versions/0/classification"
+    ]
+  },
+  {
+    "label": "the deployment missing created_at",
+    "remove": [
+      "/versions/0/created_at"
+    ]
+  },
+  {
+    "label": "the deployment missing confirmed_at",
+    "remove": [
+      "/versions/0/confirmed_at"
+    ]
+  },
+  {
+    "label": "the deployment missing confirmation_id",
+    "remove": [
+      "/versions/0/confirmation_id"
+    ]
+  },
+  {
+    "label": "the deployment missing deployed_at",
+    "remove": [
+      "/versions/0/deployed_at"
+    ]
+  },
+  {
+    "label": "the deployment missing application",
+    "remove": [
+      "/versions/0/application"
+    ]
+  },
+  {
+    "label": "a confirmation missing mandate_version",
+    "remove": [
+      "/versions/1/mandate_version"
+    ]
+  },
+  {
+    "label": "a confirmation missing base_version",
+    "remove": [
+      "/versions/1/base_version"
+    ]
+  },
+  {
+    "label": "a confirmation missing classification",
+    "remove": [
+      "/versions/1/classification"
+    ]
+  },
+  {
+    "label": "a confirmation missing created_at",
+    "remove": [
+      "/versions/1/created_at"
+    ]
+  },
+  {
+    "label": "a confirmation missing confirmed_at",
+    "remove": [
+      "/versions/1/confirmed_at"
+    ]
+  },
+  {
+    "label": "a confirmation missing confirmation_id",
+    "remove": [
+      "/versions/1/confirmation_id"
+    ]
+  },
+  {
+    "label": "a confirmation missing deployed_at",
+    "remove": [
+      "/versions/1/deployed_at"
+    ]
+  },
+  {
+    "label": "a confirmation missing application",
+    "remove": [
+      "/versions/1/application"
+    ]
+  },
+  {
+    "label": "an unknown member on the deployment",
+    "set": {
+      "/versions/0/extra": 1
+    }
+  },
+  {
+    "label": "an unknown member on a confirmation",
+    "set": {
+      "/versions/1/extra": 1
+    }
+  },
+  {
+    "label": "a deployment classified neutral",
+    "set": {
+      "/versions/0/classification": "neutral"
+    }
+  },
+  {
+    "label": "a deployment classified null",
+    "set": {
+      "/versions/0/classification": null
+    }
+  },
+  {
+    "label": "a confirmation classified first_version",
+    "set": {
+      "/versions/1/classification": "first_version"
+    }
+  },
+  {
+    "label": "an unknown classification",
+    "set": {
+      "/versions/1/classification": "mutant_value"
+    }
+  },
+  {
+    "label": "a deployment with no deployed_at",
+    "set": {
+      "/versions/0/deployed_at": null
+    }
+  },
+  {
+    "label": "a deployment with a base",
+    "set": {
+      "/versions/0/base_version": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+    }
+  },
+  {
+    "label": "a deployment with an application",
+    "set": {
+      "/versions/0/application": {
+        "result": "applied",
+        "reason": null,
+        "recorded_at": "2026-10-22T10:05:03.000000000Z"
+      }
+    }
+  },
+  {
+    "label": "a confirmation deployed",
+    "set": {
+      "/versions/1/deployed_at": "2026-10-22T10:05:00.000000000Z"
+    }
+  },
+  {
+    "label": "a confirmation with no base",
+    "set": {
+      "/versions/1/base_version": null
+    }
+  },
+  {
+    "label": "a confirmation with no confirmed_at",
+    "set": {
+      "/versions/1/confirmed_at": null
+    }
+  },
+  {
+    "label": "a confirmation with no confirmation_id",
+    "set": {
+      "/versions/1/confirmation_id": null
+    }
+  },
+  {
+    "label": "a malformed confirmation_id",
+    "set": {
+      "/versions/0/confirmation_id": "x"
+    }
+  },
+  {
+    "label": "a malformed mandate_version",
+    "set": {
+      "/versions/0/mandate_version": "v1"
+    }
+  },
+  {
+    "label": "a malformed created_at",
+    "set": {
+      "/versions/1/created_at": "x"
+    }
+  },
+  {
+    "label": "an applied version with a reason",
+    "set": {
+      "/versions/1/application/reason": "not_loosening"
+    }
+  },
+  {
+    "label": "a rejected version with no reason",
+    "set": {
+      "/versions/1/application/result": "rejected"
+    }
+  },
+  {
+    "label": "an unknown reason",
+    "set": {
+      "/versions/1/application": {
+        "result": "rejected",
+        "reason": "mutant_value",
+        "recorded_at": "2026-10-22T10:05:03.000000000Z"
+      }
+    }
+  },
+  {
+    "label": "an unknown result",
+    "set": {
+      "/versions/1/application/result": "pending"
+    }
+  },
+  {
+    "label": "an unknown application member",
+    "set": {
+      "/versions/1/application/extra": 1
+    }
+  },
+  {
+    "label": "an unknown rejected application member",
+    "set": {
+      "/versions/1/application": {
+        "result": "rejected",
+        "reason": "not_loosening",
+        "recorded_at": "2026-10-22T10:05:03.000000000Z",
+        "extra": 1
+      }
+    }
+  },
+  {
+    "label": "an application missing result",
+    "remove": [
+      "/versions/1/application/result"
+    ]
+  },
+  {
+    "label": "an application missing reason",
+    "remove": [
+      "/versions/1/application/reason"
+    ]
+  },
+  {
+    "label": "an application missing recorded_at",
+    "remove": [
+      "/versions/1/application/recorded_at"
+    ]
+  },
+  {
+    "label": "a rejected application missing result",
+    "set": {
+      "/versions/1/application": {
+        "reason": "not_loosening",
+        "recorded_at": "2026-10-22T10:05:03.000000000Z"
+      }
+    }
+  },
+  {
+    "label": "a rejected application missing reason",
+    "set": {
+      "/versions/1/application": {
+        "result": "rejected",
+        "recorded_at": "2026-10-22T10:05:03.000000000Z"
+      }
+    }
+  },
+  {
+    "label": "a rejected application missing recorded_at",
+    "set": {
+      "/versions/1/application": {
+        "result": "rejected",
+        "reason": "not_loosening"
+      }
+    }
+  }
+]
