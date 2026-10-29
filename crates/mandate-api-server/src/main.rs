@@ -42,7 +42,7 @@ use std::time::Duration;
 
 use mandate_api_server::cache::{CachedJournal, Limits};
 use mandate_api_server::challenges::Challenges;
-use mandate_api_server::chat::{Chat, models_from_registry};
+use mandate_api_server::chat::{Chat, chat_from};
 use mandate_api_server::chat_watch;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
@@ -176,19 +176,6 @@ struct Start {
     chat: Chat,
 }
 
-/// The chat's settings (DEC-2293): the gateway service's `host:port` and the registry file the
-/// gateway serves, whose `chat` entries are the models an owner may choose. Either missing or
-/// unreadable leaves the chat with no model, which every run then says; it never stops the start.
-fn chat_from_env() -> Chat {
-    let gateway = env::var(MODEL_GATEWAY).ok().filter(|a| !a.is_empty());
-    let models = env::var_os(CHAT_REGISTRY)
-        .and_then(|path| std::fs::read(path).ok())
-        .and_then(|bytes| mandate_canon::parse(&bytes).ok())
-        .map(|file| models_from_registry(&file))
-        .unwrap_or_default();
-    Chat::new(gateway, models)
-}
-
 /// The model gateway service's `host:port` (DEC-2293).
 const MODEL_GATEWAY: &str = "MANDATE_MODEL_GATEWAY";
 /// The gateway's live registry file, read for its chat entries (DEC-2293).
@@ -269,7 +256,12 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         connect,
         cool_off_waiver: waiver,
         bars: bars_root(env::var_os(BARS).as_deref()),
-        chat: chat_from_env(),
+        chat: chat_from(
+            env::var(MODEL_GATEWAY).ok(),
+            env::var_os(CHAT_REGISTRY)
+                .and_then(|path| std::fs::read(path).ok())
+                .as_deref(),
+        ),
     };
     Ok((args, start))
 }

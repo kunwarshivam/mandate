@@ -8,7 +8,6 @@
 //!   message the owner sees is journaled before it is served.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
@@ -232,7 +231,6 @@ fn execute(app: &App, handle: &Handle, start: Start) {
         app,
         handle,
         start: &start,
-        turn: 0,
         index: 0,
         posted: false,
     };
@@ -541,26 +539,7 @@ impl Model for Remote {
         let timeout = Duration::from_secs(180);
         let _ = stream.set_read_timeout(Some(timeout));
         let _ = stream.set_write_timeout(Some(timeout));
-        frame::call(&mut Bounded(&mut stream), request)
-            .unwrap_or(Err(RequestError::GatewayUnreachable))
-    }
-}
-
-/// A stream read and written whole.
-struct Bounded<'a>(&'a mut TcpStream);
-
-impl Read for Bounded<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.0.read(buf)
-    }
-}
-
-impl Write for Bounded<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.write(buf)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
+        frame::call(&mut stream, request).unwrap_or(Err(RequestError::GatewayUnreachable))
     }
 }
 
@@ -642,7 +621,7 @@ struct Tools<'a> {
     app: &'a App,
     handle: &'a Handle,
     start: &'a Start,
-    turn: u32,
+    /// The run's calls so far, which names each commit's idempotency key.
     index: u32,
     posted: bool,
 }
@@ -650,9 +629,6 @@ struct Tools<'a> {
 impl Toolbox for Tools<'_> {
     fn run(&mut self, call: &ToolCall) -> String {
         self.index = self.index.saturating_add(1);
-        if call.index == 0 {
-            self.turn = self.turn.saturating_add(1);
-        }
         let result = match call.name.as_str() {
             name::REPLY => self.reply(call),
             name::NOTE => self.note(call),
@@ -1138,10 +1114,8 @@ impl Tools<'_> {
             return refusal("no_session");
         };
         let now = self.app.clock.now().unwrap_or(self.start.now);
-        let Ok(key) = IdempotencyKey::parse(&format!(
-            "chat-{}-{}-{}",
-            self.start.run, self.turn, self.index
-        )) else {
+        let Ok(key) = IdempotencyKey::parse(&format!("chat-{}-{}", self.start.run, self.index))
+        else {
             return refusal("idempotency");
         };
         let gate = Gate {
@@ -1289,4 +1263,127 @@ fn cut(mut text: String) -> String {
         text.push_str("…(cut)");
     }
     text
+}
+
+#[cfg(test)]
+mod pure {
+    //! The run's small readers, each against the inputs on both sides of its every condition.
+
+    use mandate_canon::{Digest, Value, parse, to_canonical};
+    use mandate_journal::StoredEvent;
+
+    use super::{THREAD_MESSAGES, Thread, micros, references, transcript};
+
+    fn payload(text: &str) -> Option<Value> {
+        parse(text.as_bytes()).ok()
+    }
+
+    fn posted(seq: u64, payload: &str) -> StoredEvent {
+        let text = format!(r#"{{"event_type":"ChatMessagePosted","payload":{payload}}}"#);
+        let body = parse(text.as_bytes())
+            .map(|v| to_canonical(&v))
+            .unwrap_or_default();
+        StoredEvent {
+            stream_id: "ctl:w".to_owned(),
+            seq,
+            event_id: format!("e{seq}"),
+            event_type: "ChatMessagePosted".to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: String::new(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::of(&body),
+            body,
+        }
+    }
+
+    #[test]
+    fn a_thread_holds_only_its_own_agent_setup_and_member() {
+        let agent = Thread::agent("agt_a", "m1");
+        let holds = |text: &str| agent.holds(payload(text).as_ref());
+        assert!(holds(
+            r#"{"agent_id":"agt_a","setup_id":null,"member":"m1"}"#
+        ));
+        assert!(!holds(
+            r#"{"agent_id":"agt_b","setup_id":null,"member":"m1"}"#
+        ));
+        assert!(!holds(
+            r#"{"agent_id":"agt_a","setup_id":null,"member":"m2"}"#
+        ));
+        assert!(!holds(
+            r#"{"agent_id":"agt_a","setup_id":"s1","member":"m1"}"#
+        ));
+        assert!(!holds(
+            r#"{"agent_id":"agt_b","setup_id":"s1","member":"m2"}"#
+        ));
+        assert!(!agent.holds(None));
+        let setup = Thread::setup("s1", "m1");
+        assert!(
+            setup.holds(payload(r#"{"agent_id":null,"setup_id":"s1","member":"m1"}"#).as_ref())
+        );
+        assert!(
+            !setup.holds(payload(r#"{"agent_id":null,"setup_id":"s2","member":"m1"}"#).as_ref())
+        );
+        assert_ne!(agent.key(), setup.key());
+        assert_ne!(agent.key(), Thread::agent("agt_a", "m2").key());
+    }
+
+    #[test]
+    fn a_dollar_text_reads_in_millionths() {
+        assert_eq!(micros("5"), Some(5_000_000));
+        assert_eq!(micros("0.5"), Some(500_000));
+        assert_eq!(micros("2.25"), Some(2_250_000));
+        assert_eq!(micros("0.000001"), Some(1));
+        assert_eq!(micros("0.0000001"), None, "past a millionth");
+        assert_eq!(micros("-1"), None);
+        assert_eq!(micros("1.x"), None);
+        assert_eq!(micros(""), None);
+        assert_eq!(micros("12."), Some(12_000_000));
+    }
+
+    #[test]
+    fn a_payload_s_references_are_its_sorted_hashes_at_any_depth() {
+        let a = format!("sha256:{}", "a".repeat(64));
+        let b = format!("sha256:{}", "b".repeat(64));
+        let text = format!(r#"{{"x":"{b}","y":[{{"z":"{a}"}},"sha256:short","{b}"],"n":1}}"#);
+        let found = payload(&text).map(|p| references(&p)).unwrap_or_default();
+        assert_eq!(found, vec![Value::Str(a), Value::Str(b)]);
+    }
+
+    #[test]
+    fn the_transcript_is_the_thread_s_own_last_messages_oldest_first() {
+        let thread = Thread::agent("agt_a", "m1");
+        let own = |author: &str, text: &str| {
+            format!(
+                r#"{{"agent_id":"agt_a","setup_id":null,"member":"m1","author":"{author}","text":"{text}"}}"#
+            )
+        };
+        let mut rows = vec![
+            posted(1, &own("owner", "hello")),
+            posted(2, &own("agent", "Hi.")),
+            posted(
+                3,
+                r#"{"agent_id":"agt_b","setup_id":null,"member":"m1","author":"owner","text":"elsewhere"}"#,
+            ),
+            posted(
+                4,
+                r#"{"agent_id":"agt_a","setup_id":null,"member":"m1","author":"agent","text":null}"#,
+            ),
+        ];
+        assert_eq!(
+            transcript(&rows, &thread),
+            "Owner: hello\nAgent: Hi.\nAgent: (card)"
+        );
+        assert_eq!(transcript(&[], &thread), "(no earlier messages)");
+        for (n, seq) in (0..THREAD_MESSAGES).zip(10_u64..) {
+            rows.push(posted(seq, &own("owner", &format!("m{n}"))));
+        }
+        let kept = transcript(&rows, &thread);
+        assert_eq!(kept.lines().count(), THREAD_MESSAGES);
+        assert!(kept.starts_with("Owner: m0\n"), "{kept}");
+        assert!(
+            kept.ends_with(&format!("Owner: m{}", THREAD_MESSAGES - 1)),
+            "{kept}"
+        );
+    }
 }

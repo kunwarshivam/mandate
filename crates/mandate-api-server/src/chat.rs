@@ -141,6 +141,17 @@ impl Chat {
     }
 }
 
+/// The chat's settings from the process's: the gateway service's `host:port`, when set and not
+/// empty, and the models of the registry file's bytes, none when there are none or they do not read.
+pub fn chat_from(gateway: Option<String>, registry: Option<&[u8]>) -> Chat {
+    let gateway = gateway.filter(|address| !address.is_empty());
+    let models = registry
+        .and_then(|bytes| parse(bytes).ok())
+        .map(|file| models_from_registry(&file))
+        .unwrap_or_default();
+    Chat::new(gateway, models)
+}
+
 /// The models a registry file's `chat` items name, in its order, each labelled by its model name
 /// and priced by its endpoint; an item that does not read is left out.
 pub fn models_from_registry(file: &Value) -> Vec<ChatModel> {
@@ -848,5 +859,162 @@ async fn append_owner(
     {
         Settled::Stored(row) => Ok(*row),
         _ => Err(Refused::JournalUnavailable),
+    }
+}
+
+#[cfg(test)]
+mod pure {
+    //! The chat's small readers, each against the inputs on both sides of its every condition.
+
+    use mandate_canon::parse;
+    use mandate_chat::ChatEntry;
+    use mandate_gateway::registry::{Identity, Snapshot};
+
+    use super::{
+        Chat, ChatModel, MAX_MESSAGE_CHARS, chat_from, decode_message, ident, marker,
+        positive_decimal,
+    };
+
+    const REGISTRY: &str = include_str!("../../../deploy/cell/model-gateway/registry.json");
+
+    fn model(id: &str) -> ChatModel {
+        ChatModel {
+            entry: ChatEntry {
+                model_id: id.to_owned(),
+                model_version: "1.0.0".to_owned(),
+                identity: Identity {
+                    provider: "anthropic".to_owned(),
+                    model_name: format!("anthropic/{id}"),
+                    snapshot: Snapshot::Dated(id.to_owned()),
+                    quantization: None,
+                },
+                deadline_ms: 1_000,
+                max_output_tokens: 100,
+            },
+            label: id.to_owned(),
+            input_per_million: "1".to_owned(),
+            output_per_million: "2".to_owned(),
+        }
+    }
+
+    #[test]
+    fn an_identifier_is_letters_digits_underscores_and_hyphens_and_never_empty() {
+        for good in ["a", "setup_1", "setup-1", "A9", "_", "-"] {
+            assert!(ident(good), "{good}");
+        }
+        for bad in ["", "a b", "a.b", "a/b", "é", "a+b"] {
+            assert!(!ident(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_cap_is_a_plain_positive_decimal() {
+        for good in ["5", "0.5", "2.50", "10", "0.000001", "01"] {
+            assert!(positive_decimal(good), "{good}");
+        }
+        for bad in [
+            "", "0", "0.0", "00", ".5", "5.", "1.2.3", "-1", "1e3", "a", "1.a", "a.1", " 1",
+        ] {
+            assert!(!positive_decimal(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_a_brief_card_with_no_text_is_the_daily_note_s_marker() {
+        let reads = |text: &str| parse(text.as_bytes()).is_ok_and(|v| marker(&v));
+        assert!(reads(
+            r#"{"payload":{"card":{"kind":"brief"},"text":null}}"#
+        ));
+        assert!(!reads(
+            r#"{"payload":{"card":{"kind":"brief"},"text":"Today went well."}}"#
+        ));
+        assert!(!reads(
+            r#"{"payload":{"card":{"kind":"fill"},"text":null}}"#
+        ));
+        assert!(!reads(r#"{"payload":{"card":null,"text":null}}"#));
+        assert!(!reads(r#"{"payload":{"card":{"kind":"brief"}}}"#));
+    }
+
+    #[test]
+    fn a_message_is_at_most_its_cap_in_characters() {
+        let body = |n: usize| format!(r#"{{"text":"{}"}}"#, "é".repeat(n));
+        assert!(decode_message(body(MAX_MESSAGE_CHARS).as_bytes()).is_ok());
+        assert!(decode_message(body(MAX_MESSAGE_CHARS - 1).as_bytes()).is_ok());
+        assert!(decode_message(body(MAX_MESSAGE_CHARS + 1).as_bytes()).is_err());
+        assert!(decode_message(br#"{"text":"  hi  "}"#).is_ok_and(|m| m.text == "hi"));
+        assert!(decode_message(br#"{"text":"   "}"#).is_err());
+        assert!(decode_message(br#"{"text":"hi","x":1}"#).is_err());
+    }
+
+    #[test]
+    fn a_named_model_is_chosen_and_an_unknown_or_absent_one_falls_back_to_the_first() {
+        let chat = Chat::new(None, vec![model("llm.a"), model("llm.b")]);
+        let id = |m: Option<&ChatModel>| m.map(|m| m.entry.model_id.clone());
+        assert_eq!(id(chat.model(Some("llm.b"))).as_deref(), Some("llm.b"));
+        assert_eq!(id(chat.model(Some("llm.a"))).as_deref(), Some("llm.a"));
+        assert_eq!(id(chat.model(Some("llm.z"))).as_deref(), Some("llm.a"));
+        assert_eq!(id(chat.model(None)).as_deref(), Some("llm.a"));
+        assert!(Chat::new(None, Vec::new()).model(None).is_none());
+    }
+
+    #[test]
+    fn a_thread_is_held_by_one_run_until_released() {
+        let chat = Chat::new(None, Vec::new());
+        assert_eq!(chat.running("t"), None);
+        assert!(chat.claim("t", "run_1"));
+        assert!(!chat.claim("t", "run_2"));
+        assert_eq!(chat.running("t").as_deref(), Some("run_1"));
+        assert_eq!(chat.running("u"), None);
+        chat.release("t");
+        assert_eq!(chat.running("t"), None);
+        assert!(!chat.stopped("run_1"));
+        chat.stop("run_1");
+        assert!(chat.stopped("run_1"));
+        assert!(!chat.stopped("run_2"));
+    }
+
+    #[test]
+    fn each_id_is_fresh_and_sorts_after_the_last_at_one_instant() {
+        let chat = Chat::new(None, Vec::new());
+        let Ok(now) = mandate_time::UtcNanos::from_parts(1_791_000_000, 0) else {
+            return;
+        };
+        let first = chat.ulid(now);
+        let second = chat.ulid(now);
+        assert_eq!(first.len(), 26);
+        assert!(second > first, "{first} {second}");
+    }
+
+    #[test]
+    fn the_chat_takes_a_set_gateway_and_the_registry_s_chat_models() {
+        let chat = chat_from(
+            Some("model-gateway:8080".to_owned()),
+            Some(REGISTRY.as_bytes()),
+        );
+        assert_eq!(chat.gateway.as_deref(), Some("model-gateway:8080"));
+        let ids: Vec<&str> = chat
+            .models
+            .iter()
+            .map(|m| m.entry.model_id.as_str())
+            .collect();
+        assert_eq!(ids, ["llm.chat_sonnet", "llm.chat_haiku"]);
+        assert_eq!(
+            chat.models.first().map(|m| m.label.as_str()),
+            Some("claude-sonnet-5.5")
+        );
+        assert_eq!(
+            chat.models.first().map(|m| m.input_per_million.as_str()),
+            Some("2")
+        );
+        assert_eq!(
+            chat.models.first().map(|m| m.output_per_million.as_str()),
+            Some("10")
+        );
+        let unset = chat_from(Some(String::new()), Some(b"not json"));
+        assert_eq!(unset.gateway, None, "an empty address is none");
+        assert!(unset.models.is_empty());
+        let none = chat_from(None, None);
+        assert_eq!(none.gateway, None);
+        assert!(none.models.is_empty());
     }
 }

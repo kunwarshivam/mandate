@@ -122,6 +122,14 @@ fn turn(calls: &[(&str, &str)], content: Option<&str>) -> Recorded {
 /// The model gateway service: the real gateway, offering the chat entry on one recorded endpoint
 /// that answers `script` in order, served one framed call per connection.
 fn gateway_service(script: Vec<Recorded>) -> String {
+    gateway_service_gated(script, None)
+}
+
+/// [`gateway_service`], answering its first call only once `gate` is sent to.
+fn gateway_service_gated(
+    script: Vec<Recorded>,
+    gate: Option<std::sync::mpsc::Receiver<()>>,
+) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
     let address = listener.local_addr().expect("its address").to_string();
     std::thread::spawn(move || {
@@ -183,8 +191,12 @@ fn gateway_service(script: Vec<Recorded>) -> String {
             Box::new(SequentialIds::starting_at(1 << 80)),
         );
         gateway.transport_mut().script(script);
+        let mut gate = gate;
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
+            if let Some(held) = gate.take() {
+                let _ = held.recv();
+            }
             let _ = frame::serve(&mut stream, |request| gateway.call(&request));
         }
     });
@@ -216,7 +228,7 @@ fn fixture(gateway: Option<String>) -> Fixture {
         &[Algorithm::Es256],
     )
     .expect("the issuer");
-    let store = Objects::new(BTreeMap::<Digest, Vec<u8>>::new());
+    let store = Arc::new(Objects::new(BTreeMap::<Digest, Vec<u8>>::new()));
     store
         .put(&to_canonical(
             &parse(PINNED_DOCUMENT.as_bytes()).expect("JSON"),
@@ -239,8 +251,10 @@ fn fixture(gateway: Option<String>) -> Fixture {
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| Ok(records.clone())),
         hosted: hosted(),
-        artifacts: Some(Arc::new(store)),
-        objects: None,
+        artifacts: Some(
+            Arc::clone(&store) as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>
+        ),
+        objects: Some(store as Arc<dyn ObjectStore>),
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
@@ -381,15 +395,16 @@ fn thread(f: &Fixture, cookie: &str) -> Value {
     parse(&reply.body).expect("JSON")
 }
 
-/// The thread once its run has ended, read every 25 ms for up to 20 s.
+/// The thread once its run has ended, read every 25 ms for up to 20 s. The end is checked before
+/// the thread is read, so the read holds everything the run journaled before its end.
 fn settled(f: &Fixture, cookie: &str) -> Value {
     for _ in 0..800 {
-        let body = thread(f, cookie);
         let ended = f
             .journal
             .rows_of(&ctl())
             .iter()
             .any(|row| row.event_type == "ChatRunEnded");
+        let body = thread(f, cookie);
         if ended && body.get("running") == Some(&Value::Bool(false)) {
             return body;
         }
@@ -924,5 +939,367 @@ fn after_the_close_on_a_weekday_the_daily_note_runs_once_and_its_marker_is_not_s
     assert!(
         said.iter().all(|t| !t.1.is_empty()),
         "the marker is not shown: {said:?}"
+    );
+}
+
+/// The result each tool of `name` gave in the run, in order.
+fn results_of<'a>(found: &'a [(String, String)], tool: &str) -> Vec<&'a str> {
+    found
+        .iter()
+        .filter(|(n, _)| n == tool)
+        .map(|(_, r)| r.as_str())
+        .collect()
+}
+
+#[test]
+fn the_read_tools_answer_from_the_agent_s_own_records() {
+    let gateway = gateway_service(vec![
+        turn(
+            &[
+                (
+                    name::NOTE,
+                    r#"{"goals":[{"text":"Hold AAPL","status":"active"}],"plan":"Wait for a dip.","watching":["AAPL"]}"#,
+                ),
+                (name::GOALS, "{}"),
+                (name::SUMMARY, "{}"),
+                (name::POSITIONS, "{}"),
+                (name::ORDERS, "{}"),
+                (name::MANDATE, "{}"),
+            ],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    seed_fill(&f);
+    seed_approval(&f);
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "how are we doing?").status, 202);
+    settled(&f, &cookie);
+    let found = results(&f);
+    let one = |tool: &str| {
+        results_of(&found, tool)
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert_eq!(one(name::NOTE), r#"{"ok":true}"#);
+    let goals = one(name::GOALS);
+    assert!(
+        goals.contains(r#""goals":[{"status":"active","text":"Hold AAPL"}]"#),
+        "{goals}"
+    );
+    assert!(goals.contains(r#""plan":"Wait for a dip.""#), "{goals}");
+    assert!(goals.contains(r#""watching":["AAPL"]"#), "{goals}");
+    assert_eq!(
+        one(name::SUMMARY),
+        r#"{"approvals_waiting":1,"mode":"active","ok":true,"positions":[]}"#
+    );
+    assert_eq!(one(name::POSITIONS), r#"{"ok":true,"positions":[]}"#);
+    let orders = one(name::ORDERS);
+    assert!(
+        orders.starts_with(r#"{"ok":true,"orders":[{"client_order_id":"co_1","#),
+        "{orders}"
+    );
+    assert!(
+        orders.contains(&format!(r#""instrument_id":"{AAPL}""#)),
+        "{orders}"
+    );
+    let mandate = one(name::MANDATE);
+    assert!(mandate.starts_with(r#"{"name":"tracer-aapl","ok":true,"pinned_universe":true,"summary":{"allocation_usd":"1000","#), "{mandate}");
+}
+
+#[test]
+fn a_thread_with_a_run_in_flight_says_so_and_refuses_another_message() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let key = mandate_api_server::chat_run::Thread::agent("agt_a", ALICE).key();
+    assert!(f.app.chat.claim(&key, "run_held"));
+    let body = thread(&f, &cookie);
+    assert_eq!(body.get("running"), Some(&Value::Bool(true)));
+    assert_eq!(body.get("run_id").and_then(Value::as_str), Some("run_held"));
+    let before = chat_rows(&f).len();
+    let refused = post_message(&f, &cookie, "are you there?");
+    assert_eq!(
+        refused.status,
+        429,
+        "{}",
+        String::from_utf8_lossy(&refused.body)
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.body).contains("rate_limited"),
+        "{}",
+        String::from_utf8_lossy(&refused.body)
+    );
+    assert_eq!(
+        chat_rows(&f).len(),
+        before,
+        "nothing is journaled for a refused message"
+    );
+    f.app.chat.release(&key);
+    let free = thread(&f, &cookie);
+    assert_eq!(free.get("running"), Some(&Value::Bool(false)));
+    assert_eq!(free.get("run_id"), Some(&Value::Null));
+}
+
+/// The agent's chat settings, as `GET .../settings` serves them.
+fn get_settings(f: &Fixture, cookie: &str, agent: &str) -> Reply {
+    let cookie = format!("{COOKIE_NAME}={cookie}");
+    send(
+        f.addr,
+        "GET",
+        &format!("/v1/workspaces/{WORKSPACE}/agents/{agent}/settings"),
+        &[("Cookie", &cookie)],
+        b"",
+    )
+}
+
+#[test]
+fn an_agent_s_settings_are_its_own_or_the_defaults() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let first = get_settings(&f, &cookie, "agt_a");
+    assert_eq!(
+        first.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let read = parse(&first.body).expect("JSON");
+    assert_eq!(read.get("agent_id").and_then(Value::as_str), Some("agt_a"));
+    assert_eq!(
+        read.get("chat_model").and_then(Value::as_str),
+        Some("llm.chat_sonnet")
+    );
+    assert_eq!(read.get("daily_cap_usd").and_then(Value::as_str), Some("5"));
+    push(
+        &f,
+        &ctl(),
+        vec![
+            row(
+                3,
+                "ChatSettingsChanged",
+                r#"{"agent_id":"agt_b","chat_model":"llm.chat_sonnet","daily_cap_usd":"9"}"#,
+            ),
+            row(
+                4,
+                "ChatSettingsChanged",
+                r#"{"agent_id":"agt_a","chat_model":"llm.unknown","daily_cap_usd":"2.5"}"#,
+            ),
+            row(
+                5,
+                "ChatSettingsChanged",
+                r#"{"agent_id":"agt_c","chat_model":"llm.chat_sonnet","daily_cap_usd":"7"}"#,
+            ),
+        ],
+    );
+    let own = parse(&get_settings(&f, &cookie, "agt_a").body).expect("JSON");
+    assert_eq!(
+        own.get("daily_cap_usd").and_then(Value::as_str),
+        Some("2.5"),
+        "the agent's own latest setting, not another agent's"
+    );
+    assert_eq!(
+        own.get("chat_model").and_then(Value::as_str),
+        Some("llm.chat_sonnet"),
+        "a model the deployment no longer offers falls back to the default"
+    );
+    assert_eq!(get_settings(&f, &cookie, "agt_nope").status, 404);
+}
+
+#[test]
+fn a_run_that_has_replied_says_nothing_more_when_it_ends_on_an_error() {
+    let gateway = gateway_service(vec![turn(
+        &[(name::REPLY, r#"{"sources":[],"text":"On it."}"#)],
+        None,
+    )]);
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "check the account").status, 202);
+    let body = settled(&f, &cookie);
+    assert_eq!(
+        texts(&body),
+        vec![
+            ("owner".to_owned(), "check the account".to_owned()),
+            ("agent".to_owned(), "On it.".to_owned()),
+        ]
+    );
+    let ended = chat_rows(&f)
+        .iter()
+        .filter(|row| row.event_type == "ChatRunEnded")
+        .filter_map(|row| parse(&row.body).ok())
+        .filter_map(|e| {
+            e.get("payload")
+                .and_then(|p| p.get("reason"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ended, vec!["model_error".to_owned()]);
+}
+
+#[test]
+fn a_run_that_ends_on_an_error_before_replying_says_why() {
+    let f = fixture(Some(gateway_service(Vec::new())));
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "check the account").status, 202);
+    let body = settled(&f, &cookie);
+    let said = texts(&body);
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert!(said[1].1.starts_with("I couldn't finish that"), "{said:?}");
+}
+
+/// The prompts of the run's model calls, oldest first, read back from the object store.
+fn prompts(f: &Fixture) -> Vec<String> {
+    let Some(store) = f.app.objects.as_ref() else {
+        return Vec::new();
+    };
+    chat_rows(f)
+        .iter()
+        .filter(|row| row.event_type == "ChatTurnRecorded")
+        .filter_map(|row| parse(&row.body).ok())
+        .filter_map(|e| {
+            e.get("payload")
+                .and_then(|p| p.get("prompt_ref"))
+                .and_then(Value::as_str)
+                .and_then(mandate_journal::ArtifactRef::parse)
+        })
+        .filter_map(|reference| store.read_artifact(&reference).ok())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .collect()
+}
+
+#[test]
+fn each_call_s_prompt_holds_the_agent_s_context_and_its_thread() {
+    let gateway = gateway_service(vec![
+        turn(&[(name::REPLY, r#"{"sources":[],"text":"Hi."}"#)], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+        turn(
+            &[(name::REPLY, r#"{"sources":[],"text":"Still here."}"#)],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "hello").status, 202);
+    settled(&f, &cookie);
+    let cookie_header = format!("{COOKIE_NAME}={cookie}");
+    let second = send(
+        f.addr,
+        "POST",
+        &messages_path(),
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Content-Type", "application/json"),
+            ("Cookie", &cookie_header),
+            ("Idempotency-Key", "k1Z-9_eeeeeeeeee"),
+        ],
+        br#"{"text":"and now?"}"#,
+    );
+    assert_eq!(second.status, 202);
+    for _ in 0..800 {
+        let ended = chat_rows(&f)
+            .iter()
+            .filter(|r| r.event_type == "ChatRunEnded")
+            .count();
+        if ended == 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let all = prompts(&f);
+    assert_eq!(all.len(), 4, "a prompt for every call");
+    let first = &all[0];
+    assert!(
+        first.contains("Agent: tracer-aapl (agt_a). Environment: paper. Stopped: false."),
+        "{first}"
+    );
+    assert!(first.contains("Mandate summary: {"), "{first}");
+    assert!(
+        first.contains(r"<<<data>>>\nOwner: hello\n<<<end data>>>"),
+        "{first}"
+    );
+    let later = &all[2];
+    assert!(
+        later.contains(
+            r"Conversation so far:\n<<<data>>>\nOwner: hello\nAgent: Hi.\nOwner: and now?\n"
+        ),
+        "the thread, oldest first, as the prompt's JSON text holds it: {later}"
+    );
+}
+
+#[test]
+fn the_owner_s_stop_ends_the_run_before_its_next_call() {
+    let (release, gate) = std::sync::mpsc::channel();
+    let gateway = gateway_service_gated(
+        vec![
+            turn(&[(name::GOALS, "{}")], None),
+            turn(&[(name::REPLY, r#"{"sources":[],"text":"Done."}"#)], None),
+            turn(&[], Some(r#"{"watch":[]}"#)),
+        ],
+        Some(gate),
+    );
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    let sent = post_message(&f, &cookie, "think it over");
+    assert_eq!(sent.status, 202);
+    let run = parse(&sent.body)
+        .ok()
+        .and_then(|b| b.get("run_id").and_then(Value::as_str).map(str::to_owned))
+        .expect("the run's id");
+    let cookie_header = format!("{COOKIE_NAME}={cookie}");
+    let stop = |run: &str, key: &str| {
+        send(
+            f.addr,
+            "POST",
+            &format!("/v1/workspaces/{WORKSPACE}/agents/agt_a/runs/{run}/stop"),
+            &[
+                ("Origin", APP),
+                ("X-Mandate-Request", "1"),
+                ("Content-Type", "application/json"),
+                ("Cookie", &cookie_header),
+                ("Idempotency-Key", key),
+            ],
+            b"{}",
+        )
+    };
+    assert_eq!(
+        stop("run_not_this_one", "k1Z-9_ffffffffff").status,
+        404,
+        "only the run in flight stops"
+    );
+    let stopped = stop(&run, "k1Z-9_gggggggggg");
+    assert_eq!(
+        stopped.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&stopped.body)
+    );
+    release.send(()).expect("the gateway waits");
+    let body = settled(&f, &cookie);
+    assert_eq!(texts(&body).last().map(|t| t.1.as_str()), Some("Stopped."));
+    let rows = chat_rows(&f);
+    assert!(rows.iter().any(|r| r.event_type == "ChatRunStopRequested"));
+    let reasons: Vec<String> = rows
+        .iter()
+        .filter(|r| r.event_type == "ChatRunEnded")
+        .filter_map(|r| parse(&r.body).ok())
+        .filter_map(|e| {
+            e.get("payload")
+                .and_then(|p| p.get("reason"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(reasons, vec!["stopped".to_owned()]);
+    assert!(
+        rows.iter()
+            .filter(|r| r.event_type == "ChatTurnRecorded")
+            .count()
+            <= 1,
+        "no call after the Stop: only the one held in flight, if the run had made it"
     );
 }
