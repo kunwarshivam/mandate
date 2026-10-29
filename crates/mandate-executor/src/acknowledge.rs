@@ -879,7 +879,7 @@ mod tests {
                             let request = request
                                 .and_then(|r| r.checked_rem(asked.len()))
                                 .and_then(|at| asked.get(at))
-                                .map_or(Value::Null, |r| text(r));
+                                .map_or(Value::Null, text);
                             let original = format!("ctl{c}");
                             control.push(control_row(&original, "OwnerAcknowledged", vec![
                                 ("event", text(&event)),
