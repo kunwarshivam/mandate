@@ -540,7 +540,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
   /**
    * `POST /connections/oauth/start` (DEC-2623 item 6's order after the session and body): live is
    * refused, a disclosure other than the current one is `invalid`, then the step-up for the connect
-   * digest; a retry with the same key and body answers the same start (item 8).
+   * digest, `cli_confirm` or `passkey` (DEC-2126); a retry with the same key and body answers the same start (item 8).
    */
   function startConnect(headers: Headers, body: string): Response {
     const key = headers.get("Idempotency-Key") ?? "";
@@ -558,8 +558,15 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const disclosure = members.disclosure as { document?: unknown; version?: unknown } | undefined;
     if (disclosure?.document !== CONNECT_DISCLOSURE.document || disclosure.version !== CONNECT_DISCLOSURE.version) return problem(422, "invalid", "none");
     if (!earlier) {
-      const refused = judgeCliConfirm(members.step_up, "connection", connectStepUpDigest(workspaceId));
-      if (refused) return problem(401, refused, "none");
+      const digest = connectStepUpDigest(workspaceId);
+      const method = (members.step_up as { method?: unknown } | null | undefined)?.method;
+      if (method === "passkey") {
+        const refused = judgePasskey(members.step_up, members.step_up_assertion, "connection", digest);
+        if (refused) return problem(refused.status, refused.code, "none");
+      } else {
+        const refused = judgeCliConfirm(members.step_up, "connection", digest);
+        if (refused) return problem(401, refused, "none");
+      }
     }
     const entry = earlier ?? { idempotency_key: key, body, connection_id: `conn_${eventId(`${workspaceId}\nconnect\n${key}`)}`, reads: 0 };
     if (!earlier) connects.push(entry);

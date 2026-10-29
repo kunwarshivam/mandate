@@ -272,6 +272,13 @@ export interface ConnectPort {
   challenge: () => Promise<ChallengeAnswer>;
   /** `POST /connections/oauth/start` with the confirmed challenge's evidence, retried with the same key while its answer is lost (DEC-2623 item 8). */
   start: (challenge: StepUpChallenge) => Promise<StartAnswer>;
+  /**
+   * The same start under the member's passkey (DEC-2126): a challenge of kind `connection` bound to
+   * this workspace and the disclosure shown, signed in the browser. A refusal before anything is sent
+   * names why with effect `none`: `passkey_unavailable`, `no_passkey` and `passkey_cooling_off` mean
+   * the host's `cli_confirm` code is the way (DEC-2125, DEC-2152).
+   */
+  startWithPasskey: () => Promise<StartAnswer>;
   /** `GET /connections/{id}` (DEC-2620). */
   read: (connectionId: string) => Promise<ConnectionAnswer>;
   /** `GET /connections`. */

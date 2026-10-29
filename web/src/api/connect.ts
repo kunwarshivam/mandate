@@ -7,24 +7,31 @@
  * Paper only.
  */
 import { array, closedEnum, isRecord, nullable, object, string, timestamp } from "./decode";
+import type { PasskeyEvidence, PasskeyStepUp, StepUpAssertion } from "./passkey";
 import { CONNECT_DISCLOSURE, type StepUpChallenge, cliConfirmEvidence } from "./step-up";
 import type { Decoded, DecodeProblem, Decoder, Timestamp } from "./types";
 
 /** The route of the start (§4.5). */
 export const CONNECT_START_ROUTE = "/connections/oauth/start";
 
-/** `commands/oauth-start-request`, as the web app sends it: Alpaca, paper, the disclosure shown, and the confirmed step-up. */
+/** `commands/oauth-start-request`, as the web app sends it: Alpaca, paper, the disclosure shown, and the step-up: a host-confirmed `cli_confirm`, or a passkey with its assertion beside it (DEC-2126 item 1). */
 export interface ConnectStartBody {
   broker: "alpaca";
   environment: "paper";
   disclosure: { document: string; version: string };
-  step_up: ReturnType<typeof cliConfirmEvidence>;
+  step_up: ReturnType<typeof cliConfirmEvidence> | PasskeyEvidence;
+  step_up_assertion?: StepUpAssertion;
 }
 
 /** The start's body for a challenge of kind `connection` the owner confirmed on the host; `null` for any other challenge. */
 export function connectStartBody(challenge: StepUpChallenge): ConnectStartBody | null {
   if (challenge.action.kind !== "connection") return null;
   return { broker: "alpaca", environment: "paper", disclosure: { document: CONNECT_DISCLOSURE.document, version: CONNECT_DISCLOSURE.version }, step_up: cliConfirmEvidence(challenge) };
+}
+
+/** The start's body under the member's passkey step-up of kind `connection` (DEC-2126 items 1 and 2): the evidence and, beside it, the assertion the server verifies. */
+export function connectPasskeyBody(stepUp: PasskeyStepUp): ConnectStartBody {
+  return { broker: "alpaca", environment: "paper", disclosure: { document: CONNECT_DISCLOSURE.document, version: CONNECT_DISCLOSURE.version }, step_up: stepUp.step_up, step_up_assertion: stepUp.step_up_assertion };
 }
 
 /** `commands/oauth-start-response` (DEC-2623 item 1). */

@@ -15,7 +15,7 @@ import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/s
 import type { CommandPhase, CommandStatus, Decoder, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead, holdingsRead } from "@/api/activity";
 import { alertsRead } from "@/api/alerts";
-import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
+import { type ConnectStartBody, connectPasskeyBody, connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
 import { type PasskeyKind, type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
 import type { ContentRef, Iso, Workspace } from "@/fixtures/types";
@@ -41,6 +41,7 @@ import {
   type Runtime,
   RuntimeContext,
   type SetUp,
+  type StartAnswer,
 } from "./mock-runtime";
 
 /** Refusal codes a set-up step names in words of their own rather than as a plain `invalid` (DEC-2809 item 1, DEC-2133). */
@@ -473,22 +474,35 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** Sends a connect's start, again with the same key and body while its answer is lost (DEC-2623 item 8). */
+  const sendStart = useCallback(
+    async (body: ConnectStartBody): Promise<StartAnswer> => {
+      const prepared = client.prepareConnect(body);
+      let last: { reason: string; effect: "none" | "recorded" | "unknown" } = { reason: "network", effect: "unknown" };
+      for (let attempt = 0; attempt < SENDS; attempt += 1) {
+        const outcome = await client.sendConnect(prepared);
+        if (outcome.ok) return { ok: true, authorizationUrl: outcome.value.authorization_url, connectionId: outcome.value.connection_id };
+        last = { reason: outcome.error.code, effect: outcome.error.effect };
+        if (outcome.error.effect !== "unknown" || !outcome.error.retryable) break;
+        await wait(retryMs * 2 ** attempt);
+      }
+      return { ok: false, ...last };
+    },
+    [client, retryMs],
+  );
+
   const connect = useMemo<ConnectPort>(
     () => ({
       challenge: () => stepUp({ kind: "connection", digest: connectStepUpDigest(client.workspaceId) }),
       start: async (challenge) => {
         const body = connectStartBody(challenge);
         if (!body) return { ok: false, reason: "step_up_mismatch", effect: "none" };
-        const prepared = client.prepareConnect(body);
-        let last: { reason: string; effect: "none" | "recorded" | "unknown" } = { reason: "network", effect: "unknown" };
-        for (let attempt = 0; attempt < SENDS; attempt += 1) {
-          const outcome = await client.sendConnect(prepared);
-          if (outcome.ok) return { ok: true, authorizationUrl: outcome.value.authorization_url, connectionId: outcome.value.connection_id };
-          last = { reason: outcome.error.code, effect: outcome.error.effect };
-          if (outcome.error.effect !== "unknown" || !outcome.error.retryable) break;
-          await wait(retryMs * 2 ** attempt);
-        }
-        return { ok: false, ...last };
+        return sendStart(body);
+      },
+      startWithPasskey: async () => {
+        const asserted = await passkeyStepUp("connection", connectStepUpDigest(client.workspaceId));
+        if (!asserted.ok) return { ok: false, reason: asserted.reason, effect: "none" };
+        return sendStart(connectPasskeyBody(asserted.value));
       },
       read: async (connectionId) => {
         const read = await client.read(`/connections/${encodeURIComponent(connectionId)}`, connectionRead);
@@ -499,7 +513,7 @@ export function ApiRuntimeProvider({
         return read.ok ? { ok: true, connections: read.value.connections } : { ok: false, reason: read.error.code };
       },
     }),
-    [client, stepUp, retryMs],
+    [client, stepUp, passkeyStepUp, sendStart],
   );
 
   /**

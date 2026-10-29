@@ -17,8 +17,8 @@ import { sha256Hex } from "@/lib/sha256";
 export const CLI_CONFIRM_KINDS = ["approve", "connection"] as const;
 export type CliConfirmKind = (typeof CLI_CONFIRM_KINDS)[number];
 
-/** The kinds a passkey confirms from the browser: a version's confirmation and a deployment (DEC-2128), and a later passkey's enrolment (DEC-2108 item 5). */
-export const PASSKEY_KINDS = ["confirm_version", "deploy", "credential_enrol", "resume", "stop"] as const;
+/** The kinds a passkey confirms from the browser: a version's confirmation and a deployment (DEC-2128), a later passkey's enrolment (DEC-2108 item 5), a resume and a Stop (DEC-2140), and a paper connect's start (DEC-2126), which falls back to `cli_confirm` for a member with no passkey past its cool-off. */
+export const PASSKEY_KINDS = ["confirm_version", "deploy", "credential_enrol", "resume", "stop", "connection"] as const;
 export type PasskeyKind = (typeof PASSKEY_KINDS)[number];
 
 /** Every `StepUpAction` kind this client asks for. */
