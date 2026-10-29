@@ -13,7 +13,8 @@
   `instrument_snapshot` registration on the control stream), `src/watch.rs` (the followed agents'
   active theses, through `mandate-research`'s `replay_theses`, and held instruments, through
   `mandate-gate-context`'s `Journaled::held`), `src/poll.rs` (a round's tickers in chunks the fetcher takes, a page
-  cap per chunk, a pause after an idle or failed round), `src/records.rs` (`StreamOpened` and
+  cap per chunk, a pause after an idle or failed round, a round from `POLL_OVERLAP_S` before the
+  last known time, DEC-2290), `src/records.rs` (`StreamOpened` and
   `NewsItemStored` as drafts with deterministic ids, timed `local`), `src/reader.rs`
   (`NewsReader`: one writer epoch, the stream folded at start, one page a step; DEC-2289's
   `Clock`, a round held past `RECEIPT_LEAD_S` of the trusted time, counted and alerted

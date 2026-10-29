@@ -11,8 +11,9 @@
 //! not ready, `news_stream_unreadable`, fetching and writing nothing (DEC-2281 item 3).
 //!
 //! **A step.** A step asks the vendor for at most one page ([`crate::poll`]), so the allowlist's pace
-//! is the only limit on requests. A round asks from the last `knowledge_at`, or 48 hours back for
-//! an empty stream (DEC-1130 item 5), about the tickers of the followed agents' active theses and
+//! is the only limit on requests. A round asks from 15 minutes before the last `knowledge_at`
+//! ([`crate::poll::POLL_OVERLAP_S`], DEC-2290), or 48 hours back for an empty stream (DEC-1130
+//! item 5), about the tickers of the followed agents' active theses and
 //! held instruments ([`crate::watch`], [`crate::tickers`]). An instrument with no registered ticker
 //! is not polled and is counted. A round with nothing to ask, a stream that cannot be read, or a
 //! failed request pauses the reader for [`crate::poll::COOLDOWN_S`].

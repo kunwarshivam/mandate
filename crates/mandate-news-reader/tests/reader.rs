@@ -159,8 +159,8 @@ fn known_time_is_the_latest_of_receipt_publication_update_and_the_stream_s_last(
     block_on(restarted.step(Clock::agreed(earlier_clock)));
     assert_eq!(
         transport.sent()[0],
-        "https://data.alpaca.markets/v1beta1/news?symbols=SPY&start=2026-10-26T15:00:00.750000000Z&limit=50&sort=desc",
-        "a stream with items asks from its last known time"
+        "https://data.alpaca.markets/v1beta1/news?symbols=SPY&start=2026-10-26T14:45:00.750000000Z&limit=50&sort=desc",
+        "a stream with items asks from its last known time, less the overlap"
     );
     assert_eq!(
         member(&stored(&journal)[1], "knowledge_at"),
@@ -418,4 +418,44 @@ fn a_started_reader_never_shows_its_key() {
             );
         }
     }
+}
+
+/// DEC-2290: a round asks from the stream's last `knowledge_at` less the overlap, so an item the
+/// vendor indexed late, published within the overlap, is fetched and stored, known at its receipt,
+/// never before what the stream already knew; and an item the stream already holds, fetched again
+/// in the overlap, is counted held and never stored twice.
+#[test]
+fn a_late_indexed_item_within_the_overlap_is_stored_and_a_held_one_is_not_stored_again() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let held = item(61, "2026-10-26T14:55:00Z", "2026-10-26T14:55:00Z", &["SPY"]);
+    let transport = Recorded::answering(&[page(std::slice::from_ref(&held), None)]);
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    block_on(reader.step(Clock::agreed(t0())));
+    assert_eq!(ids(&journal), ["61:2026-10-26T14:55:00.000000000Z"]);
+
+    let later = plus(t0(), 600);
+    let late = item(62, "2026-10-26T14:50:00Z", "2026-10-26T14:50:00Z", &["SPY"]);
+    let transport = Recorded::answering(&[page(&[late, held], None)]);
+    let mut restarted = started(&journal, &shelf, &transport, later);
+    block_on(restarted.step(Clock::agreed(later)));
+    assert!(
+        transport.sent()[0].contains("start=2026-10-26T14:45:00Z"),
+        "15 minutes before the last known 15:00: {:?}",
+        transport.sent()
+    );
+    assert_eq!(
+        ids(&journal),
+        [
+            "61:2026-10-26T14:55:00.000000000Z",
+            "62:2026-10-26T14:50:00.000000000Z"
+        ],
+        "the late item stored once, the held one not again"
+    );
+    assert_eq!(restarted.counts().held, 1);
+    assert_eq!(
+        member(&stored(&journal)[1], "knowledge_at"),
+        Value::Str("2026-10-26T15:10:00.000000000Z".into()),
+        "known at its receipt, after everything the stream knew"
+    );
 }
