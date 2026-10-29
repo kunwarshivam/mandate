@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Skeleton } from "@/components/domain/skeleton";
@@ -156,7 +157,9 @@ function DensitySample({ density }: { density: "calm" | "dense" }) {
   );
 }
 
+/** The design-system reference: sample figures and fixture agents. Dev only: not in production builds, and a 404 there even if compiled, so app.owlhead.ai shows no sample data. */
 export default function DesignPage() {
+  if (process.env.NODE_ENV === "production") notFound();
   return (
     <div className="grid gap-(--section-gap)">
       <header className="grid gap-2">

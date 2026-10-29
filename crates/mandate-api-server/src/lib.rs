@@ -54,6 +54,8 @@
 //!   device its limits count against (DEC-2117, DEC-2119).
 //! - [`mandate_versions`]: an agent's mandate versions and the one in effect, read-only (§4.7,
 //!   DEC-2147).
+//! - [`owner_requests`]: an owner's request for an order, recorded for the runtime's builder,
+//!   gate and autonomy rules (§3.11 item 13, DEC-2151).
 //! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
 //! - [`connect_binding`]: whether the start binds a connect, from its four settings (DEC-2338).
 //! - [`vault_codes`]: the callback's vault port, which writes a code as the API's vault identity
@@ -93,6 +95,7 @@ pub mod methods;
 pub mod objects;
 pub mod opening;
 pub mod operator;
+pub mod owner_requests;
 pub mod passkeys;
 pub mod reads;
 pub mod real_money;
