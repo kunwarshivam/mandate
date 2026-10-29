@@ -28,6 +28,13 @@
   ConfigMap `news-reader-allowlist`, the artifact store read-write, and egress to Postgres, the
   vault and `data.alpaca.markets` alone; release ships it and promotion holds it. The parsed news item keeps the vendor's
   tickers in `mandate-sources`' `Draft`.
+  The agent runtime offers the stored items as event triggers (DEC-2288):
+  `mandate-runtime`'s `RetrievedObservation::stored` (the offer from a row and its record, `data_ref`
+  the row's `item_ref` as it is, no text; `news_record_unreadable`, `news_record_mismatch`), and
+  `mandate-daemon`'s `CellSource` (the news stream read under news triggers, items known by the risk
+  clock) and `merge_offers` (feed and stream once each, in arrival order), whose pass alerts each
+  mismatch once and unreadable records once. `fixtures/news/` holds the reader's stored bytes both
+  sides read.
 - **Tests:** `crates/mandate-news-reader/tests/key.rs` (the vault's answer decides the key or why
   there is none; no byte of the key in any refusal, error or `Debug` output;
   one read, then one end of the session), `tests/vault.rs` (the
@@ -42,8 +49,14 @@
   gaps, chunking, the page cap and the pause end to end), `tests/reader.rs` (items stored and
   journaled once, known times, skips, pages and pace, a retried batch and a refused append),
   `tests/properties.rs` (each version stored once and known times never going back, against the
-  test's own ledger); `mandate-sources`' `tests/ingest.rs` (the vendor's tickers kept
+  test's own ledger); `tests/stored_records.rs` (the reader stores exactly `fixtures/news/`'s rows and
+  records); `mandate-runtime`'s `tests/stored_news.rs` (the offer, each mismatch and unreadable case,
+  no text) and `tests/event_trigger.rs` (a stored item starts one `monitor` run naming its
+  `item_ref`); `mandate-daemon`'s `tests/source.rs` (the stream read under news triggers alone, an
+  unreadable stream, an item known later, refusals by event id), `tests/news_offers.rs` (the merge
+  against its own oracle, fuzzed) and `tests/research.rs` (one run per stored item, and the
+  refusals' alerts); `mandate-sources`' `tests/ingest.rs` (the vendor's tickers kept
   as parsed); `deploy/tests/test_cell.py`: the reader's staging launch, role, AppRole, allowlist,
   store and egress, and no render outside staging, outside paper, or with no followed agent.
-- **Run:** `cargo nextest run -p mandate-news-reader -p mandate-sources -p mandate-store`; the
+- **Run:** `cargo nextest run -p mandate-news-reader -p mandate-sources -p mandate-store -p mandate-runtime -p mandate-daemon`; the
   chart's with `uv run --directory python pytest ../deploy/tests` (helm required).
