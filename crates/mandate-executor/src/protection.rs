@@ -2771,7 +2771,10 @@ fn uncovered_end() -> Vec<(&'static str, Value)> {
 /// share of the room before the holders that can be protected, and [`re_place`] journals and
 /// alerts its shortfall. Its gap is still kept out of the owner's residual, so its shares never
 /// ride on another agent's leg. Nor does the owner's residual ride on an unpriced
-/// sequence's agent: it is left uncovered, and the `bool` says so, for `re_place` to alert.
+/// sequence's agent: it is left uncovered, and the `bool` says so, for `re_place` to alert. The
+/// check counts the residual's whole shares ([`whole_shares`]), as a leg would carry them: an
+/// equity's fractional remainder is one §5.4 never protects (DEC-2312 item 2), so it alone raises
+/// no alert, while a crypto residual counts whole.
 fn leg_plan(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
