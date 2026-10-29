@@ -318,9 +318,100 @@ impl RetrievedObservation {
     /// # Errors
     /// [`StoredRefusal`].
     pub fn stored(row: &[u8], record: &[u8]) -> Result<Self, StoredRefusal> {
-        let _ = (row, record);
-        Err(StoredRefusal::Unreadable)
+        use StoredRefusal::{Mismatch, Unreadable};
+        let row = mandate_canon::parse(row).map_err(|_| Unreadable)?;
+        if row.get("event_type").and_then(Value::as_str) != Some("NewsItemStored") {
+            return Err(Unreadable);
+        }
+        let stored = row.get("payload").ok_or(Unreadable)?;
+        let item_ref = digest_of(stored.get("item_ref")).ok_or(Unreadable)?;
+        let named = StoredNews::read(stored).ok_or(Unreadable)?;
+        if Digest::of(record) != item_ref {
+            return Err(Mismatch);
+        }
+        let record = mandate_canon::parse(record).map_err(|_| Unreadable)?;
+        let kind = record
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or(Unreadable)?;
+        let held = StoredNews::read(&record).ok_or(Unreadable)?;
+        let content = digest_of(record.get("content_hash")).ok_or(Unreadable)?;
+        let length_bytes = match record.get("length_bytes") {
+            Some(Value::Int(length)) => length.get(),
+            _ => return Err(Unreadable),
+        };
+        let holds_text = ["headline", "summary", "link"]
+            .iter()
+            .any(|member| record.get(member).is_some_and(|text| *text != Value::Null));
+        if kind != ItemKind::News.as_str() || held != named || (held.licensed && holds_text) {
+            return Err(Mismatch);
+        }
+        let instrument_id = match held.symbols.first() {
+            Some(symbol) if held.symbols.len() == 1 => {
+                Some(InstrumentId::new(symbol.as_str()).map_err(|_| Unreadable)?)
+            }
+            _ => None,
+        };
+        Ok(Self {
+            observation: Observation {
+                source: held.source.as_str().to_owned(),
+                instrument_id,
+                as_of: RiskClock::from_secs(held.knowledge_at.secs()),
+                data_ref: item_ref,
+            },
+            item: ItemFacts {
+                item_id: held.item_id,
+                source: held.source,
+                kind: ItemKind::News,
+                symbols: held.symbols,
+                instrument: None,
+                knowledge_at: held.knowledge_at,
+                content: Some(content),
+                length_bytes,
+            },
+        })
     }
+}
+
+/// The members a `NewsItemStored` row and the record its `item_ref` names both carry, read alike
+/// from either, so the two are compared as values rather than as text.
+#[derive(PartialEq, Eq)]
+struct StoredNews {
+    item_id: ItemId,
+    source: SourceId,
+    symbols: BTreeSet<Symbol>,
+    knowledge_at: UtcNanos,
+    published_at: UtcNanos,
+    licensed: bool,
+}
+
+impl StoredNews {
+    fn read(members: &Value) -> Option<Self> {
+        let text = |name: &str| members.get(name).and_then(Value::as_str);
+        let time = |name: &str| text(name).and_then(|at| UtcNanos::parse(at).ok());
+        let Some(Value::Array(symbols)) = members.get("symbols") else {
+            return None;
+        };
+        Some(Self {
+            item_id: ItemId::new(text("item_id")?).ok()?,
+            source: SourceId::new(text("source")?).ok()?,
+            symbols: symbols
+                .iter()
+                .map(|symbol| Symbol::new(symbol.as_str()?).ok())
+                .collect::<Option<_>>()?,
+            knowledge_at: time("knowledge_at")?,
+            published_at: time("published_at")?,
+            licensed: match members.get("licensed") {
+                Some(Value::Bool(licensed)) => *licensed,
+                _ => return None,
+            },
+        })
+    }
+}
+
+/// A `sha256:` reference's digest.
+fn digest_of(value: Option<&Value>) -> Option<Digest> {
+    Digest::from_hex(value?.as_str()?.strip_prefix("sha256:")?)
 }
 
 /// What the research worker hands the core (spec §10.3).

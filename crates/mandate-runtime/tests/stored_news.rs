@@ -30,7 +30,7 @@ const ITEM_ID: &str = "41000003:2026-10-26T13:05:00.000000000Z";
 const KNOWN: &str = "2026-10-26T15:00:00Z";
 const CONTENT: &str = "66a1d129949747a7c8d58a470d6c8faf0228725449fda820e3502cc5735d4cff";
 const LICENSED_REF: &str =
-    "sha256:d9a851c40a40993a5ed2aadce8ec6df50e5110c9e027871278fef4f29911c103";
+    "sha256:bbf39bbd6017fb65b0b82df4d4c25ec382d7072bcc2ea2b6f30ed7eb7792f90b";
 
 fn key(name: &str) -> Key {
     Key::new(name).unwrap()
