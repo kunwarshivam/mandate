@@ -1433,7 +1433,7 @@ land (E10-14), and is served in a `live` workspace too, since a read adds no ris
   exactly when `rejected` (journal spec §9.3 rule 30), and be the only one answering its
   confirmation. Rule 33 (a reason only an increase meets is `risk_increasing`) is the journal's
   check at append; the read does not check it again yet (E10-28). One that is not fails the read `journal_unavailable`
-  ({D8}), never an entry that contradicts its record.
+  ([DEC-2148](../project/decisions/DEC-2148.md)), never an entry that contradicts its record.
 - **Failures.** A control stream that cannot be read fails the membership read first, so the answer
   is `membership_unavailable`, as for every read (§3.11 item 8). An account stream the store fails,
   and any row of the kinds folded here (`MandateVersionCreated`, `MandateConfirmed`,
