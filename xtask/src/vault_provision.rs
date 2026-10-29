@@ -678,6 +678,7 @@ fn import(
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::os::unix::fs::PermissionsExt;
 
     use anyhow::anyhow;
     use serde_json::json;
@@ -1522,6 +1523,59 @@ mod tests {
         };
         fake.run(&["c1"])?;
         assert!(fake.revoked());
+        Ok(())
+    }
+
+    /// `kubectl port-forward` writes `Handling connection for <port>` to its standard output on
+    /// every connection, and a Go program writing to a closed pipe on its standard output dies of
+    /// `SIGPIPE`. So the forward's output must stay read for as long as the CLI runs, or the first
+    /// connection kills the forward and the CLI sees the vault as unreachable, as staging's applies
+    /// 40810612392 and 40813571135 did. The stand-in forward records that its second line was
+    /// read; the stand-in CLI succeeds only once it has been.
+    #[test]
+    fn the_forward_lives_through_the_connection_it_reports() -> Result<()> {
+        let dir = crate::unique_temp_path("mandate-vault-forward", "");
+        fs::create_dir_all(&dir)?;
+        let handled = dir.join("handled");
+        let forward = dir.join("kubectl");
+        fs::write(
+            &forward,
+            format!(
+                "#!/bin/sh\n\
+                 echo 'Forwarding from 127.0.0.1:18200 -> 8200'\n\
+                 /bin/sleep 0.2\n\
+                 echo 'Handling connection for 18200' && : > '{}'\n\
+                 /bin/sleep 30\n",
+                handled.display()
+            ),
+        )?;
+        let cli = dir.join("mandate");
+        fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n\
+                 tries=0\n\
+                 while [ \"$tries\" -lt 50 ]; do\n\
+                   [ -f '{}' ] && exit 0\n\
+                   tries=$((tries + 1))\n\
+                   /bin/sleep 0.1\n\
+                 done\n\
+                 exit 1\n",
+                handled.display()
+            ),
+        )?;
+        for script in [&forward, &cli] {
+            fs::set_permissions(script, fs::Permissions::from_mode(0o755))?;
+        }
+        let kubectl = || Command::new(&forward);
+        let read = |_: &[&str], _: Option<&str>| Ok((true, "a CA certificate".to_owned()));
+        let outcome = run_cli(&kubectl, &read, &cli, &dir, &["provision".to_owned()], "");
+        fs::remove_dir_all(&dir)?;
+        let (succeeded, _) = outcome?;
+        assert!(
+            succeeded,
+            "the forward died when it reported its connection, so the CLI never reached the vault"
+        );
         Ok(())
     }
 }
