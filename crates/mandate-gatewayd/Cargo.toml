@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
+mandate-chat.workspace = true
 mandate-gateway.workspace = true
 mandate-gateway-http.workspace = true
 mandate-journal.workspace = true
@@ -28,6 +29,7 @@ tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 mandate-canon.workspace = true
+mandate-chat.workspace = true
 mandate-connections.workspace = true
 mandate-time.workspace = true
 proptest.workspace = true

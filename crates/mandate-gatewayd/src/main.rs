@@ -23,6 +23,7 @@
 //! gate passes (`mandate_gatewayd::live`). `mandate-gatewayd probe livez|readyz --probe <socket>` is
 //! its `exec` probe (DEC-994 item 5). Every refusal exits 2 with its code alone on stderr.
 
+use std::collections::BTreeSet;
 use std::net::TcpListener;
 use std::path::Path;
 use std::process::ExitCode;
@@ -37,7 +38,7 @@ use mandate_gateway_http::{HttpsTransport, SystemClock, TlsRoots};
 use mandate_gatewayd::config::Config;
 use mandate_gatewayd::control::StoreControl;
 use mandate_gatewayd::key::HeldKey;
-use mandate_gatewayd::live::{self, live_service};
+use mandate_gatewayd::live::{self, ChatLive, live_service_with_chat};
 use mandate_gatewayd::recorded::Replies;
 use mandate_gatewayd::run::{
     self, Command, LiveArgs, Parts, RunArgs, WriteLog, answer_recorded, heartbeat, host_now,
@@ -185,11 +186,13 @@ fn serve_live(
 ) -> Result<(), &'static str> {
     let config = Config::from_env(&|name| std::env::var(name).ok()).map_err(|e| e.code())?;
     let entries = live::read_registry(&args.registry).map_err(|e| e.code())?;
-    let key = read_key(&args.vault_address, &args.vault_dir, &entries)?;
+    let chats = live::read_chat(&args.registry).map_err(|e| e.code())?;
+    let key = read_key(&args.vault_address, &args.vault_dir, &entries, &chats)?;
     let transport = HttpsTransport::new(TlsRoots::Platform).map_err(|_| "https_unavailable")?;
     let (parts, writer) = parts(&config, started)?;
     let (mut service, refused) =
-        live_service(&config, &entries, parts, transport, Box::new(key)).map_err(|e| e.code())?;
+        live_service_with_chat(&config, &entries, &chats, parts, transport, Box::new(key))
+            .map_err(|e| e.code())?;
     for refusal in &refused {
         eprintln!("registry_refused {} {:?}", refusal.model_id, refusal.error);
     }
@@ -209,7 +212,12 @@ fn serve_live(
 
 /// The provider key, read once through a vault session as the model gateway (DEC-2020 items 3
 /// and 5), for every upstream `entries` route through and no other.
-fn read_key(address: &str, dir: &Path, entries: &[LiveEntry]) -> Result<HeldKey, &'static str> {
+fn read_key(
+    address: &str,
+    dir: &Path,
+    entries: &[LiveEntry],
+    chats: &[ChatLive],
+) -> Result<HeldKey, &'static str> {
     let ca = read_mounted_ca(dir).map_err(|_| "vault_ca_unreadable")?;
     let (role_id, secret_id) = read_mounted_credentials(dir, &Identity::ModelGateway)
         .map_err(|_| "vault_credentials_unreadable")?;
@@ -231,7 +239,11 @@ fn read_key(address: &str, dir: &Path, entries: &[LiveEntry]) -> Result<HeldKey,
             host_now(),
         ))
         .map_err(|_| "vault_login_failed")?;
-    let mut upstreams = live::upstreams(entries).into_iter();
+    let mut upstreams = live::upstreams(entries)
+        .into_iter()
+        .chain(live::chat_upstreams(chats))
+        .collect::<BTreeSet<_>>()
+        .into_iter();
     let first = upstreams.next().ok_or("registry_malformed")?;
     let key = runtime
         .block_on(HeldKey::read(&vault, &first))

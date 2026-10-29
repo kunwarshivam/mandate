@@ -1,4 +1,50 @@
 {
+  "chat": [
+    {
+      "endpoint": {
+        "cached_per_million": "0.1",
+        "host": "openrouter.ai",
+        "id": "openrouter:google-vertex/global:llm.chat_sonnet",
+        "input_per_million": "2",
+        "output_per_million": "10",
+        "price_table": "openrouter /api/v1/models/anthropic/claude-sonnet-5.5/endpoints read 2026-10-27",
+        "region": "global",
+        "reported_provider": "Google",
+        "upstream": "google-vertex/global"
+      },
+      "entry": {
+        "deadline_ms": 120000,
+        "max_output_tokens": 4000,
+        "model_id": "llm.chat_sonnet",
+        "model_name": "anthropic/claude-sonnet-5.5",
+        "model_version": "1.0.0",
+        "provider": "anthropic",
+        "snapshot": "claude-sonnet-5-5"
+      }
+    },
+    {
+      "endpoint": {
+        "cached_per_million": "0.01",
+        "host": "openrouter.ai",
+        "id": "openrouter:google-vertex/global:llm.chat_haiku",
+        "input_per_million": "0.1",
+        "output_per_million": "0.5",
+        "price_table": "openrouter /api/v1/models/anthropic/claude-haiku-5.5/endpoints read 2026-10-27",
+        "region": "global",
+        "reported_provider": "Google",
+        "upstream": "google-vertex/global"
+      },
+      "entry": {
+        "deadline_ms": 120000,
+        "max_output_tokens": 4000,
+        "model_id": "llm.chat_haiku",
+        "model_name": "anthropic/claude-haiku-5.5",
+        "model_version": "1.0.0",
+        "provider": "anthropic",
+        "snapshot": "claude-haiku-5-5"
+      }
+    }
+  ],
   "entries": [
     {
       "endpoint": {
