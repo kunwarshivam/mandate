@@ -3763,6 +3763,86 @@ fn another_agents_limit_is_not_acknowledged_through_this_agent() {
     assert!(w.held(&issued));
 }
 
+/// A request answers only the hold it names: with two of `agt_a`'s limits standing, another
+/// user's unspent request for the second does not answer an acknowledgment of the first, which is
+/// refused `acknowledgment_request_invalid` with nothing recorded and the challenge kept (§3.11
+/// item 12, check 6).
+#[test]
+fn a_request_for_another_hold_of_the_same_agent_answers_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let first = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let second = seed_account(&w.f, "RiskLimitTriggered", &limit("profit_stop"), None);
+    let for_second = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &format!(
+            r#"{{"agent":"agt_a","event":"{}","independent_required":true,"requested_by":"{BOB}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"subject":"limit","submitted_at":1}}"#,
+            second.event_id
+        ),
+    );
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &first.event_id,
+        "limit",
+        Some(&for_second.event_id),
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &first.event_id,
+        "limit",
+        Some(&for_second.event_id),
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::AcknowledgmentRequestInvalid,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// An acknowledgment or a request posted to an agent that is not deployed here is `not_found`
+/// with nothing recorded, before the hold is read (§3.11 item 12, check 3): `agt_a` before its
+/// deploy, and `agt_q`, never deployed, while `agt_a`'s limit stands.
+#[test]
+fn an_acknowledgment_to_an_undeployed_agent_is_not_found() {
+    let w = passkeyed_with(true);
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let posted = |agent: &str, route: &str, body: &str| {
+        post(
+            &w.f,
+            &ws(&format!("/agents/{agent}/{route}")),
+            &w.cookie,
+            Some(KEY_3),
+            body.as_bytes(),
+        )
+    };
+    let acknowledgment = ack_body(&hold.event_id, "limit", None, "null", None);
+    let request = request_body(&hold.event_id, "limit", "null", None);
+    let before = control(&w.f).len();
+    refused(
+        &posted("agt_a", "acknowledgments", &acknowledgment),
+        404,
+        ProblemCode::NotFound,
+    );
+    w.deployed();
+    let deployed = control(&w.f).len();
+    for (route, body) in [
+        ("acknowledgments", &acknowledgment),
+        ("acknowledgment-requests", &request),
+    ] {
+        refused(&posted("agt_q", route, body), 404, ProblemCode::NotFound);
+    }
+    assert!(deployed > before, "the deploy is recorded");
+    assert_eq!(control(&w.f).len(), deployed, "nothing more is recorded");
+}
+
 /// A request is refused as an acknowledgment is, with nothing recorded and the challenge kept: a
 /// hold that does not stand, no step-up, a method other than passkey, and no assertion.
 #[test]
