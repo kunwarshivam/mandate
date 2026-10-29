@@ -15,6 +15,11 @@ use mandate_time::UtcNanos;
 /// agent harness spec §6.3).
 pub const FIRST_LOOKBACK_S: i64 = 48 * 3_600;
 
+/// How far before the stream's last `knowledge_at` a round asks (DEC-2290): an item the vendor
+/// indexes late, with an earlier publication time, is still fetched, and rule 284's `item_id`
+/// dedupe keeps a held item from being stored twice.
+pub const POLL_OVERLAP_S: i64 = 15 * 60;
+
 /// The most pages one chunk of a round follows.
 pub const MAX_PAGES: u32 = 20;
 
