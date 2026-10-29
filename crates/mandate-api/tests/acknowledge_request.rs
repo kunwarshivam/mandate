@@ -1,9 +1,8 @@
 //! An acknowledgment's members beside the event, `record`, and `step_up` (journal spec §9.28 version
-//! 2, DEC-2523, DEC-2144): `subject` is one of
-//! `limit`, `restriction`, and `reconciliation`; `request` is an event id; and `step_up_assertion`
+//! 2, DEC-2523, DEC-2144): `subject` is required, one of `limit`, `restriction`, and
+//! `reconciliation`; `request` is an event id, read as `null` when absent; and `step_up_assertion`
 //! is carried only beside `passkey` evidence (DEC-2128 item 1), else one violation at
-//! `/step_up_assertion`. Each is read as `null` when absent: the schema requires `subject`, and the
-//! type does too once the server serves the route (DEC-2144 item 8).
+//! `/step_up_assertion`, and read as `null` when absent.
 //!
 //! The base body is the schema's example without its optional members; every expected outcome is
 //! written here by hand.
@@ -24,7 +23,7 @@ fn base() -> Value {
     ))
     .expect("JSON");
     let object = body.as_object_mut().expect("an object");
-    for member in ["subject", "request", "step_up_assertion"] {
+    for member in ["request", "step_up_assertion"] {
         object.remove(member);
     }
     body
@@ -84,20 +83,23 @@ fn one(path: &str, code: &str) -> Option<Vec<(String, String)>> {
 #[test]
 fn a_body_without_the_optional_members_reads_each_as_null() {
     let request = decode::<AcknowledgeRequest>(&with(&[])).expect("decodes");
-    assert_eq!(
-        (request.subject, request.request, request.step_up_assertion),
-        (None, None, None)
-    );
+    assert_eq!((request.request, request.step_up_assertion), (None, None));
+    assert_eq!(request.subject, AcknowledgeSubject::Reconciliation);
     assert_eq!(request.acknowledged, event("01JBH3BTZ8K2M4N6P8R0S2T4V6"));
-    let nulls = [
-        ("subject", Value::Null),
-        ("request", Value::Null),
-        ("step_up_assertion", Value::Null),
-    ];
+    let nulls = [("request", Value::Null), ("step_up_assertion", Value::Null)];
     let request = decode::<AcknowledgeRequest>(&with(&nulls)).expect("decodes");
-    assert_eq!(
-        (request.subject, request.request, request.step_up_assertion),
-        (None, None, None)
+    assert_eq!((request.request, request.step_up_assertion), (None, None));
+}
+
+#[test]
+fn a_body_without_its_subject_or_with_a_null_one_is_refused() {
+    let mut body = base();
+    body.as_object_mut().expect("an object").remove("subject");
+    let bytes = serde_json::to_vec(&body).expect("JSON");
+    assert!(refused(&bytes).is_some(), "no subject");
+    assert!(
+        refused(&with(&[("subject", Value::Null)])).is_some(),
+        "null"
     );
 }
 
@@ -110,7 +112,7 @@ fn each_subject_decodes_as_its_variant_and_no_other_name_does() {
     ];
     for (name, subject) in subjects {
         let request = decode::<AcknowledgeRequest>(&with(&[("subject", json!(name))])).expect(name);
-        assert_eq!(request.subject, Some(subject), "{name}");
+        assert_eq!(request.subject, subject, "{name}");
     }
     for name in [
         json!("Limit"),

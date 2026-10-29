@@ -41,6 +41,10 @@ images:
   model-gateway: ""
   exporter: ""
   data: ""
+  # The news reader (E2-10, DEC-2084): the hosted workspace's news stream, staging's alone. It needs
+  # `api.workspace`, `news.follows`, and the staging vault's `platform/news-data-key` and
+  # `vault-approle-news-reader`; a released image only, never a local build.
+  news-reader: ""
   # The deployment manager (DEC-1172): the one pod with an API token, which starts the runtimes and
   # executors. Once named, those two render as its pod templates, never as Deployments.
   deploy-manager: ""
@@ -94,6 +98,15 @@ data:
   # (DEC-2283), staging's alone, which lists no instrument.
   source: recorded
 
+# The news reader (E2-10, DEC-2084), rendered only with images.news-reader, in staging alone. Each
+# followed agent is `{agent, account}`: an agent whose theses and holdings it polls, and the broker
+# account its executor trades (DEC-2281). They are owner choices, so only the founder's overlay
+# names them, and the chart refuses an empty list, with which the reader is never ready. The user
+# agent is the contact the vendor sees, never a secret.
+news:
+  follows: []
+  userAgent: "Mandate news reader ops@owlhead.ai"
+
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
 # each start, since sessions live in that one replica's memory too, and the subject links are a
@@ -124,6 +137,11 @@ api:
   # never holds it. Off until that Secret exists: staging provisions it, and the local cell turns it
   # on with `vaultBinding`, once `cargo xtask cell up` provisions both.
   connectFinish: false
+  # A dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up
+  # (MANDATE_API_STEP_UP_COOL_OFF_WAIVER, DEC-2146): each waived step-up is journaled as
+  # StepUpCoolOffWaived. Any other tier refuses it, in the schema, in the chart and at the API's
+  # start.
+  stepUpCoolOffWaiver: false
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.

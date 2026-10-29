@@ -42,7 +42,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled, waiver_id};
 use crate::versions::stored;
 
 /// The `Idempotency-Key` request header (§3.4).
@@ -221,7 +221,7 @@ async fn committed(
 /// for the operation named beside it, follows the command in its batch ([DEC-2128] item 3).
 ///
 /// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
-async fn committed_asserted(
+pub(crate) async fn committed_asserted(
     app: &App,
     gate: &Gate,
     reader: &Reader,
@@ -270,15 +270,15 @@ async fn commit_with(
     let assertion = match asserted {
         Some((asserted, operation)) => {
             match assertion_draft(app, gate, &issued, asserted, operation) {
-                Some(assertion) => Some(assertion),
+                Some(assertion) => assertion,
                 None => return Refused::JournalUnavailable.response(),
             }
         }
-        None => None,
+        None => Vec::new(),
     };
     let batch: Vec<&[u8]> = std::iter::once(bytes.as_slice())
         .chain(alert.as_deref())
-        .chain(assertion.as_deref())
+        .chain(assertion.iter().map(Vec::as_slice))
         .collect();
     match appended_batch_at(app, reader, (&text, &batch), gate.now, None).await {
         Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
@@ -292,16 +292,20 @@ async fn commit_with(
 }
 
 /// The `StepUpAsserted` recording the passkey step-up that authorized `issued`, its id derived under
-/// `operation`, its raw assertion stored first. `None` when no id derives, no store is bound, or
-/// the store refuses it.
+/// `operation`, its raw assertion stored first, then its `StepUpCoolOffWaived` when a test cell
+/// waived the cool-off (DEC-2146 item 4). `None` when no id derives, no store is bound, or the
+/// store refuses it.
 fn assertion_draft(
     app: &App,
     gate: &Gate,
     issued: &Issued<'_>,
     asserted: &Asserted,
     operation: &str,
-) -> Option<Vec<u8>> {
+) -> Option<Vec<Vec<u8>>> {
     let (_, id) = derived_for(gate, issued.workspace, operation)?;
+    let waiver = waiver_id(asserted, operation, |operation| {
+        derived_for(gate, issued.workspace, operation).map(|(_, id)| id)
+    })?;
     let writer = Writer {
         workspace: issued.workspace,
         principal: issued.principal,
@@ -309,7 +313,12 @@ fn assertion_draft(
         environment: issued.environment,
         now: issued.now,
     };
-    asserted.drafted(app.objects.as_deref()?, &writer, issued.event_id)
+    asserted.drafted(
+        app.objects.as_deref()?,
+        &writer,
+        issued.event_id,
+        waiver.as_deref(),
+    )
 }
 
 /// The operation §3.4 derives a resume's `StepUpAsserted` id under ([DEC-2128] item 3).
@@ -426,7 +435,7 @@ pub(crate) fn derived_for(
 }
 
 /// The `202` for the stored `row` (§5.4): its id, `recorded`, and what this call dropped.
-fn accepted(
+pub(crate) fn accepted(
     id_member: &'static str,
     row: &StoredEvent,
     now: UtcNanos,
@@ -611,7 +620,7 @@ async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> 
 /// method, and `authenticated_at` as the integer second the CLI writes, the second it falls in, so
 /// the recorded evidence is never fresher than the presented; `None` only for an instant the
 /// canonical integer cannot hold.
-fn answered(evidence: &StepUpEvidence) -> Option<Value> {
+pub(crate) fn answered(evidence: &StepUpEvidence) -> Option<Value> {
     let presented = journaled(Some(evidence))?;
     let at = UtcNanos::parse(presented.get("authenticated_at")?.as_str()?).ok()?;
     let second = Value::Int(Int::new(u64::try_from(at.secs()).ok()?)?);
@@ -837,10 +846,13 @@ fn schema_violation(path: &str, code: &str) -> Violation {
 }
 
 /// DEC-279 item 1's object for a command, which the step-up digest binds (§3.6): what it
-/// confirms, the agent, and the control stream's head.
-struct Bound {
+/// confirms, the agent, and the control stream's head; for an acknowledgment and its request, also
+/// the hold's `event` and `subject`, and the request an acknowledgment names (§3.11 item 12,
+/// DEC-2144), members DEC-279's object does not have.
+pub(crate) struct Bound {
     confirms: &'static str,
     agent: String,
+    held: Option<(String, &'static str, Option<String>)>,
 }
 
 impl Bound {
@@ -848,12 +860,33 @@ impl Bound {
         Self {
             confirms,
             agent: agent.to_owned(),
+            held: None,
+        }
+    }
+
+    /// An acknowledgment's or its request's object: `confirms` `acknowledge` or `request_ack`, the
+    /// hold's `event` and `subject`, and the `request` it names, if any.
+    pub(crate) fn held(
+        confirms: &'static str,
+        agent: &str,
+        event: &str,
+        subject: &'static str,
+        request: Option<&str>,
+    ) -> Self {
+        Self {
+            confirms,
+            agent: agent.to_owned(),
+            held: Some((event.to_owned(), subject, request.map(str::to_owned))),
         }
     }
 
     /// The SHA-256 of the canonical object at the control stream's head `head`.
-    fn digest(&self, head: u64) -> Option<Digest> {
+    pub(crate) fn digest(&self, head: u64) -> Option<Digest> {
         let mut object = mandate_canon::Object::new();
+        let event = self
+            .held
+            .as_ref()
+            .map_or(Value::Null, |(event, _, _)| text_value(event));
         let members = [
             ("confirms", text_value(self.confirms)),
             ("agent", text_value(&self.agent)),
@@ -862,10 +895,22 @@ impl Bound {
             ("bid", Value::Null),
             ("bid_size", Value::Null),
             ("floor", Value::Null),
-            ("event", Value::Null),
+            ("event", event),
         ];
         for (name, value) in members {
             object.insert(mandate_canon::Key::new(name).ok()?, value);
+        }
+        if let Some((_, subject, request)) = &self.held {
+            object.insert(
+                mandate_canon::Key::new("subject").ok()?,
+                text_value(subject),
+            );
+            if let Some(request) = request {
+                object.insert(
+                    mandate_canon::Key::new("request").ok()?,
+                    text_value(request),
+                );
+            }
         }
         Some(Digest::of(&to_canonical(&Value::Object(object))))
     }
@@ -962,7 +1007,7 @@ async fn stepped(
 }
 
 /// The row the gate's key already holds for `command`, when it is that command.
-fn replayed(gate: &Gate, reader: &Reader, command: &Command) -> Option<StoredEvent> {
+pub(crate) fn replayed(gate: &Gate, reader: &Reader, command: &Command) -> Option<StoredEvent> {
     let (_, id) = derived(gate, &reader.workspace, command)?;
     let issued = Issued {
         workspace: &reader.workspace,

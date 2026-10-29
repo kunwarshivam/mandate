@@ -13,6 +13,7 @@ use mandate_passkey::credentials::{
     Assertion, CredentialError, CredentialFold, CredentialRecord, Enrolment, PasskeyAlg,
     credential_record,
 };
+use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
 fn section(name: &str) -> Value {
@@ -178,6 +179,7 @@ fn step_up_asserted_maps_its_member_credential_challenge_and_counter() {
             credential: text(&envelope, "payload.credential").to_owned(),
             challenge: text(&envelope, "payload.challenge").to_owned(),
             sign_count,
+            event_time: UtcNanos::parse(text(&envelope, "event_time")).unwrap(),
         });
         assert_eq!(credential_record(seq, &envelope), Ok(Some(expected)));
     }
@@ -217,6 +219,43 @@ fn each_invalid_step_up_asserted_is_refused_at_the_member_the_mapping_reads() {
         checked += 1;
     }
     assert!(checked >= 13, "{checked} invalid assertions checked");
+}
+
+/// A `StepUpAsserted` whose `event_time` is absent, not text, or not a timestamp is refused there,
+/// so the fold fails closed rather than reading an assertion with no instant for rule 318 to
+/// judge (journal spec v0.113 §9.38; the envelope always carries one, DEC-176).
+#[test]
+fn a_step_up_asserted_without_a_readable_event_time_is_refused_there() {
+    let section = section("step_up_assertions");
+    let base = section
+        .get("drafts")
+        .and_then(|d| d.get("step_up_asserted"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap();
+    let mut missing = base.clone();
+    missing.remove("event_time");
+    let mut not_text = base.clone();
+    not_text.insert(Key::new("event_time").unwrap(), Value::Bool(true));
+    let mut not_a_time = base;
+    not_a_time.insert(
+        Key::new("event_time").unwrap(),
+        Value::Str("yesterday".to_owned()),
+    );
+    for (name, envelope) in [
+        ("missing", missing),
+        ("not text", not_text),
+        ("not a timestamp", not_a_time),
+    ] {
+        assert_eq!(
+            credential_record(6, &Value::Object(envelope)),
+            Err(CredentialError::Unreadable {
+                seq: 6,
+                member: "event_time"
+            }),
+            "{name}"
+        );
+    }
 }
 
 /// Every rule-254 stream's records are admitted one by one up to the index the vectors name, and
@@ -275,6 +314,7 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
                         *count = (*count).max(a.sign_count);
                     }
                 }
+                CredentialRecord::Waived(w) => panic!("{name}: no waiver at {}", w.seq),
             }
         }
         let ids: BTreeSet<&str> = all
@@ -283,6 +323,7 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
                 CredentialRecord::Enrolled(e) => e.credential.as_str(),
                 CredentialRecord::Removed(r) => r.credential.as_str(),
                 CredentialRecord::Asserted(a) => a.credential.as_str(),
+                CredentialRecord::Waived(w) => w.credential.as_str(),
             })
             .collect();
         for credential in ids {
@@ -398,6 +439,7 @@ fn record(seq: u64, step: Step) -> CredentialRecord {
             credential: credential(c),
             challenge: format!("challenge-{h}"),
             sign_count: u32::from(n),
+            event_time: UtcNanos::EPOCH,
         }),
     }
 }

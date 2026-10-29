@@ -55,7 +55,7 @@ module "cell" {
   region                     = local.region
   state_region               = local.state_region
   vpc_ip_range               = "10.120.0.0/20"
-  kubernetes_version         = "1.35.9-do.1"
+  kubernetes_version         = "1.35.9-do.2"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = var.kube_api_allowed_addresses
   bootstrap_runner_cidr      = var.bootstrap_runner_cidr
