@@ -1400,3 +1400,29 @@ fn other_roles_write_every_stream_as_before() {
         }
     });
 }
+
+/// DEC-2292: the journal answers the database server's own clock, to the microsecond, between two
+/// readings the test takes from the server itself in RFC 3339 text, a form the method never reads.
+#[test]
+fn the_journal_answers_the_database_server_s_clock() {
+    let Some(db) = TestDb::new() else { return };
+    db.block_on(async {
+        let text = "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', \
+                    'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')";
+        let read = |sql: &'static str| {
+            let pool = db.app.clone();
+            async move {
+                let at: String = sqlx::query_scalar(sql).fetch_one(&pool).await.unwrap();
+                mandate_time::UtcNanos::parse_rfc3339(&at).unwrap()
+            }
+        };
+        let before = read(text).await;
+        let clock = db.journal().clock().await.unwrap();
+        let after = read(text).await;
+        assert!(
+            before <= clock && clock <= after,
+            "{before} <= {clock} <= {after}"
+        );
+        assert_eq!(clock.nanos() % 1_000, 0, "to the microsecond");
+    });
+}
