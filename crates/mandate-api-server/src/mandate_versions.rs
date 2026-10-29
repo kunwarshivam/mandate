@@ -12,7 +12,8 @@
 //!   stream is not found, or once `AgentStopped` names the agent.
 //! - **An application agrees with its entry**: it names the entry's version over its base, with
 //!   the classification computed here, and a reason exactly when rejected (journal spec rules 30
-//!   and 33); one that does not fails the read rather than serve a contradiction.
+//!   and 33), and it is the confirmation's only one; one that does not, or a second answering
+//!   the same confirmation, fails the read rather than serve a contradiction.
 //! - **A classification** is mandate spec §9.2's verdict of the two stored documents, computed
 //!   here as the confirm computes it, never read from a record.
 //!
@@ -259,7 +260,8 @@ pub fn classification(store: Option<&Store>, base: &str, version: &str) -> Optio
 /// # Errors
 /// [`Unserved::Unreadable`] for any row of a folded kind whose members do not read, then
 /// [`Unserved::NotFound`] when no `AgentDeployed` names `agent`, then [`Unserved::Unreadable`]
-/// for a later confirmation with no base, or an application that disagrees with its entry.
+/// for a later confirmation with no base, an application that disagrees with its entry, or a
+/// second application answering one confirmation.
 pub fn history(
     control: &[StoredEvent],
     account: Option<&[StoredEvent]>,
@@ -271,7 +273,16 @@ pub fn history(
     let deployment = folded.deployment.ok_or(Unserved::NotFound)?;
     let created = |version: &str| folded.created.get(version).cloned();
     let applied = applied.unwrap_or_default();
-    let answering = |id: &str| applied.iter().find(|a| a.causation.as_deref() == Some(id));
+    let answering = |id: &str| {
+        let mut answers = applied
+            .iter()
+            .filter(|a| a.causation.as_deref() == Some(id));
+        let first = answers.next();
+        match answers.next() {
+            None => Ok(first),
+            Some(_) => Err(Unserved::Unreadable),
+        }
+    };
     let deploying = deployment.confirmed.as_ref();
     let mut entries = vec![Entry {
         mandate_version: deployment.version.clone(),
@@ -286,7 +297,7 @@ pub fn history(
     for confirmation in &folded.later {
         let base = confirmation.base.clone().ok_or(Unserved::Unreadable)?;
         let classified = classification(store, &base, &confirmation.version);
-        let answer = answering(&confirmation.id);
+        let answer = answering(&confirmation.id)?;
         if let Some(answer) = answer {
             let agrees = answer.new_version == confirmation.version
                 && answer.old_version == base
