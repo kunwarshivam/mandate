@@ -620,7 +620,7 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity, min(Lᵢ, N) (§8.1), never held by a deficit or by an `Unknown` order (below); never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity, min(Lᵢ, N) (§8.1); the certain part is never held by a deficit or by an `Unknown` order (below); never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -641,21 +641,29 @@ windows with current status data; otherwise the exit price ladder in §5.6) → 
   What an `Unknown` order in the instrument could still sell is its quantity less its recorded
   fills, for every `Unknown` sell, protective ones included; an `Unknown` buy could sell nothing.
   - **The certain part,** `k-<switch>-<n>`, has the sub-ledger as its quantity. Each send of it
-    sells at most the lower of the sub-ledger less every live non-protective sell the switch
-    reaches, and the long position less every live non-protective sell in the instrument and every
-    `Unknown` protective sell; neither counts its own order, and the gate judges the send so
-    capped (§5.3 rule 4). It is raised, gated and sent without
+    sells at most the lower of two quantities:
+    - the sub-ledger, less every live non-protective sell the switch reaches and every `Unknown`
+      sell among them;
+    - the long position, less every live non-protective sell in the instrument and every
+      `Unknown` sell there, protective or not.
+
+    "Live" here excludes `Unknown`, so each `Unknown` sell is counted once. The other part of the
+    close counts like any other sell. Neither quantity counts the order being sized, but an
+    earlier order of the same part that is still `Unknown` is counted. The gate judges the send so
+    capped (§5.3 rule 4). While that cap is positive, the part is raised, gated and sent without
     waiting on any `Unknown` order: not for the close (DEC-485 item 2), not at §5.3 rule 9, not for
     an `Unknown` opening (§5.3 rule 5), and not for an `Unknown` protective order in §5.4's
     sequence. It still waits for a `Submitting` order and for the cancels of confirmed orders.
   - **The remainder,** `k-<switch>-<n>r`, is raised with the certain part whenever an `Unknown`
     order is in the instrument. Its quantity is the sub-ledger plus the agent's `Unknown` buys'
     unfilled quantity, and each send carries the same cap. §5.3 rule 9 holds it until no order in
-    the instrument is `Unknown`, then §5.7's re-gating releases it with no new approval. Held past
-    `max_intent_age_s`, it is journaled `held_long` and the owner alerted once.
-  - **A send capped to zero** sends nothing. If the agent's sub-ledger is zero, the remainder is
-    abandoned `flatten_covered` without an alert, and the certain part `released_to_owner` with
-    one (DEC-2360). Otherwise the part waits for a positive cap.
+    the instrument is `Unknown`, then §5.7's re-gating releases it at the next tick, with no new
+    approval. Held past `max_intent_age_s`, it is journaled `held_long` and the owner alerted once.
+  - **A send capped to zero** sends nothing, and waits only on an `Unknown` order.
+    - While one is in the instrument, the part is held `unknown_order_in_flight`, and `held_long`
+      covers it.
+    - Once none is, the part ends: the remainder is abandoned `flatten_covered` without an alert,
+      and the certain part `released_to_owner` with one (DEC-2360).
   - When the cap is zero where the close would be raised, only the remainder is raised. A close
     has at most these two parts, and the account and workspace switch is unchanged.
 
