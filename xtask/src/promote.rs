@@ -294,7 +294,7 @@ mod tests {
     /// promoting the image alone would stop the whole workspace release from reconciling
     /// (DEC-2079 item 3). A process moves to [`CHART_IMAGE_FOR_BINARY`] in the change that gives the
     /// overlays its value.
-    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 2] = [
+    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 3] = [
         (
             "mandate-datad",
             "data",
@@ -304,6 +304,11 @@ mod tests {
             "mandate-gatewayd",
             "model-gateway",
             "platform/model-provider-key in the staging vault, which the founder's apply writes (FOUNDER-STEPS K): without it the gateway stops at start and holds the whole workspace release unready, so it is promoted in the change after that apply (DEC-2081 item 5)",
+        ),
+        (
+            "mandate-news-reader",
+            "news-reader",
+            "news.follows in staging's overlay, platform/news-data-key and vault-approle-news-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M), and the cell's run of the reader against a recorded news fixture (E2-10c): the chart refuses the reader without followed agents, without its key it is never ready and holds the whole workspace release unready, and without the cell's run staging would be the first real run of the chart and the binary together, so it is promoted in the change after all three (DEC-2084 item 8)",
         ),
     ];
 
@@ -325,7 +330,8 @@ mod tests {
              ghcr.io/kunwarshivam/mandate/mandate-scheduler@{}  mandate-scheduler\n\
              ghcr.io/kunwarshivam/mandate/mandate-dispatcher@{}  mandate-dispatcher\n\
              ghcr.io/kunwarshivam/mandate/mandate-datad@{}  mandate-datad\n\
-             ghcr.io/kunwarshivam/mandate/mandate-gatewayd@{}  mandate-gatewayd\n",
+             ghcr.io/kunwarshivam/mandate/mandate-gatewayd@{}  mandate-gatewayd\n\
+             ghcr.io/kunwarshivam/mandate/mandate-news-reader@{}  mandate-news-reader\n",
             digest('a'),
             digest('b'),
             digest('c'),
@@ -338,7 +344,8 @@ mod tests {
             digest('6'),
             digest('5'),
             digest('0'),
-            digest('2')
+            digest('2'),
+            digest('3')
         )
     }
 
