@@ -608,17 +608,15 @@ nothing and takes no command.
 
    Click **Deploy**. None is a secret. The Worker reads them on every request, and `keep_vars` in
    `web/wrangler.jsonc` keeps them across later deploys, so you set them once.
-4. **Sign in** at `https://app.owlhead.ai`. The dashboard should show staging's workspace, or say
-   that something is not reported. It should never show the example agents.
-5. **Add your passkey.** Open **Settings → Profile → Passkeys for confirming** and click **Add a
-   passkey** within five minutes of signing in; after that, sign in again first. This is the passkey
-   that confirms a mandate, a deployment or an approval. It is not the Supabase sign-in passkey.
-   Elsewhere a first passkey cannot confirm anything for 24 hours (DEC-2108 item 5). Staging waives
-   that for the demo until its expiry, no later than 2026-11-05T00:00Z
-   ([DEC-2150](../docs/project/decisions/DEC-2150.md)), so you can use it at once.
-6. **Set up the demo agent the same day**, under **Agents → New**. Each step-up the app shows comes
-   with a code. Confirm it as section J says. After the waiver's expiry, a passkey added from then on
-   waits its 24 hours again.
+4. **Sign in at `https://app.owlhead.ai`, then follow the app.** Everything after this is the
+   app's own journey, the same as any customer's: there is no further operator step. The dashboard
+   shows staging's workspace, or says that something is not reported. It never shows the example
+   agents.
+
+   One thing depends on staging's version. The first passkey the app asks you to add can confirm at
+   once only after DEC-2150's implementation (#2992) has been applied to staging. Before that it
+   waits its 24 hours (DEC-2108 item 5). The waiver ends at its expiry, no later than
+   2026-11-05T00:00Z, and a passkey still inside its first 24 hours then waits out the rest.
 
 **To undo:** delete `OWLHEAD_DATA_SOURCE` from the Worker's variables and deploy. The app then
-shows the fixtures again. Nothing in staging changes, and your passkey stays enrolled.
+shows the fixtures again. Nothing in staging changes, and any passkey added stays enrolled.
