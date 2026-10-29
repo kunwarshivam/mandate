@@ -510,7 +510,6 @@ fn the_binary_offers_agent_holds() {
 /// deployed on the account, so until E9-6's effective-policy fold lands the line says it is
 /// advisory. The wording is written out here, not taken from the code.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_independence_line_says_it_is_advisory_until_e9_6() {
     for (independent, expected) in [
         (
@@ -535,7 +534,6 @@ type Raise = fn(&mut Fixture);
 /// Every listing opens with the advisory line, whichever holds stand: a limit, a reconciliation
 /// hold, a restriction, or none, under a policy that requires independence and one that does not.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_listing_opens_with_the_advisory_independence_line() {
     let kinds: [(&str, Raise); 4] = [
         ("limit", |fx| {

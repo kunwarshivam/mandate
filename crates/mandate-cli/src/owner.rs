@@ -453,10 +453,18 @@ pub fn run_holds(args: &HoldsArgs, report: &mut impl Write) -> anyhow::Result<()
 /// the account, which this listing does not read (backlog E7-4b holds fold minors, item 1).
 ///
 /// # Errors
-/// None once implemented.
+/// None: the `Result` is the stub's shape (DEC-77), kept so its tests stand unchanged.
 pub fn independence_line(independent: bool) -> Result<String, ControlError> {
-    let _ = independent;
-    Err(ControlError::Unimplemented { story: "E7-4b" })
+    Ok(independence_header(independent))
+}
+
+/// [`independence_line`]'s text.
+fn independence_header(independent: bool) -> String {
+    format!(
+        "independent approval required: {} (advisory until E9-6: the executor applies the \
+         strictest policy of every agent deployed on the account)",
+        if independent { "yes" } else { "no" }
+    )
 }
 
 /// The lines `mandate agent holds` prints: whether an independent user must acknowledge, then each
@@ -467,10 +475,7 @@ pub fn independence_line(independent: bool) -> Result<String, ControlError> {
 /// the request is the caller's own (rule 239), or why none lifts it yet.
 #[must_use]
 pub fn holds_lines(found: &Holds) -> Vec<String> {
-    let mut lines = vec![format!(
-        "independent approval required: {}",
-        if found.independent { "yes" } else { "no" }
-    )];
+    let mut lines = vec![independence_header(found.independent)];
     if found.holds.is_empty() {
         lines.push("no holds".to_owned());
     }
