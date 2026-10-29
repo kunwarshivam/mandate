@@ -9549,6 +9549,61 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2849 item 8: the owner's residual never rides on a sequence whose agent has no prices
+    /// of its own. `agent-z` holds nothing and has no prices; `agent-b`'s 5 get their own leg
+    /// either way. With 6 the owner bought outside Mandate, those 6 are journaled uncovered; with
+    /// none, nothing is left uncovered and the interval awaits `agent-b`'s leg.
+    #[test]
+    fn an_unpriced_sequence_leaves_the_owners_residual_uncovered() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        for (owner, uncovered) in [("6", true), ("0", false)] {
+            let mut executor = Executor::opened(&ports)?;
+            holding(
+                &mut executor,
+                ("agent-b", "md-held-2", "5"),
+                Some(("180", "130")),
+            )?;
+            if owner != "0" {
+                committed(
+                    &mut executor,
+                    "FillApplied",
+                    vec![
+                        ("fill_id", text("f-owner")),
+                        ("instrument", text("AAPL")),
+                        ("side", text("buy")),
+                        ("qty_gross", text(owner)),
+                        ("price", text("150")),
+                    ],
+                )?;
+            }
+            let mut batch = crate::batch::Batch::new(&executor.state, &ports)?;
+            let unpriced = crate::state::Replacement {
+                entry: ClientOrderId::parse("md-held-9")?,
+                agent: AgentId("agent-z".to_owned()),
+                prices: None,
+            };
+            super::re_place(&mut batch, &aapl()?, &unpriced)?;
+            let effects = batch.effects;
+            assert_eq!(
+                legs_sent(&effects)?,
+                vec![(
+                    "md-held-2".to_owned(),
+                    Qty::parse("5")?,
+                    "180/130".to_owned()
+                )],
+                "owner {owner}"
+            );
+            let end =
+                interval_end(&effects).ok_or(ExecutorError::Unimplemented { story: "test" })?;
+            assert_eq!(
+                end.get("uncovered") == Some(&Value::Bool(true)),
+                uncovered,
+                "owner {owner}: {end:?}"
+            );
+        }
+        Ok(())
+    }
+
     /// DEC-2849 item 8: the legs share what the position leaves beside protection still resting,
     /// largest lots first. A leg of 3 no agent owns leaves 12 of 15: `agent-a`'s 10, then 2 of
     /// `agent-b`'s 5. So the broker-side sells never pass the position.
