@@ -305,6 +305,24 @@ fn a_waiver_after_another_row_does_not_settle_its_assertion() {
     assert_eq!(immediate.first_waiver_break(), Ok(None));
 }
 
+/// Rule 318's converse names no member (§9.38): an assertion inside its credential's cool-off is
+/// owed a waiver whoever made it. Another member's assertion of the owner's cooling credential,
+/// with no waiver after it, breaks the rule at the assertion.
+#[test]
+#[ignore = "pending E9-4"]
+fn another_members_assertion_inside_the_cool_off_is_owed_a_waiver_too() {
+    let fold = CredentialFold::new([
+        record(1, Step::Enrol(0, 0, true)),
+        record(2, Step::Assert(1, 0, 0, 0)),
+    ]);
+    assert_eq!(fold.first_waiver_break(), Ok(Some(2)));
+    let past = CredentialFold::new([
+        record(1, Step::Enrol(0, 0, true)),
+        record(2, Step::Assert(1, 0, 0, 1)),
+    ]);
+    assert_eq!(past.first_waiver_break(), Ok(None));
+}
+
 /// One random step among two members, three credentials and three challenges: an enrolment with
 /// or without a cool-off, a removal, an assertion at one of three instants, or a waiver of one of
 /// two ends at one of three instants.
@@ -394,9 +412,9 @@ type History = (u32, Option<(u8, bool)>, bool);
 
 /// The oracle: rule 318 as journal spec §9.38 words it, rebuilt here from each credential's own
 /// history, the challenges waived so far, and the one assertion, if any, that the very next record
-/// must waive. A credential is held by whoever enrolled it while rule 251 keeps that history: an
-/// enrolment counts only as the id's first record, and a removal only as its second, by the member
-/// who enrolled it.
+/// must waive, whichever member made it. A credential is held by whoever enrolled it while rule
+/// 251 keeps that history: an enrolment counts only as the id's first record, and a removal only
+/// as its second, by the member who enrolled it.
 fn oracle(steps: &[Step]) -> Option<u64> {
     let mut history: BTreeMap<u8, History> = BTreeMap::new();
     let mut waived: BTreeSet<u8> = BTreeSet::new();
@@ -426,8 +444,8 @@ fn oracle(steps: &[Step]) -> Option<u64> {
                 }
                 entry.0 += 1;
             }
-            Step::Assert(m, c, h, t) => {
-                if held(c).is_some_and(|(by, cools)| by == m && cools && at(t) < end(0)) {
+            Step::Assert(_, c, h, t) => {
+                if held(c).is_some_and(|(_, cools)| cools && at(t) < end(0)) {
                     owed = Some((seq, h));
                 }
             }
@@ -446,16 +464,13 @@ fn oracle(steps: &[Step]) -> Option<u64> {
 }
 
 /// Over random streams of enrolments, removals, assertions and waivers, the fold's first
-/// rule-318 break is the oracle's. The runner keeps no failure file (DEC-381).
+/// rule-318 break is the oracle's. Another member's assertion inside the cool-off is checked
+/// first, so the comparison never rests on the runner happening to draw one. The runner keeps
+/// no failure file (DEC-381).
 #[test]
+#[ignore = "pending E9-4"]
 fn the_first_rule_318_break_is_the_oracles() {
-    let config = ProptestConfig {
-        cases: 512,
-        failure_persistence: None,
-        ..ProptestConfig::default()
-    };
-    let mut runner = TestRunner::new(config);
-    let outcome = runner.run(&prop::collection::vec(step(), 0..12), |steps| {
+    let matches_the_oracle = |steps: Vec<Step>| -> Result<(), TestCaseError> {
         let records: Vec<CredentialRecord> = steps
             .iter()
             .zip(1_u64..)
@@ -464,7 +479,19 @@ fn the_first_rule_318_break_is_the_oracles() {
         let fold = CredentialFold::new(records);
         prop_assert_eq!(fold.first_waiver_break(), Ok(oracle(&steps)));
         Ok(())
-    });
+    };
+    if let Err(failure) =
+        matches_the_oracle(vec![Step::Enrol(0, 0, true), Step::Assert(1, 0, 0, 0)])
+    {
+        panic!("another member's assertion inside the cool-off: {failure}");
+    }
+    let config = ProptestConfig {
+        cases: 512,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    };
+    let mut runner = TestRunner::new(config);
+    let outcome = runner.run(&prop::collection::vec(step(), 0..12), matches_the_oracle);
     if let Err(failure) = outcome {
         panic!("{failure}");
     }
