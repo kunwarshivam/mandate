@@ -13,10 +13,10 @@ use mandate_domain::{AssetId, Environment, MarketSession, Purpose as BuilderPurp
 use mandate_num::{
     Conviction, CostBasis, FeeRate, MarkPrice, Price, Qty, Signed, SizeFraction, Unit, Usd,
 };
-use mandate_ports::{BuilderContext, PortError, size};
+use mandate_ports::{BuilderContext, PortError, requested, size};
 use mandate_runtime::{
-    ExitOrigin, ModelDirection, ModelOutput, OrderExecution, Proposal, ProtectionPrices, Purpose,
-    RiskClock, SignalInputs, TimeInForce,
+    EventId, ExitOrigin, ModelDirection, ModelOutput, OrderExecution, OwnerRequest, Proposal,
+    ProtectionPrices, Purpose, Requester, RiskClock, SignalInputs, TimeInForce,
 };
 use mandate_spec::document::ProvenanceMap;
 use mandate_spec::{Mandate, ValidatedMandate, ValidationContext};
@@ -515,5 +515,90 @@ fn thesis_exit_sells_only_a_plain_sell_of_an_ended_instrument() {
     assert!(
         exit(false, protected, &swing).is_err(),
         "a sell carries no protection"
+    );
+}
+
+/// The mandate's protected equity buy, as the plan derives one for `two_stock_swing`.
+fn buy_execution() -> OrderExecution {
+    OrderExecution {
+        asset_class: AssetClass::UsEquity,
+        tif: TimeInForce::Day,
+        protection_required: true,
+        protection: Some(ProtectionPrices {
+            stop: Price::parse("95").unwrap(),
+            take_profit: Some(Price::parse("110").unwrap()),
+        }),
+    }
+}
+
+fn request_builder() -> BuilderContext {
+    BuilderContext {
+        execution: buy_execution(),
+        ..builder()
+    }
+}
+
+fn owners(qty: &str) -> OwnerRequest {
+    OwnerRequest {
+        request: EventId("01J8Z3MOWNERREQUEST0000001".into()),
+        instrument: InstrumentId::new(SWING).unwrap(),
+        qty: Qty::parse(qty).unwrap(),
+        requested_by: Requester::Owner,
+    }
+}
+
+/// DEC-2858: holding five, an owner's three at the 100 ask is $300, within every room, so it is
+/// the owner's three, an increase, with the mandate's execution and nothing scored or clipped.
+#[test]
+#[ignore = "pending E10-30"]
+fn an_owners_request_is_the_builders_requested_buy_unscored() {
+    let proposal = requested(&validated(), &request_builder(), &owners("3"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(proposal.side, Side::Buy);
+    assert_eq!(proposal.purpose, Purpose::Increase);
+    assert_eq!(proposal.qty, Qty::parse("3").unwrap());
+    assert_eq!(proposal.limit, Price::parse("100").unwrap());
+    assert_eq!(proposal.combined_score, mandate_canon::Value::Null);
+    assert_eq!(proposal.buy_conviction, None);
+    assert!(proposal.outputs_used.is_empty() && proposal.model_weights.is_empty());
+    assert!(proposal.clips_applied.is_empty());
+    assert_eq!(proposal.execution, Some(buy_execution()));
+}
+
+/// A request in another instrument than the builder's market, or an execution the mandate does
+/// not derive (no protection where the mandate requires it, or another asset class), is refused.
+#[test]
+#[ignore = "pending E10-30"]
+fn a_request_the_builders_facts_do_not_describe_is_refused() {
+    let mut elsewhere = owners("3");
+    elsewhere.instrument = InstrumentId::new(OTHER).unwrap();
+    assert_eq!(
+        refused(requested(&validated(), &request_builder(), &elsewhere)),
+        "a request in the builder market's instrument"
+    );
+    let unprotected = BuilderContext {
+        execution: OrderExecution {
+            protection_required: false,
+            protection: None,
+            ..buy_execution()
+        },
+        ..builder()
+    };
+    assert_eq!(
+        refused(requested(&validated(), &unprotected, &owners("3"))),
+        "the mandate-derived execution policy"
+    );
+    let crypto = BuilderContext {
+        execution: OrderExecution {
+            asset_class: AssetClass::Crypto,
+            tif: TimeInForce::Gtc,
+            ..buy_execution()
+        },
+        ..builder()
+    };
+    assert_eq!(
+        refused(requested(&validated(), &crypto, &owners("3"))),
+        "the mandate-derived execution policy"
     );
 }
