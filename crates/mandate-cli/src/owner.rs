@@ -447,6 +447,18 @@ pub fn run_holds(args: &HoldsArgs, report: &mut impl Write) -> anyhow::Result<()
     Ok(())
 }
 
+/// The first line `mandate agent holds` prints: whether the workspace's latest membership record
+/// requires an independent user to acknowledge, marked advisory until E9-6's effective-policy fold
+/// lands, since the executor's §9.28 check 4 takes the strictest overlay of every agent deployed on
+/// the account, which this listing does not read (backlog E7-4b holds fold minors, item 1).
+///
+/// # Errors
+/// None once implemented.
+pub fn independence_line(independent: bool) -> Result<String, ControlError> {
+    let _ = independent;
+    Err(ControlError::Unimplemented { story: "E7-4b" })
+}
+
 /// The lines `mandate agent holds` prints: whether an independent user must acknowledge, then each
 /// hold on one line (its `event`, subject, holder, what it holds, its mode, since when, and its
 /// unspent request and who made it), and under it the command that moves it on, to run with the

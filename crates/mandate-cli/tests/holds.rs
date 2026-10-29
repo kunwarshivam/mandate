@@ -14,7 +14,7 @@ use mandate_canon::Value;
 use mandate_cli::agent::{Command, Subject, code, command, holds};
 use mandate_cli::brake::AgentCommand;
 use mandate_cli::control::{ControlError, Owner};
-use mandate_cli::owner::holds_lines;
+use mandate_cli::owner::{holds_lines, independence_line};
 use mandate_cli::{Cli, Command as Top};
 use mandate_journal::Environment;
 
@@ -50,6 +50,16 @@ fn listed(fx: &Fixture, agent: Option<&str>) -> Vec<String> {
     }
 }
 
+/// What the listing's first line says independence requires, `yes` or `no`, whatever note follows
+/// it.
+fn requires(lines: &[String]) -> Option<&str> {
+    lines
+        .first()?
+        .strip_prefix("independent approval required: ")?
+        .split_whitespace()
+        .next()
+}
+
 /// The `agent acknowledge` command line printed for `event`, split into its words.
 fn command_for(lines: &[String], event: &str) -> Vec<String> {
     let at = lines
@@ -70,10 +80,7 @@ fn each_standing_hold_is_listed_with_its_subject_and_the_command_that_lifts_it()
     let lifted = hold(&mut fx, AGENT, "reconciliation:SPY", "paused");
     hold(&mut fx, AGENT, "reconciliation:SPY", "normal");
     let lines = listed(&fx, Some(AGENT));
-    assert_eq!(
-        lines.first().map(String::as_str),
-        Some("independent approval required: no")
-    );
+    assert_eq!(requires(&lines), Some("no"), "{lines:#?}");
     assert!(
         !lines.iter().any(|l| l.contains(&lifted)),
         "a lifted hold is not listed: {lines:#?}"
@@ -243,10 +250,7 @@ fn independence_prints_the_request_or_the_answer_to_it() {
     let incomplete = hold(&mut fx, "*", "reconciliation:incomplete", "exits_only");
     member_role(&mut fx, Value::Bool(true));
     let lines = listed(&fx, Some(AGENT));
-    assert_eq!(
-        lines.first().map(String::as_str),
-        Some("independent approval required: yes")
-    );
+    assert_eq!(requires(&lines), Some("yes"), "{lines:#?}");
     assert_eq!(
         command_for(&lines, &incomplete),
         [
@@ -306,10 +310,8 @@ fn independence_prints_the_request_or_the_answer_to_it() {
     hold(&mut unread, "*", "reconciliation:incomplete", "exits_only");
     member_role(&mut unread, Value::Bool(false));
     member_role(&mut unread, text("no"));
-    assert_eq!(
-        listed(&unread, Some(AGENT)).first().map(String::as_str),
-        Some("independent approval required: yes")
-    );
+    let lines = listed(&unread, Some(AGENT));
+    assert_eq!(requires(&lines), Some("yes"), "{lines:#?}");
 }
 
 /// A restriction is listed, but no command lifts it yet: the executor lifts no restriction until
@@ -352,10 +354,9 @@ fn no_hold_says_so() {
         None,
         object(&[("stream_type", text("account"))]),
     );
-    assert_eq!(
-        listed(&fx, Some(AGENT)),
-        ["independent approval required: no", "no holds"]
-    );
+    let lines = listed(&fx, Some(AGENT));
+    assert_eq!(requires(&lines), Some("no"), "{lines:#?}");
+    assert_eq!(lines.get(1..), Some(&["no holds".to_owned()][..]));
 }
 
 /// A record the fold must read and cannot is an error, never an empty list.
@@ -502,4 +503,88 @@ fn the_binary_offers_agent_holds() {
         Cli::try_parse_from(&no_account).is_err(),
         "it names the account"
     );
+}
+
+/// Backlog E7-4b holds fold minors, item 1 (Must): the listing reads only the workspace's latest
+/// membership record, while the executor's §9.28 check 4 takes the strictest overlay of every agent
+/// deployed on the account, so until E9-6's effective-policy fold lands the line says it is
+/// advisory. The wording is written out here, not taken from the code.
+#[test]
+#[ignore = "pending E7-4b"]
+fn the_independence_line_says_it_is_advisory_until_e9_6() {
+    for (independent, expected) in [
+        (
+            true,
+            "independent approval required: yes (advisory until E9-6: the executor applies the \
+             strictest policy of every agent deployed on the account)",
+        ),
+        (
+            false,
+            "independent approval required: no (advisory until E9-6: the executor applies the \
+             strictest policy of every agent deployed on the account)",
+        ),
+    ] {
+        let line = independence_line(independent).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(line, expected);
+    }
+}
+
+/// Every listing opens with the advisory line, whichever holds stand: a limit, a reconciliation
+/// hold, a restriction, or none, under a policy that requires independence and one that does not.
+#[test]
+#[ignore = "pending E7-4b"]
+fn every_listing_opens_with_the_advisory_independence_line() {
+    let restriction = |fx: &mut Fixture| {
+        fx.append_in(
+            "paper",
+            ACCOUNT_STREAM,
+            "AccountRestrictionChanged",
+            None,
+            object(&[
+                ("cause", text("broker_notice")),
+                ("restriction", text("blocked")),
+            ]),
+        );
+    };
+    let none = |fx: &mut Fixture| {
+        fx.append_in(
+            "paper",
+            ACCOUNT_STREAM,
+            "StreamOpened",
+            None,
+            object(&[("stream_type", text("account"))]),
+        );
+    };
+    let kinds: [(&str, &dyn Fn(&mut Fixture)); 4] = [
+        ("limit", &|fx: &mut Fixture| {
+            trigger(fx, AGENT, "max_daily_loss");
+        }),
+        ("reconciliation", &|fx: &mut Fixture| {
+            hold(fx, "*", "reconciliation:incomplete", "exits_only");
+        }),
+        ("restriction", &restriction),
+        ("none", &none),
+    ];
+    for independent in [true, false] {
+        let expected = independence_line(independent).unwrap_or_else(|e| panic!("{e}"));
+        for (kind, raise) in kinds {
+            let mut fx = Fixture::new();
+            raise(&mut fx);
+            member_role(&mut fx, Value::Bool(independent));
+            let lines = listed(&fx, Some(AGENT));
+            assert_eq!(
+                lines.first(),
+                Some(&expected),
+                "{kind}, independence {independent}: {lines:#?}"
+            );
+            assert_eq!(
+                lines
+                    .iter()
+                    .filter(|l| l.contains("advisory until E9-6"))
+                    .count(),
+                1,
+                "{kind}: the note is printed once, on the first line"
+            );
+        }
+    }
 }
