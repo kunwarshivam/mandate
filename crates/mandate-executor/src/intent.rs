@@ -972,6 +972,8 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
         holds_alone(held_long(batch, &intent))?;
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
+        } else if crate::kill::awaits_legs(&batch.view, &intent) {
+            continue;
         } else if !batch.view.orders.contains_key(&id) {
             holds_alone(begin_and_submit(batch, &intent, false))?;
         } else {

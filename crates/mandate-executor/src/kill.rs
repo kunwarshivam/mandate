@@ -778,6 +778,26 @@ pub(crate) fn is_certain(view: &ExecutorState, intent: &IntentId) -> bool {
     is_flatten(view, intent) && !intent.0.0.ends_with(REMAINDER)
 }
 
+/// Whether a switch's held flatten part waits, before the gate releases it, for the legs of a
+/// bracket entry it reaches that has filled shares but no legs recorded placed: the release then
+/// finds them resting and §5.4's sequence cancels them before the part sells, as the close waits
+/// for them before it is raised ([`flatten_closes`], DEC-485 item 6). A remainder held while the
+/// entry was `Unknown` is released only once its legs are placed (DEC-2857 item 4).
+pub(crate) fn awaits_legs(view: &ExecutorState, intent: &IntentId) -> bool {
+    let Some(switch) = switch_of(view, intent) else {
+        return false;
+    };
+    let Some(IntentBody::Order { instrument, .. }) = view.bodies.get(intent) else {
+        return false;
+    };
+    view.orders.values().any(|order| {
+        &order.instrument == instrument
+            && (order.agent.as_ref() == Some(&switch.agent)
+                || reached(view, order, &switch.agent, &switch.instruments))
+            && unplaced(view, order)
+    })
+}
+
 /// DEC-2857 item 5: a certain part's order that `ended` unfilled after its remainder ended
 /// `flatten_covered` leaves the agent's rest in the instrument to the owner, who is alerted once on
 /// the record that ends it, so the rest is never left silently unsold. A rejection or an expiry
