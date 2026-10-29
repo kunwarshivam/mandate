@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::thread::sleep;
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -1528,6 +1528,56 @@ fn granted_fill(workspace: &str, connected: Option<&Connected>) -> Vec<Part> {
     ]
 }
 
+/// Why a link of `chain` is not read in this run, or `None`: the research loop's unless another
+/// job reads it (`elsewhere`, [`loop_read_here`]); step 4's unless web/'s trade loop, `traded`,
+/// granted its opening ([`granted_unread`]).
+pub fn unread(
+    chain: Chain,
+    traded: Option<&TradeOutcome>,
+    elsewhere: Option<&std::ffi::OsStr>,
+) -> Option<&'static str> {
+    match chain {
+        Chain::Research => (!loop_read_here(elsewhere)).then_some(LOOP_ELSEWHERE),
+        Chain::Granted => granted_unread(traded),
+    }
+}
+
+/// The streams step 4's reads follow, each once: their heads are read before web/'s trade loop
+/// runs, so a fill already on the stream, from an earlier run on a reused cell or on staging, is
+/// never read as this run's (DEC-2086).
+pub fn granted_streams(steps: &[Step]) -> std::collections::BTreeSet<String> {
+    steps
+        .iter()
+        .flat_map(|s| &s.parts)
+        .filter_map(|p| match p {
+            Part::Loop(l) if l.chain == Chain::Granted => Some(l.stream.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The query that answers `stream`'s last sequence number in the journal, `0` for a stream with
+/// none.
+pub fn head_query(stream: &str) -> String {
+    format!(
+        "SELECT coalesce(max(seq), 0) FROM journal.events WHERE stream_id = {}",
+        sql_quoted(stream)
+    )
+}
+
+/// The head [`head_query`] answered, or why there is none: a query that failed, or an answer that
+/// is not a sequence number, leaves the stream unanchored, so its reads are not run rather than
+/// read from the stream's start.
+pub fn anchor(answer: Result<String>) -> std::result::Result<u64, String> {
+    let text = answer.map_err(|why| format!("{why:#}"))?;
+    text.trim().parse::<u64>().map_err(|_| {
+        format!(
+            "the journal answered {:?}, not a sequence number",
+            text.trim()
+        )
+    })
+}
+
 /// Why step 4's reads of the granted opening are not run, given what web/'s trade loop did,
 /// `None` when it reached `approved`: only a granted opening can fill, so a loop that did not run
 /// or granted nothing spends none of their waits.
@@ -2001,7 +2051,20 @@ pub fn run_in(name: &str) -> Result<String> {
         .and_then(|o| o["metadata"]["name"].as_str())
         .context("the gestures' Job has no name")?
         .to_string();
-    let (succeeded, logs) = run_job(objects)?;
+    let warming = match api_unaskable()? {
+        Some(why) => Err(why),
+        None => {
+            let warmed = workspace.clone();
+            Ok(thread::spawn(move || web::warm(&warmed, WEB_AGENT)))
+        }
+    };
+    let (ran, job_took) = timed(|| run_job(objects));
+    let warmed = match warming {
+        Err(why) => WarmOutcome::NotRun(why),
+        Ok(handle) => warm_outcome(handle.join()),
+    };
+    eprintln!("{}", warm_report(&warmed, job_took));
+    let (succeeded, logs) = ran?;
     let pods = kubectl(&[
         "get",
         "pods",
@@ -2019,6 +2082,17 @@ pub fn run_in(name: &str) -> Result<String> {
     let mut traded: Option<TradeOutcome> = None;
     let mut looped = BTreeMap::<Chain, Looped>::new();
     let mut linked = BTreeMap::<String, u64>::new();
+    let mut unanchored = BTreeMap::<String, String>::new();
+    for stream in granted_streams(&steps) {
+        match anchor(super::on_primary(&head_query(&stream))) {
+            Ok(head) => {
+                linked.insert(stream, head);
+            }
+            Err(why) => {
+                unanchored.insert(stream, why);
+            }
+        }
+    }
     for step in &steps {
         let waiting = lanes(step);
         let on = if waiting.is_empty() {
@@ -2176,13 +2250,11 @@ pub fn run_in(name: &str) -> Result<String> {
                         Part::Grant(check) => (check.shows, &check.gap, Chain::Research),
                         _ => continue,
                     };
-                    let unread = match chain {
-                        Chain::Research => {
-                            (!loop_read_here(env::var_os(LOOP_ELSEWHERE_ENV).as_deref()))
-                                .then_some(LOOP_ELSEWHERE)
-                        }
-                        Chain::Granted => granted_unread(traded.as_ref()),
-                    };
+                    let unread = unread(
+                        chain,
+                        traded.as_ref(),
+                        env::var_os(LOOP_ELSEWHERE_ENV).as_deref(),
+                    );
                     if let (None, Some(why)) = (&failed, unread) {
                         eprintln!("    not run  {shows}: {why}");
                         continue;
@@ -2190,7 +2262,12 @@ pub fn run_in(name: &str) -> Result<String> {
                     let looped = looped.entry(chain).or_insert(Looped::Open);
                     let seen = match (&failed, &*looped, part) {
                         (None, Looped::Open, Part::Loop(check)) => {
-                            Some(journaled(check, &mut linked))
+                            Some(match unanchored.get(&check.stream) {
+                                Some(why) => Seen::Unread(format!(
+                                    "the stream's head before the trade loop was not read: {why}"
+                                )),
+                                None => journaled(check, &mut linked),
+                            })
                         }
                         (None, Looped::Open, Part::Grant(check)) => Some(grant(check, &id, &files)),
                         _ => None,
@@ -2238,6 +2315,70 @@ pub fn run_in(name: &str) -> Result<String> {
         NODE
     );
     Ok(workspace)
+}
+
+/// What the warm-up of web/'s `next dev` did beside the gestures' Job (E11-9w).
+#[derive(Debug)]
+pub enum WarmOutcome {
+    Warmed(web::Warmed),
+    NotRun(String),
+}
+
+/// What the warm-up's thread answered as a [`WarmOutcome`]: its pages, or why it did not run,
+/// a thread that panicked included.
+pub fn warm_outcome(joined: thread::Result<Result<web::Warmed>>) -> WarmOutcome {
+    match joined {
+        Ok(Ok(warmed)) => WarmOutcome::Warmed(warmed),
+        Ok(Err(why)) => WarmOutcome::NotRun(format!("{why:#}")),
+        Err(_) => WarmOutcome::NotRun("the warm-up's thread panicked".to_owned()),
+    }
+}
+
+/// The report's line for the warm-up, beside the gestures' Job's `job_took`: the warm-up's time and
+/// how many of the pages it was asked for loaded, naming each that did not, a page its result does
+/// not name read as not reached, or why it did not run. A warm-up never fails the run: it only
+/// saves the next run of `next dev` its first compiles.
+pub fn warm_report(warmed: &WarmOutcome, job_took: Duration) -> String {
+    let job = format!(
+        "    the gestures' Job took about {:.1}s",
+        job_took.as_secs_f64()
+    );
+    match warmed {
+        WarmOutcome::NotRun(why) => format!("{job}; web/'s warm-up did not run: {why}"),
+        WarmOutcome::Warmed(w) => {
+            let missed: Vec<String> = w
+                .requested
+                .iter()
+                .filter_map(|page| match w.pages.get(page) {
+                    Some(status) if status.starts_with('2') || status.starts_with('3') => None,
+                    Some(status) => Some(format!("{page} {status}")),
+                    None => Some(format!("{page} not reached")),
+                })
+                .collect();
+            let pages = w.requested.len();
+            let loaded = pages - missed.len();
+            let line = format!(
+                "{job}; web/'s warm-up beside it took about {:.1}s, {loaded} of {pages} pages loaded",
+                w.seconds
+            );
+            if missed.is_empty() {
+                line
+            } else {
+                format!("{line} (not: {})", missed.join(", "))
+            }
+        }
+    }
+}
+
+/// `work`'s answer and how long it took by the host's clock, for the report's times alone.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host-side scenario reports how long a gesture took on the host's clock"
+)]
+fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
+    let started = Instant::now();
+    let answer = work();
+    (answer, started.elapsed())
 }
 
 /// Reads `check` with the owner's session every two seconds until it passes or [`APPLIED_WITHIN`]
@@ -4098,6 +4239,81 @@ mod tests {
             .collect()
     }
 
+    /// The warm-up's line sits beside the Job's time: its own time and the pages that loaded, a
+    /// redirect counted as loaded, each page that did not named, or why it did not run.
+    #[test]
+    fn the_warm_up_is_reported_beside_the_job() {
+        let job = Duration::from_millis(312_400);
+        assert_eq!(
+            warm_report(&WarmOutcome::NotRun("no npm".into()), job),
+            "    the gestures' Job took about 312.4s; web/'s warm-up did not run: no npm"
+        );
+        let pages = |list: &[(&str, &str)]| {
+            WarmOutcome::Warmed(web::Warmed {
+                requested: list.iter().map(|(p, _)| (*p).to_owned()).collect(),
+                pages: list
+                    .iter()
+                    .map(|(p, s)| ((*p).to_owned(), (*s).to_owned()))
+                    .collect(),
+                seconds: 41.25,
+            })
+        };
+        assert_eq!(
+            warm_report(&pages(&[("/", "200"), ("/agents", "307")]), job),
+            "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 41.2s, \
+             2 of 2 pages loaded"
+        );
+        assert_eq!(
+            warm_report(
+                &pages(&[
+                    ("/", "200"),
+                    ("/alerts", "not loaded: timeout"),
+                    ("/positions", "500")
+                ]),
+                job
+            ),
+            "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 41.2s, \
+             1 of 3 pages loaded (not: /alerts not loaded: timeout, /positions 500)"
+        );
+        let stopped = WarmOutcome::Warmed(web::Warmed {
+            requested: ["/", "/agents", "/alerts", "/positions"]
+                .map(str::to_owned)
+                .into(),
+            pages: [("/".to_owned(), "200".to_owned())].into(),
+            seconds: 150.0,
+        });
+        assert_eq!(
+            warm_report(&stopped, job),
+            "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 150.0s, \
+             1 of 4 pages loaded (not: /agents not reached, /alerts not reached, /positions not \
+             reached)",
+            "a run stopped part way reads as partial, every page it did not reach named"
+        );
+    }
+
+    /// The warm-up's thread reads as its pages, or as why it did not run: an error it answered, or
+    /// a panic.
+    #[test]
+    fn the_warm_up_s_thread_reads_as_its_outcome() {
+        let warmed = web::Warmed {
+            requested: vec!["/".to_owned()],
+            pages: [("/".to_owned(), "200".to_owned())].into(),
+            seconds: 1.0,
+        };
+        assert!(matches!(
+            warm_outcome(Ok(Ok(warmed))),
+            WarmOutcome::Warmed(w) if w.pages["/"] == "200"
+        ));
+        assert!(matches!(
+            warm_outcome(Ok(Err(anyhow::anyhow!("no npm")))),
+            WarmOutcome::NotRun(why) if why == "no npm"
+        ));
+        assert!(matches!(
+            warm_outcome(Err(Box::new("boom"))),
+            WarmOutcome::NotRun(why) if why == "the warm-up's thread panicked"
+        ));
+    }
+
     /// Step 4 reads, after web/'s trade loop, the granted opening's fill and then its protective
     /// stop on the demo account's stream, in their own chain and waiting on lane E2E alone; it
     /// names no gap for the runtime's ask, which the trade loop's approval shows (DEC-2378,
@@ -4163,6 +4379,78 @@ mod tests {
         );
         assert!(dry4.parts.iter().all(|p| !matches!(p, Part::Loop(_))));
         assert_eq!(lanes(dry4), ["L1", "W2", "DR"]);
+    }
+
+    /// Which links a run reads: the research loop's unless only `1` says another job reads it,
+    /// whatever web/ did; step 4's only after web/'s grant, wherever the research loop is read.
+    #[test]
+    fn each_chain_is_read_by_its_own_rule() {
+        let granted = TradeOutcome::Ran(web::TradeLoop {
+            reached: [("approved".to_owned(), "b".to_owned())].into(),
+            error: None,
+        });
+        let one = std::ffi::OsStr::new("1");
+        let zero = std::ffi::OsStr::new("0");
+        for traded in [None, Some(&granted)] {
+            assert_eq!(unread(Chain::Research, traded, None), None);
+            assert_eq!(unread(Chain::Research, traded, Some(zero)), None);
+            assert_eq!(
+                unread(Chain::Research, traded, Some(one)),
+                Some(LOOP_ELSEWHERE)
+            );
+        }
+        for elsewhere in [None, Some(one), Some(zero)] {
+            assert_eq!(unread(Chain::Granted, Some(&granted), elsewhere), None);
+            assert_eq!(
+                unread(Chain::Granted, None, elsewhere),
+                Some("web/'s trade loop did not run here")
+            );
+        }
+    }
+
+    /// Step 4's reads start after their stream's head as it stood before web/'s trade loop, so a
+    /// buy fill already on the account is never this run's: the planned run anchors the demo
+    /// account's stream alone, a dry run anchors none, and a head that cannot be read leaves the
+    /// stream unanchored with why, never read from its start.
+    #[test]
+    fn step_four_s_reads_start_at_the_account_s_head_before_the_trade_loop() {
+        let acct = format!("acct:demo1:{}", connected().account);
+        assert_eq!(
+            granted_streams(&planned("demo1"))
+                .into_iter()
+                .collect::<Vec<_>>(),
+            [acct.as_str()]
+        );
+        assert!(granted_streams(&unconnected("demo1")).is_empty());
+        assert_eq!(
+            head_query("acct:demo1:o'x"),
+            "SELECT coalesce(max(seq), 0) FROM journal.events WHERE stream_id = 'acct:demo1:o''x'"
+        );
+        assert_eq!(anchor(Ok(" 41\n".into())), Ok(41));
+        assert_eq!(anchor(Ok("0".into())), Ok(0));
+        assert_eq!(
+            anchor(Ok("".into())),
+            Err("the journal answered \"\", not a sequence number".to_owned())
+        );
+        assert_eq!(
+            anchor(Err(anyhow::anyhow!("psql: no primary"))),
+            Err("psql: no primary".to_owned())
+        );
+        let linked = BTreeMap::from([(acct.clone(), 41)]);
+        let fill = LoopCheck {
+            chain: Chain::Granted,
+            shows: "x",
+            stream: acct.clone(),
+            event_type: "FillApplied",
+            holding: Some(r#""side":"buy""#),
+            gap: Gap {
+                what: "x",
+                on_main: "x",
+                waits: vec![],
+            },
+        };
+        let since = linked.get(&fill.stream).copied().unwrap_or(0);
+        assert!(link_query(&fill, since).ends_with("AND seq > 41 ORDER BY seq LIMIT 1"));
     }
 
     /// Step 4's reads run only once web/'s trade loop reached `approved`, whatever it reached

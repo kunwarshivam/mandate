@@ -154,6 +154,7 @@ fn world_with(signer: Signer) -> World {
             rp: support_passkey::rp(),
             keys: Some(Arc::new(keys)),
             cool_off_waiver: None,
+            cool_off_waiver_until: None,
         },
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),
@@ -851,6 +852,56 @@ fn a_waived_step_up_counts_and_carries_its_waiver_inside_the_assertion() {
             "{waiver:?}"
         );
         assert!(!w.held(), "the challenge is taken once it counts");
+    }
+}
+
+/// DEC-2150 items 1 and 5: a staging cell's waiver, judged before its expiry, counts a cooling
+/// passkey's step-up and carries the tier `staging` inside the assertion.
+#[test]
+fn a_staging_waiver_before_its_expiry_counts_and_names_staging() {
+    let mut w = cooling_in(Some(CoolOffWaiver::Staging));
+    w.port.passkey.cool_off_waiver_until = Some(at(ISSUED + 31));
+    let signed = w.signed(9);
+    let mut ask = w.ask();
+    ask.assertion = Some(signed.wire(CREDENTIAL));
+    let answer = w.judge(&ask);
+    let Ok(Some(asserted)) = answer else {
+        panic!("the step-up counts, not {answer:?}");
+    };
+    assert_eq!(
+        asserted.waived(),
+        Some(CoolOffWaived {
+            cool_off_ends: at(COOLING),
+            tier: CoolOffWaiver::Staging,
+        })
+    );
+    assert!(!w.held(), "the challenge is taken once it counts");
+}
+
+/// DEC-2150 item 4: the expiry is judged against the verifier's own instant. A step-up judged at
+/// the expiry or after it is not waived, whatever the tier: a cooling passkey is `step_up_missing`
+/// and the challenge is kept. Without the expiry the same step-up counts, so the expiry alone ends
+/// it.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_waiver_judged_at_or_after_its_expiry_counts_nothing() {
+    for waiver in [
+        CoolOffWaiver::Staging,
+        CoolOffWaiver::Ci,
+        CoolOffWaiver::Dev,
+    ] {
+        for until in [ISSUED + 30, ISSUED + 29, ISSUED - 86_400] {
+            let mut w = cooling_in(Some(waiver));
+            w.port.passkey.cool_off_waiver_until = Some(at(until));
+            let mut ask = w.ask();
+            ask.assertion = Some(w.signed(9).wire(CREDENTIAL));
+            assert_eq!(
+                w.judge(&ask).map(|asserted| asserted.is_some()),
+                Err(Unverified::Code(ProblemCode::StepUpMissing)),
+                "{waiver:?} until {until}"
+            );
+            assert!(w.held(), "{waiver:?} until {until}: nothing is taken");
+        }
     }
 }
 

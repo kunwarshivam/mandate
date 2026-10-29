@@ -626,7 +626,7 @@ SCHEMAS[("ctl", "StepUpCoolOffWaived")] = rec(
     ("challenge", ULID),
     ("credential", CREDENTIAL_ID),
     ("cool_off_ends", TS),
-    ("tier", one_of("dev", "ci")),
+    ("tier", one_of("dev", "ci", "staging")),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account

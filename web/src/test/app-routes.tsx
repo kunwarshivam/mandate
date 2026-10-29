@@ -14,7 +14,7 @@ import * as audit from "@/app/(app)/audit/page";
 import * as closeAll from "@/app/(app)/connections/[connectionId]/close-all/page";
 import * as stopAll from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import * as connections from "@/app/(app)/connections/page";
-import * as design from "@/app/(app)/design/page";
+import * as design from "@/app/(app)/design/page.dev";
 import * as goLive from "@/app/(app)/go-live/page";
 import * as desk from "@/app/(app)/messages/[agentId]/desk/page";
 import * as thread from "@/app/(app)/messages/[agentId]/page";

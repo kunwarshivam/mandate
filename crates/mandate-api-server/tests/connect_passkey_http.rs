@@ -132,6 +132,7 @@ fn world_in(
                         rp: support_passkey::rp(),
                         keys: Some(keys),
                         cool_off_waiver: waiver,
+                        cool_off_waiver_until: None,
                     },
                     cli_confirm: CliConfirm {
                         challenges,
