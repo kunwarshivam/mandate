@@ -37,6 +37,7 @@ use mandate_canon::{Digest, Value};
 use mandate_num::{Price, Qty, Signed};
 
 use crate::error::RuntimeError;
+use crate::owner_request;
 use crate::payload;
 use crate::ports::Ports;
 use crate::state::RuntimeState;
@@ -60,7 +61,7 @@ pub(crate) fn is_owner_input(event: &FoldedEvent) -> bool {
     event.stream.starts_with("ctl:")
         && matches!(
             event.event_type.as_str(),
-            RESPONSE_SUBMITTED | COMMAND_ISSUED
+            RESPONSE_SUBMITTED | COMMAND_ISSUED | owner_request::REQUEST_SUBMITTED
         )
 }
 
@@ -75,10 +76,10 @@ pub(crate) fn owner_input(
     if state.has_copied(&event.event_id) {
         return Ok(());
     }
-    if event.event_type == RESPONSE_SUBMITTED {
-        answered(state, event, ports, batch)
-    } else {
-        commanded(state, event, ports, batch)
+    match event.event_type.as_str() {
+        RESPONSE_SUBMITTED => answered(state, event, ports, batch),
+        owner_request::REQUEST_SUBMITTED => owner_request::requested(state, event, ports, batch),
+        _ => commanded(state, event, ports, batch),
     }
 }
 

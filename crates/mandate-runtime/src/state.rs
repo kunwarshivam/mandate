@@ -722,6 +722,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 state.pending_approvals.remove(&approval);
             }
         }
+        "OwnerRequestSubmitted" => {}
         "ApprovalResponseSubmitted" | "OwnerCommandIssued" => {
             if let Some(evidence) = payload::step_up_of(&event.payload) {
                 state

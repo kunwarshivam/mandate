@@ -2,8 +2,8 @@
 
 use crate::error::RuntimeError;
 use crate::types::{
-    DryRunVerdict, EventId, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal,
-    RiskClock, Seq, SignalInputs, TimerId, WriterEpoch,
+    DryRunVerdict, EventId, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, OwnerRequest,
+    Proposal, RiskClock, Seq, SignalInputs, TimerId, WriterEpoch,
 };
 
 /// Deterministic event identity (ADR-0001 ES-06, ES-21). The Phase 1 implementation derives the id
@@ -27,6 +27,17 @@ pub trait GateDryRun {
 pub trait OrderPlan {
     fn plan(&self, view: &MandateView, inputs: &SignalInputs) -> Option<Proposal>;
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> crate::types::Classified;
+
+    /// An owner's request as a proposal (DEC-2858): the owner's quantity clipped to the mandate's
+    /// caps, each cap that cut it in `clips_applied`, priced at the ask, with no conviction, score
+    /// or model output, because no §8.3 evaluation produced it. When no cap leaves any room, the
+    /// owner's quantity unclipped, so the gate's dry run names the cap that binds. `None` when the
+    /// plan cannot price or size it at all, which journals nothing (`AGENTS.md` rule 3); a plan that
+    /// builds no owner requests says so by keeping this default.
+    fn requested(&self, view: &MandateView, request: &OwnerRequest) -> Option<Proposal> {
+        let _ = (view, request);
+        None
+    }
 }
 
 /// `mandate-risk`'s agent flatten (family F): the orders to cancel by `client_order_id`, the sells of
