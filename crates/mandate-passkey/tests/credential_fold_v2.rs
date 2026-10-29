@@ -13,6 +13,7 @@ use mandate_passkey::credentials::{
     Assertion, CredentialError, CredentialFold, CredentialRecord, Enrolment, PasskeyAlg,
     credential_record,
 };
+use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
 fn section(name: &str) -> Value {
@@ -178,6 +179,7 @@ fn step_up_asserted_maps_its_member_credential_challenge_and_counter() {
             credential: text(&envelope, "payload.credential").to_owned(),
             challenge: text(&envelope, "payload.challenge").to_owned(),
             sign_count,
+            event_time: UtcNanos::parse(text(&envelope, "event_time")).unwrap(),
         });
         assert_eq!(credential_record(seq, &envelope), Ok(Some(expected)));
     }
@@ -275,6 +277,7 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
                         *count = (*count).max(a.sign_count);
                     }
                 }
+                CredentialRecord::Waived(w) => panic!("{name}: no waiver at {}", w.seq),
             }
         }
         let ids: BTreeSet<&str> = all
@@ -283,6 +286,7 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
                 CredentialRecord::Enrolled(e) => e.credential.as_str(),
                 CredentialRecord::Removed(r) => r.credential.as_str(),
                 CredentialRecord::Asserted(a) => a.credential.as_str(),
+                CredentialRecord::Waived(w) => w.credential.as_str(),
             })
             .collect();
         for credential in ids {
@@ -398,6 +402,7 @@ fn record(seq: u64, step: Step) -> CredentialRecord {
             credential: credential(c),
             challenge: format!("challenge-{h}"),
             sign_count: u32::from(n),
+            event_time: UtcNanos::EPOCH,
         }),
     }
 }
