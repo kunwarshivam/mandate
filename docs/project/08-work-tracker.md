@@ -7,7 +7,7 @@
 | **Last updated** | 2026-10-28 05:00 UTC: E21-64l reproduced the live canary's cloud-init failure at missing `/run/sshd`; the tested boot-order fix is in progress under claim #2867 while the debug window stays open and `CI_RUNNER` stays unset |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
-ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
+ran is in git history and the merged PRs. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
 decisions in [decisions/](decisions/README.md) and, before DEC-344, [04-decision-log.md](04-decision-log.md).
 Open PRs and claim issues on GitHub are the live record of who holds what.
@@ -136,7 +136,7 @@ Nothing else is blocked on you.
 
 ## Open issues
 
-Resolved issues are in the [work log](11-work-log.md). Each row is one change for whoever picks
+Resolved issues are in git history. Each row is one change for whoever picks
 it up.
 
 | Issue | Owner |
