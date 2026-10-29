@@ -68,7 +68,7 @@ The notifications spec's design (§5.1, §5.5, §5.9): each stream's owner write
 | Executor owner alerts (`batch.notify`: protection, exit_stalled, reconciliation, agent_held, kill_switch keys) | journaled | `OwnerAlertSent` in the subject's batch, under its closed kind (#2555, DEC-2514) |
 | Runtime owner alerts (step.rs:521, research.rs:1268-1280) | journaled | `RuntimeAlert` drafts `OwnerAlertSent` in the agent stream's batch (#2555) |
 | `OwnerAlertSent` writers | every core alert (#2555) | the user kill switch's one notice (E8-9k), an account restriction (E7-2u), and cancel retries exhausted (E7-2x), each a backlog row |
-| Operator alerts (`journal_unavailable`, `opening_held`, `exit_held`, `flatten_unplanned`, `research_context_unread` (DEC-2825)) | process-only | infrastructure alerts (`mandate-alerts`, E21-39), not owner notices |
+| Operator alerts (`journal_unavailable`, `opening_held`, `exit_held`, `flatten_unplanned`, `research_context_unread` (DEC-2825), `news_record_unreadable` and `news_record_mismatch` (DEC-2288), the news reader's `receipt_ahead` (DEC-2289)) | process-only | infrastructure alerts (`mandate-alerts`, E21-39), not owner notices |
 | Dispatcher | binary, image, `processes.json` entry, journal role, chart values and its configuration file (DEC-2500, DEC-2516) | it mails only through the recorded transport; the founder's SMTP transport and web push join with their adapters (DEC-2511, DEC-2504) |
 
 Plan: (1) the processes write `OwnerAlertSent` for each core alert in its own batch, mapped by spec §3.2's closed key-to-kind table; (2) the dispatcher binary in the cell over the journal, sending only through the recorded transports and the pull channels.

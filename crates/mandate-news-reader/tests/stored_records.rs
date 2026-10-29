@@ -48,7 +48,7 @@ fn stored_as(licensed: bool) -> (StoredEvent, Vec<u8>) {
     let transport = Recorded::answering(&[page(&[the_item()], None)]);
     let mut reader = started_with(&journal, &shelf, &transport, &config, t0());
     assert_eq!(reader.lifecycle().state(), State::Ready);
-    block_on(reader.step(t0()));
+    block_on(reader.step(Clock::agreed(t0())));
     let rows = stored(&journal);
     assert_eq!(rows.len(), 1, "one item stored");
     let row = rows[0].clone();
