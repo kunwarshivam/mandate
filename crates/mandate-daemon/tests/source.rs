@@ -1683,3 +1683,121 @@ fn a_stream_whose_held_head_is_gone_is_read_again_from_its_first_record() {
         "the stream it now holds, from its first record"
     );
 }
+
+/// Rows that answer a whole stream from the genesis start and refuse every read past a head, so a
+/// source must read from the first record and keep only what follows what it holds.
+struct NoTail(Journal);
+
+impl Rows for NoTail {
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        self.0.rows(stream)
+    }
+
+    fn rows_from(
+        &self,
+        stream: &StreamId,
+        start: mandate_journal::TrustedStart,
+    ) -> Option<Vec<StoredEvent>> {
+        (start == mandate_journal::TrustedStart::GENESIS)
+            .then(|| self.0.rows(stream))
+            .flatten()
+    }
+}
+
+/// A store that refuses every read past a head still has each record read once: the source reads
+/// from the first record and keeps only the rows after the one it holds.
+#[test]
+fn a_refused_read_past_the_head_reads_from_the_first_record_and_keeps_only_what_follows() {
+    let records = Counted {
+        objects: BTreeMap::from([
+            (Digest::of(LICENSED_RECORD), LICENSED_RECORD.to_vec()),
+            (Digest::of(UNLICENSED_RECORD), UNLICENSED_RECORD.to_vec()),
+        ]),
+        ..Counted::default()
+    };
+    let journal = Journal::default();
+    let mut objects = records.clone();
+    let mut documents = BTreeMap::new();
+    let version = store(&mut documents, &triggered());
+    objects.objects.extend(documents);
+    journal.deployed(AGENT, &version, "paper");
+    let source = CellSource::new(
+        &bundle(),
+        who(),
+        Box::new(NoTail(journal.clone())),
+        Box::new(objects),
+    );
+    let both = chained(vec![news_row(2, LICENSED_ROW), news_row(3, UNLICENSED_ROW)]);
+    journal.news.borrow_mut().push(both[0].clone());
+    assert_eq!(offers(&source).len(), 1);
+    journal.news.borrow_mut().push(both[1].clone());
+    for _ in 0..3 {
+        assert_eq!(
+            offers(&source),
+            vec![
+                mandate_runtime::RetrievedObservation::stored(LICENSED_ROW, LICENSED_RECORD)
+                    .unwrap(),
+                mandate_runtime::RetrievedObservation::stored(UNLICENSED_ROW, UNLICENSED_RECORD)
+                    .unwrap(),
+            ]
+        );
+    }
+    assert_eq!(records.reads.get(), 2, "each record read once");
+}
+
+/// `Rows::rows_from` reads as the store's does: the whole stream from the genesis start, and from
+/// any other start the rows from its seq on, or `None` when the first of them does not follow it.
+#[test]
+fn rows_from_reads_from_a_start_and_refuses_one_its_rows_do_not_follow() {
+    let journal = Journal::default();
+    let rows = chained(vec![news_row(2, LICENSED_ROW), news_row(3, UNLICENSED_ROW)]);
+    journal.news.borrow_mut().extend(rows.clone());
+    let stream = StreamId::parse("news:ws1").unwrap();
+    let start = |from_seq, prev_hash| mandate_journal::TrustedStart {
+        from_seq,
+        prev_hash,
+    };
+    assert_eq!(
+        Rows::rows_from(&journal, &stream, mandate_journal::TrustedStart::GENESIS),
+        Some(rows.clone()),
+        "a stream whose first row is not seq 1 is still read whole"
+    );
+    assert_eq!(
+        Rows::rows_from(&journal, &stream, start(3, rows[0].hash)),
+        Some(vec![rows[1].clone()])
+    );
+    assert_eq!(
+        Rows::rows_from(&journal, &stream, start(4, rows[1].hash)),
+        Some(Vec::new()),
+        "nothing past the head"
+    );
+    assert_eq!(
+        Rows::rows_from(&journal, &stream, start(3, Digest::of(b"other"))),
+        None,
+        "a first row that does not follow the start's hash"
+    );
+    assert_eq!(
+        Rows::rows_from(&journal, &stream, start(2, rows[0].hash)),
+        None,
+        "a first row whose hash is not its prev_hash"
+    );
+    let skipped = Journal::default();
+    skipped.news.borrow_mut().push(rows[1].clone());
+    assert_eq!(
+        Rows::rows_from(&skipped, &stream, start(2, rows[0].prev_hash)),
+        None,
+        "a first row that is not the start's seq"
+    );
+    let ctl = StreamId::parse("ctl:ws1").unwrap();
+    assert_eq!(
+        Rows::rows_from(&OneRow, &ctl, start(1, Digest::of(b"prev"))),
+        Store::rows_from(&OneRow, &ctl, start(1, Digest::of(b"prev"))),
+        "a store is read as its own rows_from"
+    );
+    assert_eq!(
+        Rows::rows_from(&OneRow, &ctl, start(1, Digest::of(b"prev")))
+            .unwrap()
+            .len(),
+        1
+    );
+}
