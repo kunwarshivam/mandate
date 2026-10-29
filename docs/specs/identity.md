@@ -1057,10 +1057,16 @@ money-adding controls for a day, and the real owner is told. Support staff never
 
 Only a `dev` or `ci` test cell may waive this cool-off at step-up, on a route that appends the
 step-up's `StepUpAsserted` ([DEC-2146](../project/decisions/DEC-2146.md) item 3, the founder's
-decision): the API server's setting `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`, which it
-refuses at start in any other tier. The enrolment still records the cool-off, every other check of
-§7.2 step 4 stands, and each waived step-up is journaled as `StepUpCoolOffWaived` (journal spec
-§9.38). Staging and production never waive it.
+decision): the API server's setting `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`, which it refuses at
+start in `production`. A `staging` cell may waive it too, for the founder's demo, but only until its
+fixed expiry ([DEC-2150](../project/decisions/DEC-2150.md), the founder's decision):
+- staging needs the expiry `MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL`, no later than the
+  ceiling the server is built with, 2026-11-05T00:00Z, or the server refuses to start;
+- the verifier counts a waiver only while its own judging instant is before the expiry.
+
+So the clock can only end the waiver, and only a code change can extend it. The enrolment still
+records the cool-off, every other check of §7.2 step 4 stands, and each waived step-up is journaled
+as `StepUpCoolOffWaived` (journal spec §9.38). Production never waives it.
 
 ### 10.2 An organization whose every owner is locked out
 

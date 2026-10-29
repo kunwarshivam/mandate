@@ -631,6 +631,109 @@ fn a_failed_membership_or_control_read_records_nothing() {
     assert!(f.journal.appends.lock().expect("unpoisoned").is_empty());
 }
 
+/// One post that fails two adjacent checks of item 13, and the refusal of the earlier one.
+struct Ordered {
+    earlier_first: &'static str,
+    environment: &'static str,
+    viewer: bool,
+    agent: &'static str,
+    body: Vec<u8>,
+    status: u16,
+    code: ProblemCode,
+    paths: &'static [&'static str],
+}
+
+#[test]
+fn the_checks_are_judged_in_order() {
+    let hold = format!(r#"{{"instrument":"{PINNED}","side":"hold","size":"1"}}"#).into_bytes();
+    let cases = [
+        Ordered {
+            earlier_first: "1 before 2: a viewer's invalid body is invalid, not forbidden",
+            environment: "paper",
+            viewer: true,
+            agent: "agt_a",
+            body: hold,
+            status: 422,
+            code: ProblemCode::Invalid,
+            paths: &[],
+        },
+        Ordered {
+            earlier_first: "2 before 3: a viewer on a missing agent is forbidden, not 404",
+            environment: "paper",
+            viewer: true,
+            agent: "agt_zz",
+            body: buy("1"),
+            status: 403,
+            code: ProblemCode::Forbidden,
+            paths: &[],
+        },
+        Ordered {
+            earlier_first: "3 before 4: an unknown agent in a live workspace is 404",
+            environment: "live",
+            viewer: false,
+            agent: "agt_zz",
+            body: buy("1"),
+            status: 404,
+            code: ProblemCode::NotFound,
+            paths: &[],
+        },
+        Ordered {
+            earlier_first: "3 before 4: a stopped agent in a live workspace is 404",
+            environment: "live",
+            viewer: false,
+            agent: "agt_s",
+            body: buy("1"),
+            status: 404,
+            code: ProblemCode::NotFound,
+            paths: &[],
+        },
+        Ordered {
+            earlier_first: "4 before 5: a sell in a live workspace is live_unavailable",
+            environment: "live",
+            viewer: false,
+            agent: "agt_a",
+            body: request(PINNED, "sell", r#""1""#),
+            status: 409,
+            code: ProblemCode::LiveUnavailable,
+            paths: &[],
+        },
+        Ordered {
+            earlier_first: "6 before 7: a zero size for an unreadable document is invalid at /size",
+            environment: "paper",
+            viewer: false,
+            agent: "agt_x",
+            body: buy("0"),
+            status: 422,
+            code: ProblemCode::Invalid,
+            paths: &["/size"],
+        },
+    ];
+    for case in cases {
+        let f = fixture(case.environment);
+        let who = if case.viewer { bob() } else { alice() };
+        let cookie = signed_in(&f, who);
+        let reply = post(&f, &ws(case.agent), Some(&cookie), Some(KEY), &case.body);
+        assert_eq!(
+            code(&reply),
+            (case.status, case.code),
+            "{}",
+            case.earlier_first
+        );
+        if !case.paths.is_empty() {
+            assert_eq!(
+                violation_paths(&reply),
+                case.paths
+                    .iter()
+                    .map(|p| (*p).to_owned())
+                    .collect::<Vec<_>>(),
+                "{}",
+                case.earlier_first
+            );
+        }
+        assert!(nothing_appended(&f), "{}", case.earlier_first);
+    }
+}
+
 #[test]
 fn a_get_on_the_request_route_is_the_one_401() {
     let f = fixture("paper");

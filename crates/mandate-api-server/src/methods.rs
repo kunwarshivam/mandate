@@ -47,14 +47,19 @@ pub struct Passkey {
     /// ([DEC-2146](../../../docs/project/decisions/DEC-2146.md)), set only by
     /// [`crate::config::cool_off_waiver`] at start; `None` everywhere else.
     pub cool_off_waiver: Option<CoolOffWaiver>,
+    /// The waiver's expiry ([DEC-2150](../../../docs/project/decisions/DEC-2150.md) item 4), set
+    /// only by [`crate::config::cool_off_waiver`] at start: no step-up judged at or after it is
+    /// waived. `None` is no expiry, which only a `dev` or `ci` cell starts with.
+    pub cool_off_waiver_until: Option<UtcNanos>,
 }
 
-/// The tier of a test cell that waives a first passkey's enrolment cool-off (DEC-2146 item 2): the
-/// only two tiers that may.
+/// The tier of a cell that waives a first passkey's enrolment cool-off: a `dev` or `ci` test cell
+/// (DEC-2146 item 2), or a staging cell until its expiry (DEC-2150 item 1). Production never does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoolOffWaiver {
     Dev,
     Ci,
+    Staging,
 }
 
 impl CoolOffWaiver {
@@ -63,6 +68,7 @@ impl CoolOffWaiver {
         match self {
             Self::Dev => "dev",
             Self::Ci => "ci",
+            Self::Staging => "staging",
         }
     }
 }
