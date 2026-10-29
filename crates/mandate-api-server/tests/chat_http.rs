@@ -771,7 +771,7 @@ fn seed_fill(f: &Fixture) {
     let mut established = row(
         3,
         "ConnectionEstablished",
-        r#"{"connection_id":"conn_alpaca_paper_01","account_ref":"acct_1"}"#,
+        r#"{"account_ref":"acct_1","broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper"}"#,
     );
     established.schema_version = 2;
     push(f, &ctl(), vec![established]);
@@ -1538,5 +1538,620 @@ fn the_owner_s_actions_commit_through_the_owner_s_own_routes() {
             .ends_with("\nNote: a sale exits the whole position in AAPL."),
         "{}",
         found[1].1
+    );
+}
+
+/// A `GET` of `path` under the workspace, signed in as `cookie`, answered as JSON with its status.
+fn get_json(f: &Fixture, cookie: &str, path: &str) -> (u16, Value) {
+    let cookie = format!("{COOKIE_NAME}={cookie}");
+    let reply = send(
+        f.addr,
+        "GET",
+        &format!("/v1/workspaces/{WORKSPACE}{path}"),
+        &[("Cookie", &cookie)],
+        b"",
+    );
+    (reply.status, parse(&reply.body).unwrap_or(Value::Null))
+}
+
+/// A `PUT` of the agent's settings with `body`, under `key`.
+fn put_settings(f: &Fixture, cookie: &str, agent: &str, body: &[u8], key: &str) -> (u16, Value) {
+    let cookie = format!("{COOKIE_NAME}={cookie}");
+    let reply = send(
+        f.addr,
+        "PUT",
+        &format!("/v1/workspaces/{WORKSPACE}/agents/{agent}/settings"),
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Content-Type", "application/json"),
+            ("Cookie", &cookie),
+            ("Idempotency-Key", key),
+        ],
+        body,
+    );
+    (reply.status, parse(&reply.body).unwrap_or(Value::Null))
+}
+
+fn member_text<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    path.iter()
+        .try_fold(value, |v, k| v.get(k))
+        .and_then(Value::as_str)
+}
+
+#[test]
+fn home_lists_each_agent_with_its_name_mode_last_message_unread_count_and_whether_it_waits() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let (status, quiet) = get_json(&f, &cookie, "/home");
+    assert_eq!(status, 200);
+    let agents = quiet
+        .get("agents")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    assert_eq!(agents.len(), 1);
+    let agent = &agents[0];
+    assert_eq!(member_text(agent, &["agent_id"]), Some("agt_a"));
+    assert_eq!(member_text(agent, &["name"]), Some("tracer-aapl"));
+    assert_eq!(member_text(agent, &["mode"]), Some("active"));
+    assert_eq!(agent.get("needs_you"), Some(&Value::Bool(false)));
+    assert_eq!(agent.get("unread").and_then(Value::as_int), Some(0));
+    assert_eq!(agent.get("last_message"), Some(&Value::Null));
+    assert_eq!(post_message(&f, &cookie, "hello").status, 202);
+    settled(&f, &cookie);
+    seed_approval(&f);
+    let (_, busy) = get_json(&f, &cookie, "/home");
+    let agent = &busy
+        .get("agents")
+        .and_then(Value::as_array)
+        .unwrap_or_default()[0];
+    assert_eq!(agent.get("needs_you"), Some(&Value::Bool(true)));
+    assert_eq!(
+        agent.get("unread").and_then(Value::as_int),
+        Some(1),
+        "the agent's answer after the owner's message"
+    );
+    assert_eq!(member_text(agent, &["last_message", "from"]), Some("agent"));
+    assert!(
+        member_text(agent, &["last_message", "text"])
+            .is_some_and(|t| t.contains("isn't connected")),
+        "{agent:?}"
+    );
+    let cookie_header = format!("{COOKIE_NAME}={cookie}");
+    let again = send(
+        f.addr,
+        "POST",
+        &messages_path(),
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Content-Type", "application/json"),
+            ("Cookie", &cookie_header),
+            ("Idempotency-Key", "k1Z-9_hhhhhhhhhh"),
+        ],
+        br#"{"text":"and again"}"#,
+    );
+    assert_eq!(again.status, 202);
+    for _ in 0..800 {
+        if chat_rows(&f)
+            .iter()
+            .filter(|r| r.event_type == "ChatRunEnded")
+            .count()
+            == 2
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let key = mandate_api_server::chat_run::Thread::agent("agt_a", ALICE).key();
+    for _ in 0..800 {
+        if f.app.chat.running(&key).is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    push(
+        &f,
+        &ctl(),
+        vec![row(
+            90,
+            "ChatMessagePosted",
+            &format!(
+                r#"{{"agent_id":"agt_a","author":"owner","card":null,"member":"{ALICE}","proactive":false,"run_id":null,"setup_id":null,"sources":[],"text":"last word"}}"#
+            ),
+        )],
+    );
+    let (_, after) = get_json(&f, &cookie, "/home");
+    let agent = &after
+        .get("agents")
+        .and_then(Value::as_array)
+        .unwrap_or_default()[0];
+    assert_eq!(
+        agent.get("unread").and_then(Value::as_int),
+        Some(0),
+        "nothing after the owner's last message"
+    );
+    assert_eq!(member_text(agent, &["last_message", "from"]), Some("owner"));
+    assert_eq!(
+        member_text(agent, &["last_message", "text"]),
+        Some("last word")
+    );
+}
+
+#[test]
+fn the_goals_read_is_the_agent_s_latest_or_empty() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let (status, empty) = get_json(&f, &cookie, "/agents/agt_a/goals");
+    assert_eq!(status, 200);
+    assert_eq!(member_text(&empty, &["agent_id"]), Some("agt_a"));
+    assert_eq!(empty.get("goals"), Some(&Value::Array(Vec::new())));
+    assert_eq!(empty.get("plan"), Some(&Value::Null));
+    assert_eq!(empty.get("watching"), Some(&Value::Array(Vec::new())));
+    push(
+        &f,
+        &ctl(),
+        vec![
+            row(
+                3,
+                "AgentGoalsUpdated",
+                r#"{"agent_id":"agt_a","goals":[{"status":"done","text":"old"}],"plan":"old plan","run_id":"run_1","watching":[]}"#,
+            ),
+            row(
+                4,
+                "AgentGoalsUpdated",
+                r#"{"agent_id":"agt_a","goals":[{"status":"active","text":"Hold AAPL"}],"plan":"Wait.","run_id":"run_2","watching":["AAPL"]}"#,
+            ),
+            row(
+                5,
+                "AgentGoalsUpdated",
+                r#"{"agent_id":"agt_b","goals":[],"plan":"another's","run_id":"run_3","watching":["MSFT"]}"#,
+            ),
+        ],
+    );
+    let (_, kept) = get_json(&f, &cookie, "/agents/agt_a/goals");
+    assert_eq!(member_text(&kept, &["plan"]), Some("Wait."));
+    assert_eq!(
+        kept.get("watching"),
+        Some(&Value::Array(vec![Value::Str("AAPL".to_owned())]))
+    );
+    assert_eq!(
+        kept.get("goals")
+            .and_then(Value::as_array)
+            .map(<[Value]>::len),
+        Some(1)
+    );
+    assert_eq!(get_json(&f, &cookie, "/agents/agt_nope/goals").0, 404);
+}
+
+#[test]
+fn the_models_read_lists_the_offered_chat_models_and_their_prices() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let (status, body) = get_json(&f, &cookie, "/models");
+    assert_eq!(status, 200);
+    let models = body
+        .get("models")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    assert_eq!(models.len(), 1);
+    assert_eq!(
+        member_text(&models[0], &["model_id"]),
+        Some("llm.chat_sonnet")
+    );
+    assert_eq!(
+        member_text(&models[0], &["label"]),
+        Some("claude-sonnet-5.5")
+    );
+    assert_eq!(
+        member_text(&models[0], &["input_per_million_usd"]),
+        Some("3")
+    );
+    assert_eq!(
+        member_text(&models[0], &["output_per_million_usd"]),
+        Some("15")
+    );
+}
+
+#[test]
+fn a_settings_write_takes_an_offered_model_and_a_positive_cap_for_a_deployed_agent() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let (status, saved) = put_settings(
+        &f,
+        &cookie,
+        "agt_a",
+        br#"{"chat_model":"llm.chat_sonnet","daily_cap_usd":"2.50"}"#,
+        "k1Z-9_iiiiiiiiii",
+    );
+    assert_eq!(status, 200, "{saved:?}");
+    assert_eq!(member_text(&saved, &["agent_id"]), Some("agt_a"));
+    assert_eq!(
+        member_text(&saved, &["chat_model"]),
+        Some("llm.chat_sonnet")
+    );
+    assert_eq!(member_text(&saved, &["daily_cap_usd"]), Some("2.50"));
+    let read = parse(&get_settings(&f, &cookie, "agt_a").body).expect("JSON");
+    assert_eq!(member_text(&read, &["daily_cap_usd"]), Some("2.50"));
+    let rows = chat_rows(&f);
+    let changed = rows
+        .iter()
+        .filter(|r| r.event_type == "ChatSettingsChanged")
+        .count();
+    let (unoffered, body) = put_settings(
+        &f,
+        &cookie,
+        "agt_a",
+        br#"{"chat_model":"llm.other","daily_cap_usd":"2"}"#,
+        "k1Z-9_jjjjjjjjjj",
+    );
+    assert_eq!(unoffered, 422);
+    assert!(format!("{body:?}").contains("not_offered"), "{body:?}");
+    let (zero, _) = put_settings(
+        &f,
+        &cookie,
+        "agt_a",
+        br#"{"chat_model":"llm.chat_sonnet","daily_cap_usd":"0"}"#,
+        "k1Z-9_kkkkkkkkkk",
+    );
+    assert_eq!(zero, 422);
+    let (unknown, _) = put_settings(
+        &f,
+        &cookie,
+        "agt_nope",
+        br#"{"chat_model":"llm.chat_sonnet","daily_cap_usd":"2"}"#,
+        "k1Z-9_llllllllll",
+    );
+    assert_eq!(unknown, 404);
+    assert_eq!(
+        chat_rows(&f)
+            .iter()
+            .filter(|r| r.event_type == "ChatSettingsChanged")
+            .count(),
+        changed,
+        "a refused write journals nothing"
+    );
+}
+
+#[test]
+fn a_thread_serves_each_message_s_author_text_card_sources_and_place() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    push(
+        &f,
+        &ctl(),
+        vec![
+            row(
+                3,
+                "ChatMessagePosted",
+                &format!(
+                    r#"{{"agent_id":"agt_a","author":"owner","card":null,"member":"{ALICE}","proactive":false,"run_id":null,"setup_id":null,"sources":[],"text":"hi"}}"#
+                ),
+            ),
+            row(
+                4,
+                "ChatMessagePosted",
+                &format!(
+                    r#"{{"agent_id":"agt_a","author":"agent","card":{{"kind":"fill"}},"member":"{ALICE}","proactive":true,"run_id":"run_1","setup_id":null,"sources":[{{"label":"Fill","ref":"ev:1"}}],"text":"Bought."}}"#
+                ),
+            ),
+            row(
+                5,
+                "ChatMessagePosted",
+                r#"{"agent_id":"agt_a","author":"owner","card":null,"member":"01JB3K6F0C9R2V7N4M8Q1T5W3Y","proactive":false,"run_id":null,"setup_id":null,"sources":[],"text":"another member's"}"#,
+            ),
+        ],
+    );
+    let (status, body) = get_json(&f, &cookie, "/agents/agt_a/messages");
+    assert_eq!(status, 200);
+    let messages = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    assert_eq!(messages.len(), 2, "only the member's own thread: {body:?}");
+    let owner = &messages[0];
+    assert_eq!(member_text(owner, &["from"]), Some("owner"));
+    assert_eq!(member_text(owner, &["text"]), Some("hi"));
+    assert_eq!(owner.get("seq").and_then(Value::as_int), Some(3));
+    assert_eq!(
+        member_text(owner, &["id"]),
+        Some(event_id_at(&ctl(), 3).as_str())
+    );
+    assert_eq!(
+        member_text(owner, &["at"]),
+        Some("2026-10-17T10:00:03.000000000Z")
+    );
+    assert_eq!(owner.get("proactive"), Some(&Value::Bool(false)));
+    let agent = &messages[1];
+    assert_eq!(member_text(agent, &["from"]), Some("agent"));
+    assert_eq!(member_text(agent, &["card", "kind"]), Some("fill"));
+    assert_eq!(agent.get("proactive"), Some(&Value::Bool(true)));
+    assert_eq!(
+        agent
+            .get("sources")
+            .and_then(Value::as_array)
+            .and_then(|s| s.first())
+            .and_then(|s| member_text(s, &["ref"])),
+        Some("ev:1")
+    );
+    assert_eq!(body.get("cursor").and_then(Value::as_int), Some(5));
+    assert_eq!(member_text(&body, &["agent_id"]), Some("agt_a"));
+    assert_eq!(body.get("setup_id"), Some(&Value::Null));
+    let (_, ahead) = get_json(&f, &cookie, "/agents/agt_a/messages?after=99");
+    assert_eq!(
+        ahead.get("cursor").and_then(Value::as_int),
+        Some(99),
+        "a cursor past the head stays"
+    );
+    assert_eq!(ahead.get("messages"), Some(&Value::Array(Vec::new())));
+    assert_eq!(
+        get_json(&f, &cookie, "/agents/agt_a/messages?after=x").0,
+        422
+    );
+    assert_eq!(
+        get_json(&f, &cookie, "/agents/agt_a/messages?before=1").0,
+        422
+    );
+    assert_eq!(get_json(&f, &cookie, "/agents/agt_nope/messages").0, 404);
+}
+
+#[test]
+fn a_setup_thread_is_read_by_its_own_id() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let sent = post_setup(&f, &cookie, "?setup_id=setup_read", "setupkey00000000009");
+    assert_eq!(sent.status, 202);
+    for _ in 0..800 {
+        if chat_rows(&f).iter().any(|r| r.event_type == "ChatRunEnded") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let (status, body) = get_json(&f, &cookie, "/setup/setup_read/messages");
+    assert_eq!(status, 200);
+    assert_eq!(member_text(&body, &["setup_id"]), Some("setup_read"));
+    assert_eq!(body.get("agent_id"), Some(&Value::Null));
+    let texts = texts(&body);
+    assert_eq!(
+        texts.first().map(|t| t.1.as_str()),
+        Some("an agent for SPY")
+    );
+    let (_, other) = get_json(&f, &cookie, "/setup/setup_other/messages");
+    assert_eq!(other.get("messages"), Some(&Value::Array(Vec::new())));
+}
+
+/// More of `acct_1`'s account stream after [`seed_fill`]: the agent's sale of MSFT, which its
+/// mandate does not pin but the catalogue registers, filled late; another agent's order and its
+/// fill; and the agent's order of an instrument no one registered, and its fill.
+fn seed_more_fills(f: &Fixture) {
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let caused = |seq: u64| format!(r#""causation_id":"{}","#, event_id_at(&acct, seq));
+    let unknown = "00000000-0000-4000-8000-00000000abcd";
+    push(
+        f,
+        &acct,
+        vec![
+            row_on(
+                &acct,
+                5,
+                "OrderRequestRecorded",
+                r#"{"agent_id":"agt_a","intent_id":"int_2","purpose":"exit"}"#,
+                "",
+            ),
+            row_on(
+                &acct,
+                6,
+                "OrderSubmitted",
+                &format!(
+                    r#"{{"client_order_id":"co_2","instrument_id":"{MSFT}","side":"sell","qty":"3","type":"limit","tif":"day","limit_price":"400"}}"#
+                ),
+                &caused(5),
+            ),
+            row_on(
+                &acct,
+                7,
+                "LateFillApplied",
+                &format!(
+                    r#"{{"fill_id":"f_2","client_order_id":"co_2","instrument_id":"{MSFT}","side":"sell","qty_gross":"3","price":"401.5"}}"#
+                ),
+                "",
+            ),
+            row_on(
+                &acct,
+                8,
+                "OrderRequestRecorded",
+                r#"{"agent_id":"agt_other","intent_id":"int_3","purpose":"entry"}"#,
+                "",
+            ),
+            row_on(
+                &acct,
+                9,
+                "OrderSubmitted",
+                &format!(
+                    r#"{{"client_order_id":"co_3","instrument_id":"{AAPL}","side":"buy","qty":"1","type":"limit","tif":"day","limit_price":"191"}}"#
+                ),
+                &caused(8),
+            ),
+            row_on(
+                &acct,
+                10,
+                "FillApplied",
+                &format!(
+                    r#"{{"fill_id":"f_3","client_order_id":"co_3","instrument_id":"{AAPL}","side":"buy","qty_gross":"1","price":"190"}}"#
+                ),
+                "",
+            ),
+            row_on(
+                &acct,
+                11,
+                "OrderRequestRecorded",
+                r#"{"agent_id":"agt_a","intent_id":"int_4","purpose":"entry"}"#,
+                "",
+            ),
+            row_on(
+                &acct,
+                12,
+                "OrderSubmitted",
+                &format!(
+                    r#"{{"client_order_id":"co_4","instrument_id":"{unknown}","side":"buy","qty":"2","type":"limit","tif":"day","limit_price":"5"}}"#
+                ),
+                &caused(11),
+            ),
+            row_on(
+                &acct,
+                13,
+                "FillApplied",
+                &format!(
+                    r#"{{"fill_id":"f_4","client_order_id":"co_4","instrument_id":"{unknown}","side":"buy","qty_gross":"2","price":"5"}}"#
+                ),
+                "",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn every_fill_of_the_agent_s_own_orders_is_said_in_its_words_and_no_other_agent_s() {
+    let f = fixture(None);
+    let cookie = alice_writes(&f);
+    seed_fill(&f);
+    seed_catalogue(&f);
+    seed_more_fills(&f);
+    assert_eq!(pass(&f), 3);
+    assert_eq!(pass(&f), 0);
+    let said: Vec<String> = texts(&thread(&f, &cookie))
+        .into_iter()
+        .filter(|(who, _)| who == "agent")
+        .map(|(_, t)| t)
+        .skip(1)
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "Bought 10 AAPL at 190.12.",
+            "Sold 3 MSFT at 401.5.",
+            "Bought 2 00000000-0000-4000-8000-00000000abcd at 5.",
+        ]
+    );
+    let cards: Vec<Value> = thread(&f, &cookie)
+        .get("messages")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| m.get("card").cloned())
+        .filter(|c| c != &Value::Null)
+        .collect();
+    assert_eq!(
+        cards
+            .get(1)
+            .map(|c| String::from_utf8_lossy(&to_canonical(c)).into_owned()),
+        Some(
+            r#"{"kind":"fill","price":"401.5","qty":"3","side":"sell","symbol":"MSFT"}"#.to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_stopped_agent_says_nothing_first() {
+    let f = fixture(None);
+    alice_writes(&f);
+    seed_fill(&f);
+    push(
+        &f,
+        &ctl(),
+        vec![row(20, "AgentStopped", r#"{"agent_id":"agt_a"}"#)],
+    );
+    assert_eq!(pass(&f), 0);
+}
+
+#[test]
+fn a_member_hears_only_from_agents_they_wrote_to_and_another_member_s_message_is_theirs() {
+    let f = fixture(None);
+    seed_fill(&f);
+    push(
+        &f,
+        &ctl(),
+        vec![row(
+            20,
+            "ChatMessagePosted",
+            r#"{"agent_id":"agt_b","author":"owner","card":null,"member":"01JB3K6F0C9R2V7N4M8Q1T5W3Y","proactive":false,"run_id":null,"setup_id":null,"sources":[],"text":"to another agent"}"#,
+        )],
+    );
+    assert_eq!(
+        pass(&f),
+        0,
+        "no member wrote to agt_a, and a row with no user actor is no member's"
+    );
+}
+
+/// The daily note's pass at `at`, with a gateway or none, and the mode the agent's stream last records, if any.
+fn brief_passes(at: i64, gateway: bool, mode: Option<&str>) -> usize {
+    let script = vec![
+        turn(&[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+        turn(&[(name::REPLY, r#"{"sources":[],"text":"A note."}"#)], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ];
+    let f = fixture(gateway.then(|| gateway_service(script)));
+    alice_writes(&f);
+    if let Some(mode) = mode {
+        let stream = format!("agent:{WORKSPACE}:agt_a");
+        push(
+            &f,
+            &stream,
+            vec![
+                row_on(&stream, 1, "StreamOpened", "{}", ""),
+                row_on(
+                    &stream,
+                    2,
+                    "AgentModeChanged",
+                    &format!(r#"{{"from":"active","to":"{mode}"}}"#),
+                    "",
+                ),
+            ],
+        );
+    }
+    f.clock.set(at);
+    pass(&f)
+}
+
+#[test]
+fn the_daily_note_waits_for_a_weekday_s_close_a_model_and_an_active_agent() {
+    let day = T0.div_euclid(86_400);
+    let weekday = |offset: i64| (day + offset).saturating_add(3).rem_euclid(7);
+    let monday = (0..7).find(|o| weekday(*o) == 0).unwrap_or_default();
+    let at = |offset: i64, secs: i64| (day + monday + offset) * 86_400 + secs;
+    let close = 21 * 3_600;
+    assert_eq!(
+        brief_passes(at(0, close + 60), true, None),
+        1,
+        "Monday after the close"
+    );
+    assert_eq!(
+        brief_passes(at(4, close), true, None),
+        1,
+        "Friday at the close"
+    );
+    assert_eq!(
+        brief_passes(at(0, close - 60), true, None),
+        0,
+        "before the close"
+    );
+    assert_eq!(brief_passes(at(5, close + 60), true, None), 0, "Saturday");
+    assert_eq!(brief_passes(at(6, close + 60), true, None), 0, "Sunday");
+    assert_eq!(
+        brief_passes(at(0, close + 60), false, None),
+        0,
+        "no model service"
+    );
+    assert_eq!(
+        brief_passes(at(0, close + 60), true, Some("paused")),
+        0,
+        "a paused agent"
+    );
+    assert_eq!(
+        brief_passes(at(0, close + 60), true, Some("active")),
+        1,
+        "an agent made active again"
     );
 }
