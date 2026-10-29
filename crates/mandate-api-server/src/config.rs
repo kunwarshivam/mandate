@@ -235,12 +235,14 @@ pub fn cool_off_waiver(
 }
 
 /// The expiry `text` names when it is exactly `YYYY-MM-DDTHH:MM:SSZ`, a real UTC instant; `None`
-/// for any other form (DEC-2150 item 2).
+/// for any other form (DEC-2150 item 2). The template refuses a fraction or an offset at the
+/// `Z`'s place, and `parse_rfc3339` refuses anything shorter, or anything after the `Z`.
 fn expiry_instant(text: &OsStr) -> Option<UtcNanos> {
     let text = text.to_str()?;
-    let template = b"dddd-dd-ddTdd:dd:ddZ";
-    let shaped = text.len() == template.len()
-        && text.bytes().zip(template).all(|(byte, want)| match want {
+    let shaped = text
+        .bytes()
+        .zip(b"dddd-dd-ddTdd:dd:ddZ")
+        .all(|(byte, want)| match want {
             b'd' => byte.is_ascii_digit(),
             _ => byte == *want,
         });
