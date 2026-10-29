@@ -98,6 +98,7 @@ impl MeterRecord {
                     Purpose::FastSignal,
                     Purpose::Compiler,
                     Purpose::Evaluation,
+                    Purpose::Chat,
                 ]
                 .into_iter()
                 .find(|purpose| Some(purpose.code()) == text("purpose"))?,

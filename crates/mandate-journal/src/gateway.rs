@@ -437,6 +437,7 @@ static METER_RESERVED: Ty = Ty::Record(&[
             "fast_signal",
             "compiler",
             "evaluation",
+            "chat",
         ]),
     ),
     ("model", MODEL),

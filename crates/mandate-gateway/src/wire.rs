@@ -510,6 +510,7 @@ fn purpose(code: &str) -> Option<Purpose> {
         Purpose::LlmSignal,
         Purpose::FastSignal,
         Purpose::Compiler,
+        Purpose::Chat,
     ]
     .into_iter()
     .find(|purpose| purpose.code() == code)
