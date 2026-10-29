@@ -1,40 +1,18 @@
-## Story
+## What and why
 
-E?-? — <title>. Task brief: <link>. Decisions: DEC-NN.
+What the change does for the product, and the story ID if there is one.
 
-## Spec clause → test
+## Dependencies and journal events
 
-| Spec clause or invariant | Test name |
-|---|---|
-| | |
+None, or the new dependency (with its `docs/dependencies.md` row) and the new event types.
 
-## Dependencies
+## Safety-critical changes only
 
-None, or: name, purpose, alternatives, license, transitive count, and the `docs/dependencies.md` row.
-
-## Journal events added
-
-None, or the event types and their streams.
-
-## Not done
-
-What this change deliberately leaves out.
-
-## Decisions needed
-
-None, or the questions for the founder.
-
-## Safety checklist (safety-critical changes)
-
-- [ ] No floats in money or quantity paths
-- [ ] No clock reads or randomness in the core
-- [ ] No `unwrap`, `expect`, or panics on trading paths
-- [ ] Ordering: inputs processed in journal order
-- [ ] Replay: same inputs give identical outputs
+- [ ] Each invariant or spec clause touched has a named test
+- [ ] No floats in money or quantity paths; no `unwrap`, `expect`, or panics on trading paths
+- [ ] Inputs processed in journal order; replay gives identical outputs
 - [ ] No secrets or trading content in logs or notifications
-- [ ] No `x-planned` or `(planned: ...)` marker added to a value the code already serves, or a reviewer signed it off (DEC-683)
 
 ## Checks
 
-- [ ] `cargo xtask check` green (summary below)
-- [ ] Review agent report attached
+- [ ] `cargo xtask check` green

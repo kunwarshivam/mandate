@@ -12,6 +12,7 @@ import { ApprovalsInboxScreen } from "@/components/screens/approvals-inbox";
 import { WorkspaceGate } from "@/components/screens/common";
 import { DashboardScreen } from "@/components/screens/dashboard";
 import { PositionsScreen } from "@/components/screens/positions-screen";
+import { InstrumentScreen, InstrumentSearch } from "@/components/api-screens/instruments";
 import { StopRecordScreen } from "@/components/stop/record-screen";
 import { AGENT_ID, APPROVAL_ID, ASSET_ID, BACKTEST_ID, CONNECTION_ID, EVENT_ID, ORDER_ID } from "@/lib/ids";
 import { type AgentRecord, SECTION_INDEX, findAgentRecord, findAgentSection, findScreen } from "@/lib/screens";
@@ -70,6 +71,9 @@ export function demoScreen(href: string): ReactNode | null {
       return second !== undefined && rest.length === 0 && BACKTEST_ID.test(second) ? <BacktestReportScreen backtestId={second} /> : null;
     case "positions":
       return second === undefined ? <PositionsScreen /> : null;
+    case "instruments":
+      if (second === undefined) return <InstrumentSearch />;
+      return rest.length === 0 && ASSET_ID.test(second) ? <InstrumentScreen instrumentId={second} /> : null;
     case "alerts":
       return second === undefined ? <AlertsScreen /> : null;
     case "messages":

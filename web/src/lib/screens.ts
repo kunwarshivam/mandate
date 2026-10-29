@@ -49,6 +49,7 @@ export const SCREENS: readonly Screen[] = [
   { key: "approvals", href: "/approvals", label: "Approvals", purpose: "Requests waiting for you, by deadline, and what happened to earlier ones.", group: "main", built: true, needs: "agents.view" },
   { key: "alerts", href: "/alerts", label: "Alerts", purpose: "Data, deployment, and agent conditions that change what agents may do.", group: "main", built: true, needs: "agents.view" },
   { key: "agents", href: "/agents", label: "All agents", purpose: "Each agent trading on paper within its own confirmed mandate.", group: "agents", built: true, needs: "agents.view" },
+  { key: "instruments", href: "/instruments", label: "Instruments", purpose: "Find an instrument your deployment has registered, and ask one of your agents to buy it.", group: "agents", built: true, needs: "agents.view" },
   { key: "positions", href: "/positions", label: "Positions", purpose: "Everything your agents hold, across agents, each marked with the time of its mark.", group: "agents", built: true, needs: "agents.view" },
   {
     key: "agents-new",

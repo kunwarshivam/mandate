@@ -41,6 +41,7 @@ export type ReadId =
   | "confirmation"
   | "passkeys"
   | "instruments"
+  | "instrument_price"
   | "signal_models";
 
 const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
@@ -59,6 +60,7 @@ const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "confirmation", method: "GET", route: "/mandate-versions/{version}/confirmation", query: [], section: "§4.1, §3.11 item 11" },
   { id: "passkeys", method: "GET", route: "/passkeys", query: [], section: "§3.6" },
   { id: "instruments", method: "GET", route: "/instruments", query: [], section: "§4.1, DEC-2136" },
+  { id: "instrument_price", method: "GET", route: "/instruments/{instrument}/price", query: [], section: "§4.1, DEC-2152" },
   { id: "signal_models", method: "GET", route: "/signal-models", query: [], section: "§4.1, DEC-2136" },
 ];
 
@@ -68,6 +70,7 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
   hold_openings: "§4.2",
   stop: "§4.2, §5.4",
   owner_exit: "§4.2, §5.4",
+  ask_agent: "§3.11 item 13, DEC-2151",
   acknowledge: "§4.2",
   kill_switch: "§4.2, §5.4",
   approval_response: "§4.3, §5.2",
