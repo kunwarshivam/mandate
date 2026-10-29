@@ -3,7 +3,7 @@ import AgentsNew from "@/app/(app)/agents/new/page";
 import Agents from "@/app/(app)/agents/page";
 import Approvals from "@/app/(app)/approvals/page";
 import Audit from "@/app/(app)/audit/page";
-import Design from "@/app/(app)/design/page";
+import Design from "@/app/(app)/design/page.dev";
 import ErrorScreen from "@/app/(app)/error";
 import Loading from "@/app/(app)/loading";
 import NotFound from "@/app/(app)/not-found";
