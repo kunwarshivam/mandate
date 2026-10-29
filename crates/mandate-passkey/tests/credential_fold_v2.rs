@@ -221,6 +221,43 @@ fn each_invalid_step_up_asserted_is_refused_at_the_member_the_mapping_reads() {
     assert!(checked >= 13, "{checked} invalid assertions checked");
 }
 
+/// A `StepUpAsserted` whose `event_time` is absent, not text, or not a timestamp is refused there,
+/// so the fold fails closed rather than reading an assertion with no instant for rule 318 to
+/// judge (journal spec v0.113 §9.38; the envelope always carries one, DEC-176).
+#[test]
+fn a_step_up_asserted_without_a_readable_event_time_is_refused_there() {
+    let section = section("step_up_assertions");
+    let base = section
+        .get("drafts")
+        .and_then(|d| d.get("step_up_asserted"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap();
+    let mut missing = base.clone();
+    missing.remove("event_time");
+    let mut not_text = base.clone();
+    not_text.insert(Key::new("event_time").unwrap(), Value::Bool(true));
+    let mut not_a_time = base;
+    not_a_time.insert(
+        Key::new("event_time").unwrap(),
+        Value::Str("yesterday".to_owned()),
+    );
+    for (name, envelope) in [
+        ("missing", missing),
+        ("not text", not_text),
+        ("not a timestamp", not_a_time),
+    ] {
+        assert_eq!(
+            credential_record(6, &Value::Object(envelope)),
+            Err(CredentialError::Unreadable {
+                seq: 6,
+                member: "event_time"
+            }),
+            "{name}"
+        );
+    }
+}
+
 /// Every rule-254 stream's records are admitted one by one up to the index the vectors name, and
 /// the record there is refused `Breaks`.
 #[test]
