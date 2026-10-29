@@ -250,3 +250,22 @@ fn the_refusals_have_stable_codes() {
     assert_eq!(StoredRefusal::Unreadable.code(), "news_record_unreadable");
     assert_eq!(StoredRefusal::Mismatch.code(), "news_record_mismatch");
 }
+
+/// An item about several tickers names no single instrument, as a captured one does: the core
+/// journals the ticker the matched thesis holds.
+#[test]
+fn an_item_about_several_tickers_names_no_instrument() {
+    let two = Value::Array(vec![text("QQQ"), text("SPY")]);
+    let record = edited(LICENSED_RECORD, &[], |members| {
+        members.insert(key("symbols"), two.clone());
+    });
+    let row = edited(&repointed(LICENSED_ROW, &record), &["payload"], |payload| {
+        payload.insert(key("symbols"), two.clone());
+    });
+    let offer = RetrievedObservation::stored(&row, &record).unwrap();
+    assert_eq!(offer.observation.instrument_id, None);
+    assert_eq!(
+        offer.item.symbols,
+        BTreeSet::from([Symbol::new("QQQ").unwrap(), Symbol::new("SPY").unwrap()])
+    );
+}
