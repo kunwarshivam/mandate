@@ -1,9 +1,10 @@
 import type { NextConfig } from "next";
 import { E2E_FLAG, distDir, isE2eBuild } from "./scripts/e2e-build.mjs";
-import { refuseWaiverOutsideDev } from "./src/lib/cool-off-build";
+import { refuseWaiverOutsideDev, stagingWaiverUntil } from "./src/lib/cool-off-build";
 import { devOnlyAliases, pageExtensions } from "./src/lib/dev-routes";
 
 refuseWaiverOutsideDev(process.env.NODE_ENV, process.env.NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED);
+stagingWaiverUntil(process.env.NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL);
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
