@@ -79,7 +79,7 @@ fn request(instrument: &str, qty: &str, version: &str) -> RequestContent {
             purpose: AskablePurpose::Open,
             mandate_version: version.to_owned(),
             decided_by: "rule:big-order".to_owned(),
-            combined_score: Signed::parse("0.5").unwrap(),
+            combined_score: Some(Signed::parse("0.5").unwrap()),
             reference_mark: Some(ReferenceMark {
                 price: Price::parse("89.5").unwrap(),
                 seq: 2,

@@ -227,7 +227,6 @@ fn assert_owner_decision(decision: &EventDraft, request: &EventId, requested_by:
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_buy_is_decided_as_the_owners_request_and_proposed() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -267,7 +266,6 @@ fn an_owners_buy_is_decided_as_the_owners_request_and_proposed() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_request_the_mandate_asks_about_is_asked_with_no_score() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -302,7 +300,6 @@ fn an_owners_request_the_mandate_asks_about_is_asked_with_no_score() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_clients_opening_is_never_auto() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -332,7 +329,6 @@ fn a_clients_opening_is_never_auto() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn each_cap_that_cut_the_owners_quantity_is_recorded() {
     let (ids, gate, view) = (TestIds, AllowGate, universe(&["AAPL"]));
     let plan = OwnerPlan {
@@ -351,7 +347,6 @@ fn each_cap_that_cut_the_owners_quantity_is_recorded() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_denied_owners_request_records_the_gates_reason_and_tells_the_owner() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -377,7 +372,6 @@ fn a_denied_owners_request_records_the_gates_reason_and_tells_the_owner() {
 /// intent, no ask, and no skipped decision's alert, because the dry run allowed it; the owner sees
 /// the rule that denied it in the decision's `decided_by`.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_the_mandate_denies_is_recorded_and_raises_no_alert() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -400,7 +394,6 @@ fn a_request_the_mandate_denies_is_recorded_and_raises_no_alert() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_mode_that_admits_no_opening_denies_the_owners_request_by_name() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -428,7 +421,6 @@ fn a_mode_that_admits_no_opening_denies_the_owners_request_by_name() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_is_copied_once_however_often_it_is_tailed() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -457,7 +449,6 @@ fn a_request_is_copied_once_however_often_it_is_tailed() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_the_api_would_have_refused_is_inert() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -508,7 +499,6 @@ fn a_request_the_api_would_have_refused_is_inert() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_the_plan_cannot_price_journals_nothing() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -681,7 +671,6 @@ fn one_run(case: &Case) -> Result<(), String> {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn owner_requests_hold_dec_2858s_invariants() -> Result<(), String> {
     let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
     runner

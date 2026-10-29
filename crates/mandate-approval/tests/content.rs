@@ -193,6 +193,31 @@ fn the_default_is_skip_and_approve_and_skip_have_equal_weight() {
     assert_eq!(text(&object_value, &["deadline"]), Some(deadline.as_str()));
 }
 
+/// DEC-2858 item 2: an owner's or a client's request has no score, so its content states
+/// `evidence.combined_score` as `null` rather than a label over no value, and the hash binds that
+/// null as it binds a score: the same order with a score is another content.
+#[test]
+fn a_request_without_a_score_states_its_evidence_score_as_null() {
+    let mut unscored = content();
+    unscored.bound.combined_score = None;
+    unscored.evidence = Vec::new();
+    let object_value = answer("content_object", content_object(&unscored));
+    let evidence = object_value.get("evidence");
+    assert_eq!(
+        evidence.and_then(|e| e.get("combined_score")),
+        Some(&Value::Null)
+    );
+    assert_eq!(
+        evidence.and_then(|e| e.get("outputs")),
+        Some(&Value::Array(Vec::new()))
+    );
+    assert_ne!(
+        answer("content_hash", content_hash(&unscored)),
+        answer("content_hash", content_hash(&content())),
+        "the score's absence is bound"
+    );
+}
+
 /// E8-1 and §6.4: the score and each output carry the spec's labels; theses stay references.
 #[test]
 fn the_score_and_the_evidence_carry_the_spec_labels() {
@@ -277,7 +302,7 @@ fn every_bound_field_moves_the_content_hash() {
     edit(&|c| c.bound.reference_mark = None);
     edit(&|c| c.bound.asset_class = AssetClass::Crypto);
     edit(&|c| c.bound.purpose = AskablePurpose::Increase);
-    edit(&|c| c.bound.combined_score = Signed::parse("0.99").unwrap());
+    edit(&|c| c.bound.combined_score = Some(Signed::parse("0.99").unwrap()));
     edit(&|c| c.risk_impact.truncate(1));
     edit(&|c| c.evidence[1].artifact = Some(Digest::of(b"other thesis")));
     assert_eq!(changed.len(), 13, "every edit ran");

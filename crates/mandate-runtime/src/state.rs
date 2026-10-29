@@ -828,10 +828,10 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             let agent = state.deployment.agent.0.clone();
             state.theses.universe_changed(&event.payload, &agent)?;
         }
+        "DecisionMade" => copy_of(state, event),
         "StreamOpened"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
-        | "DecisionMade"
         | "RunStarted"
         | "ToolCallRecorded"
         | "ToolResultRecorded"
@@ -1152,7 +1152,10 @@ fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeEr
         purpose,
         mandate_version: version.to_owned(),
         decided_by: text("decided_by")?.to_owned(),
-        combined_score: Signed::parse(text("combined_score")?)?,
+        combined_score: match payload.get("combined_score") {
+            Some(Value::Null) => None,
+            _ => Some(Signed::parse(text("combined_score")?)?),
+        },
         reference_mark,
         approvers_required,
         independent_required,

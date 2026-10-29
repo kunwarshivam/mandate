@@ -13,7 +13,7 @@ use crate::types::{
     Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
     ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope,
     LiquidityRead, MandateView, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation,
-    Proposal, Purpose, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest,
+    Proposal, Purpose, Requester, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest,
     WriterEpoch,
 };
 
@@ -517,11 +517,19 @@ fn decide(
     }
     let verdict = dry_run(state, ports, &proposal, now);
     let classified = overlaid(ports.plan.classify(ports.view, &proposal), &verdict);
-    let (verdict, then) = next(state, &proposal, verdict, &classified, now, ports.view);
+    let (verdict, then) = next(
+        state,
+        &proposal,
+        verdict,
+        &classified,
+        now,
+        ports.view,
+        None,
+    );
     let decision = batch.journal(
         "DecisionMade",
         None,
-        decided(&proposal, &inputs, &verdict, &classified)?,
+        decided(&proposal, &inputs, &verdict, &classified, None)?,
     )?;
     match &verdict {
         DryRunVerdict::Deny { .. } | DryRunVerdict::DenyOnFigures { .. } => {
@@ -670,13 +678,14 @@ pub(crate) enum Next {
 /// - an `auto`, or an `ask` of a purpose that adds no risk, is proposed, because reducing risk never
 ///   needs approval and an exit is never asked (`AGENTS.md` rules 2 and 13, DEC-278 item 1);
 /// - a `deny`, or any denied verdict, does nothing more.
-fn next(
+pub(crate) fn next(
     state: &RuntimeState,
     proposal: &Proposal,
     verdict: DryRunVerdict,
     classified: &Classified,
     now: RiskClock,
     view: &MandateView,
+    requester: Option<&Requester>,
 ) -> (DryRunVerdict, Next) {
     if !matches!(
         verdict,
@@ -692,6 +701,7 @@ fn next(
             &deferred_names(&verdict),
             now,
             view,
+            requester.is_some(),
         ) {
             Ok(prepared) => (verdict, Next::Ask(Box::new(prepared))),
             Err(reason_code) => (
@@ -708,7 +718,7 @@ fn next(
 
 /// Carries out an allowed decision's [`Next`]: the ASK's request, its delivery, deadline and
 /// notification; or the proposal's `IntentProposed` and hand-off; or nothing.
-fn allowed(
+pub(crate) fn allowed(
     proposal: &Proposal,
     next: Next,
     ports: &Ports<'_>,
@@ -766,12 +776,21 @@ pub(crate) fn proposed(proposal: &Proposal) -> Result<Value, RuntimeError> {
     ])
 }
 
-fn decided(
+/// The `DecisionMade` payload of `proposal`, decided `verdict` and `classified`. `requester` is the
+/// owner or client whose request it decides, or `None` for the order builder's own proposal
+/// (`requested_by` `agent`, mandate spec §6.2 step 5a).
+pub(crate) fn decided(
     proposal: &Proposal,
     inputs: &crate::types::SignalInputs,
     verdict: &DryRunVerdict,
     classified: &Classified,
+    requester: Option<&Requester>,
 ) -> Result<Value, RuntimeError> {
+    let (requested_by, client_id) = match requester {
+        None => ("agent", Value::Null),
+        Some(Requester::Owner) => ("owner", Value::Null),
+        Some(Requester::Client { client_id }) => ("client", payload::text(client_id)),
+    };
     let (dry_run, reason_code) = match verdict {
         DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => ("allow", Value::Null),
         DryRunVerdict::Deny { reason_code } | DryRunVerdict::DenyOnFigures { reason_code, .. } => {
@@ -868,8 +887,8 @@ fn decided(
         ("ask_suppressed", Value::Null),
         ("decided_by", decided_by),
         ("delegation_id", Value::Null),
-        ("requested_by", payload::text("agent")),
-        ("client_id", Value::Null),
+        ("requested_by", payload::text(requested_by)),
+        ("client_id", client_id),
     ])?;
     let read = match verdict {
         DryRunVerdict::AllowDeferring { liquidity, .. } => liquidity.as_ref(),

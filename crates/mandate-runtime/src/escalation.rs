@@ -224,10 +224,15 @@ fn bound_action(
     proposal: &Proposal,
     decided_by: Option<&str>,
     version: &str,
+    requested: bool,
 ) -> Option<BoundAction> {
     let purpose = askable(proposal.purpose)?;
     let decided_by = decided_by.filter(|label| !label.is_empty())?;
-    let combined_score = Signed::parse(proposal.combined_score.as_str()?).ok()?;
+    let combined_score = if requested {
+        None
+    } else {
+        Some(Signed::parse(proposal.combined_score.as_str()?).ok()?)
+    };
     Some(BoundAction {
         instrument: proposal.instrument.as_str().to_owned(),
         asset_class: approval_class(proposal.asset_class),
@@ -259,6 +264,10 @@ pub(crate) struct Prepared {
 /// cannot be written. The decision then journals the dry run's `deny` with that code and is
 /// notified as any skipped decision, so no asked opening is ever dropped unseen (DEC-2814).
 ///
+/// `requested` is whether an owner or a client asked for the order: its request then binds no
+/// score and cites no model output, because no §8.3 evaluation produced it (DEC-2858 item 2), while
+/// the builder's own proposal still needs its decimal score.
+///
 /// `deferred` names the checks the decision's dry run left to the binding gate, in byte order. The
 /// request's content names the same (version 3, journal spec rules 291 and 292; DEC-2515), so the
 /// approver is told which checks have not run. A deferral with no builder plan never reaches here:
@@ -274,14 +283,17 @@ pub(crate) fn prepared(
     deferred: &[&'static str],
     now: RiskClock,
     view: &MandateView,
+    requested: bool,
 ) -> Result<Prepared, &'static str> {
-    let bound =
-        bound_action(state, proposal, decided_by, &view.version).ok_or(payload::ASK_UNBOUND)?;
+    let bound = bound_action(state, proposal, decided_by, &view.version, requested)
+        .ok_or(payload::ASK_UNBOUND)?;
     let execution = bound_plan(proposal).map_err(|()| payload::PLAN_MISMATCH)?;
     let deadline = RiskClock::from_secs(now.secs().saturating_add(view.approval.timeout_s));
+    let scored = bound.combined_score.is_some();
     let evidence = state
         .evidence_for(&proposal.instrument, now)
         .into_iter()
+        .filter(|_| scored)
         .map(|event| EvidenceRef {
             event_id: event.0,
             artifact: None,
@@ -375,7 +387,9 @@ fn requested_payload(
         ("decided_by", payload::text(&bound.decided_by)),
         (
             "combined_score",
-            payload::text(&bound.combined_score.to_string()),
+            bound
+                .combined_score
+                .map_or(Value::Null, |score| payload::text(&score.to_string())),
         ),
         ("reference_mark", reference_mark),
         (
@@ -656,7 +670,9 @@ fn bound_proposal(
         exit_origin: None,
         exit_conviction: None,
         buy_conviction: None,
-        combined_score: payload::text(&bound.combined_score.to_string()),
+        combined_score: bound
+            .combined_score
+            .map_or(Value::Null, |score| payload::text(&score.to_string())),
         outputs_used: Default::default(),
         model_weights: Default::default(),
         clips_applied: Vec::new(),

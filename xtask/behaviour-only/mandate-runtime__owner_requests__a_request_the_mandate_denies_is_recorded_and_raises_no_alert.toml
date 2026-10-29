@@ -1,9 +1,0 @@
-file = "crates/mandate-runtime/tests/owner_requests.rs"
-test = "a_request_the_mandate_denies_is_recorded_and_raises_no_alert"
-reason = """
-E10-30, slice B (DEC-2858): `owner_request::requested` is inert rather than an
-`Unimplemented` stub, because a failed step stops the shell's control pass and would leave a
-later kill switch in the same read unhanded (`AGENTS.md` rule 13; #2970's review). So this test
-fails on the request journaling nothing rather than at a stub, until the implementation deletes
-this file with its `#[ignore]` line.
-"""

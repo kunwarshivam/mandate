@@ -194,7 +194,7 @@ fn the_content_hash_separates_every_bound_field() {
             7 => other.bound.reference_mark = None,
             8 => other.bound.asset_class = AssetClass::Crypto,
             9 => other.bound.purpose = AskablePurpose::Increase,
-            10 => other.bound.combined_score = Signed::parse(&format!("0.{n}1")).unwrap(),
+            10 => other.bound.combined_score = Some(Signed::parse(&format!("0.{n}1")).unwrap()),
             11 => other.evidence[1].artifact = Some(mandate_canon::Digest::of(&n.to_be_bytes())),
             12 => other.risk_impact[0].value = DecStr::parse(&format!("{n}.5")).unwrap(),
             _ => {}
