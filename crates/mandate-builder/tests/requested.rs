@@ -108,7 +108,6 @@ fn a_clip_that_leaves_nothing_hands_the_gate_the_requested_quantity() {
 /// below the minimum: that clip is not applied either, and the twelve go to the gate unclipped
 /// with no limit named (DEC-2858 item 7).
 #[test]
-#[ignore = "pending E10-30"]
 fn a_clip_below_the_minimum_order_hands_the_gate_the_requested_quantity() {
     let mut mandate = two_stock_swing();
     mandate.limits.max_order_usd = usd("120");
