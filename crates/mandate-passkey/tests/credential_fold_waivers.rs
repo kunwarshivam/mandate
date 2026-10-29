@@ -105,6 +105,17 @@ fn records(stream: &Value) -> Vec<CredentialRecord> {
         .collect()
 }
 
+/// `record`, an assertion moved past every cool-off: the stream rule 254 alone judges.
+fn past_every_cool_off(record: &CredentialRecord) -> CredentialRecord {
+    match record {
+        CredentialRecord::Asserted(a) => CredentialRecord::Asserted(Assertion {
+            event_time: UtcNanos::from_parts(4_102_444_800, 0).unwrap(),
+            ..a.clone()
+        }),
+        other => other.clone(),
+    }
+}
+
 /// The `seq` rule 318 first breaks at, as the vectors expect it, or `None` for a valid stream.
 fn expected_break(stream: &Value) -> Option<u64> {
     let expect = stream.get("expect").unwrap();
@@ -118,7 +129,6 @@ fn expected_break(stream: &Value) -> Option<u64> {
 /// `credential_record`: the actor as member, the credential, the challenge, the `cool_off_ends`
 /// and the record's `event_time`.
 #[test]
-#[ignore = "pending E9-4"]
 fn each_waiver_maps_its_member_credential_challenge_end_and_time() {
     let section = section();
     let base = section
@@ -145,7 +155,6 @@ fn each_waiver_maps_its_member_credential_challenge_end_and_time() {
 /// ULID or credential id is refused at that member, and one at another schema version at
 /// `schema_version`, so the fold reads it as unreadable rather than as no waiver.
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unreadable_waiver_is_refused_at_its_member() {
     let section = section();
     let mut checked = 0;
@@ -172,7 +181,6 @@ fn an_unreadable_waiver_is_refused_at_its_member() {
 /// The fold finds each rule-318 stream's first break at the `seq` the vectors name, and none in a
 /// valid stream.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_fold_finds_each_rule_318_break_where_the_vectors_name_it() {
     let section = section();
     let streams = list(&section, "streams");
@@ -191,9 +199,9 @@ fn the_fold_finds_each_rule_318_break_where_the_vectors_name_it() {
 /// Step-up's view fails closed: on a stream that breaks rule 318, the member of the breaking
 /// record and the credential's holder have no passkey that counts, from the first `seq` that breaks
 /// rule 318 or rule 254 for them. On a valid stream each member's passkeys and counters are those
-/// the stream holds without its waivers, which change no counter. Route 2's view reads no waiver.
+/// rule 254 alone leaves, the stream without its waivers and with each assertion past every
+/// cool-off: a waiver changes no counter. Route 2's view reads no waiver.
 #[test]
-#[ignore = "pending E9-4"]
 fn step_up_fails_closed_from_the_first_rule_318_break_and_route_two_reads_no_waiver() {
     let section = section();
     for stream in list(&section, "streams") {
@@ -205,7 +213,7 @@ fn step_up_fails_closed_from_the_first_rule_318_break_and_route_two_reads_no_wai
             .filter(|r| !matches!(r, CredentialRecord::Waived(_)))
             .cloned()
             .collect();
-        let unwaived = CredentialFold::new(without.clone());
+        let unwaived = CredentialFold::new(without.iter().map(past_every_cool_off));
         let expected = expected_break(stream);
         assert_eq!(
             fold.first_waiver_break().map(|b| b.is_some()),
@@ -356,13 +364,18 @@ fn record(seq: u64, step: Step) -> CredentialRecord {
     }
 }
 
+/// One credential id's history for the oracle: how many enrolments and removals name it, the
+/// member who enrolled it and whether with a cool-off, while rule 251 keeps that enrolment, and
+/// whether that member then removed it.
+type History = (u32, Option<(u8, bool)>, bool);
+
 /// The oracle: rule 318 as journal spec §9.38 words it, rebuilt here from each credential's own
-/// history (who enrolled it and whether they removed it), the challenges waived so far, and the
-/// one assertion, if any, that the very next record must waive. Rule 251's own breaks are left to
-/// the fold: a record that breaks it neither enrols nor removes here.
+/// history, the challenges waived so far, and the one assertion, if any, that the very next record
+/// must waive. A credential is held by whoever enrolled it while rule 251 keeps that history: an
+/// enrolment counts only as the id's first record, and a removal only as its second, by the member
+/// who enrolled it.
 fn oracle(steps: &[Step]) -> Option<u64> {
-    let mut enrolled: BTreeMap<u8, (u8, bool)> = BTreeMap::new();
-    let mut removed: BTreeSet<u8> = BTreeSet::new();
+    let mut history: BTreeMap<u8, History> = BTreeMap::new();
     let mut waived: BTreeSet<u8> = BTreeSet::new();
     let mut owed: Option<(u64, u8)> = None;
     for (step, seq) in steps.iter().zip(1_u64..) {
@@ -371,33 +384,35 @@ fn oracle(steps: &[Step]) -> Option<u64> {
         {
             return Some(assertion);
         }
-        let holds = |m: u8, c: u8| {
-            enrolled
-                .get(&c)
-                .is_some_and(|(by, _)| *by == m && !removed.contains(&c))
+        let held = |c: u8| match history.get(&c) {
+            Some((_, Some(enrolment), false)) => Some(*enrolment),
+            _ => None,
         };
         match *step {
             Step::Enrol(m, c, cools) => {
-                enrolled.entry(c).or_insert((m, cools));
+                let entry = history.entry(c).or_insert((0, None, false));
+                if entry.0 == 0 {
+                    entry.1 = Some((m, cools));
+                }
+                entry.0 += 1;
             }
             Step::Remove(m, c) => {
-                if enrolled.get(&c).is_some_and(|(by, _)| *by == m) && !removed.contains(&c) {
-                    removed.insert(c);
+                let entry = history.entry(c).or_insert((0, None, false));
+                if entry.0 == 1 && entry.1.is_some_and(|(by, _)| by == m) {
+                    entry.2 = true;
                 }
+                entry.0 += 1;
             }
             Step::Assert(m, c, h, t) => {
-                let cooling = enrolled
-                    .get(&c)
-                    .is_some_and(|(_, cools)| *cools && !removed.contains(&c))
-                    && at(t) < end(0);
-                if holds(m, c) && cooling {
+                if held(c).is_some_and(|(by, cools)| by == m && cools && at(t) < end(0)) {
                     owed = Some((seq, h));
                 }
             }
             Step::Waive(m, c, h, e, t) => {
-                let own_end = enrolled.get(&c).is_some_and(|(_, cools)| *cools) && e == 0;
-                let after = end(e) > at(t);
-                if !holds(m, c) || !own_end || !after || waived.contains(&h) {
+                let keeps = held(c).is_some_and(|(by, cools)| by == m && cools && e == 0)
+                    && end(e) > at(t)
+                    && !waived.contains(&h);
+                if !keeps {
                     return Some(seq);
                 }
                 waived.insert(h);
@@ -410,7 +425,6 @@ fn oracle(steps: &[Step]) -> Option<u64> {
 /// Over random streams of enrolments, removals, assertions and waivers, the fold's first
 /// rule-318 break is the oracle's. The runner keeps no failure file (DEC-381).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_rule_318_break_is_the_oracles() {
     let config = ProptestConfig {
         cases: 512,
