@@ -9,8 +9,8 @@ import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { RoleProvider } from "@/lib/roles";
 
 /**
- * The agent page's plain-words box: each phrase becomes one previewed action, sent only on Send,
- * through the same paths as the rest of the app (DEC-2151 for an ask, the owner commands, owner exits).
+ * The agent page's chat: the deployment's model answers, and its one typed card is shown as a line
+ * this page writes, sent only on Send through the app's own paths (DEC-2151, owner commands, exits).
  */
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
@@ -20,14 +20,19 @@ function swing() {
   return found;
 }
 const SWING = swing();
-/** The name the API serves: the mandate document's, not the fixture's label. */
+/** The name the API serves: the mandate document's. */
 const NAME = SWING.mandate.name;
 
-function mount() {
+type Answer = { status: number; body: unknown };
+
+function mount(answer: Answer) {
   const server = createMockServer({ workspaceId: WS, scenario: "normal" });
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   const fetch: Fetch = (input, init) => {
-    if ((init.method ?? "GET") === "POST") posts.push({ path: new URL(input).pathname.slice(`/v1/workspaces/${WS}`.length), body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> });
+    const path = new URL(input).pathname.slice(`/v1/workspaces/${WS}`.length);
+    if ((init.method ?? "GET") === "POST") posts.push({ path, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> });
+    if (path === `/agents/${SWING.agent_id}/chat`)
+      return Promise.resolve(new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "Content-Type": answer.status === 200 ? "application/json" : "application/problem+json" } }));
     return server.fetch(input, init);
   };
   render(
@@ -39,6 +44,8 @@ function mount() {
   );
   return posts;
 }
+
+const reply = (text: string, card: unknown = null): Answer => ({ status: 200, body: { api_version: "v1", as_of: [], reply: { text, author: "agent" }, card } });
 
 async function say(text: string) {
   const field = await screen.findByLabelText(`Tell ${NAME} what to do`, {}, { timeout: 5_000 });
@@ -55,71 +62,59 @@ const proposal = async () => {
 afterEach(() => cleanup());
 
 describe("telling an agent what to do in plain words", () => {
-  it("previews an ask to buy and sends nothing until Send, then sends the owner's request", async () => {
-    const posts = mount();
-    await say("buy 10 XYZ");
+  it("sends the owner's words to the chat route, shows the model's reply, and an ask card it writes itself, sent only on Send", async () => {
+    const posts = mount(reply("I'll ask it to buy 10 XYZ.", { action: "ask_to_buy", summary: { instrument_id: INSTRUMENTS.XYZ.asset_id, symbol: "XYZ", size: "10" } }));
+    await say("buy 10 xyz please");
     const card = await proposal();
+    expect(posts.find((p) => p.path.endsWith("/chat"))?.body).toEqual({ message: "buy 10 xyz please" });
+    expect(last()?.querySelector('[data-slot="agent-chat-reply"]')?.textContent).toBe("I'll ask it to buy 10 XYZ.");
     expect(card.textContent).toContain(`Ask ${NAME} to buy 10 XYZ.`);
     expect(posts.filter((p) => p.path.endsWith("/requests"))).toEqual([]);
-    expect(within(card).queryByRole("button", { name: /^buy$/i })).toBeNull();
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(card.querySelector('[data-slot="agent-chat-outcome"]')?.textContent).toMatch(/^Your agent took the request/), { timeout: 5_000 });
     expect(posts.filter((p) => p.path.endsWith("/requests"))).toEqual([{ path: `/agents/${SWING.agent_id}/requests`, body: { instrument: INSTRUMENTS.XYZ.asset_id, side: "buy", size: "10" } }]);
-    expect(within(card).getByRole("link", { name: "Approvals" }).getAttribute("href")).toBe("/approvals");
   });
 
   it("sends nothing when the owner cancels", async () => {
-    const posts = mount();
+    const posts = mount(reply("Pausing it.", { action: "pause", summary: { agent_id: SWING.agent_id } }));
     await say("pause");
     const card = await proposal();
     fireEvent.click(within(card).getByRole("button", { name: "Cancel" }));
     expect(card.textContent).toContain("Canceled. Nothing was sent.");
-    expect(posts.filter((p) => p.path.includes("/agents/"))).toEqual([]);
+    expect(posts.filter((p) => p.path.endsWith("/pause"))).toEqual([]);
   });
 
-  it("pauses through the owner command once Send is tapped", async () => {
-    const posts = mount();
-    await say("pause it");
+  it("pauses through the owner command, with the app's own wording, once Send is tapped", async () => {
+    const posts = mount(reply("Pausing it.", { action: "pause", summary: { agent_id: SWING.agent_id } }));
+    await say("hold on, pause");
     const card = await proposal();
     expect(card.textContent).toContain(`Pause ${NAME}: no new orders; resting protection stays.`);
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts.some((p) => p.path === `/agents/${SWING.agent_id}/pause`)).toBe(true), { timeout: 5_000 });
   });
 
-  it("previews selling everything the agent holds, then sends one owner exit per holding", async () => {
-    const posts = mount();
+  it("sends one owner exit per instrument the card names", async () => {
+    const posts = mount(reply("Selling it.", { action: "owner_exit", summary: { instruments: [{ instrument_id: INSTRUMENTS.XYZ.asset_id, symbol: "XYZ", qty: "8" }] } }));
     await say("sell everything");
     const card = await proposal();
-    expect(card.textContent).toMatch(/^Sell all of .+'s /);
-    expect(posts.filter((p) => p.path.endsWith("/exits"))).toEqual([]);
+    expect(card.textContent).toContain(`Sell all of ${NAME}'s 8 XYZ`);
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(card.querySelector('[data-slot="agent-chat-outcome"]')).not.toBeNull(), { timeout: 5_000 });
-    const exits = posts.filter((p) => p.path === `/agents/${SWING.agent_id}/exits`);
-    expect(exits.length).toBeGreaterThan(0);
-    expect(new Set(exits.map((e) => e.body.instrument)).size).toBe(exits.length);
+    expect(posts.filter((p) => p.path === `/agents/${SWING.agent_id}/exits`).map((p) => p.body.instrument)).toEqual([INSTRUMENTS.XYZ.asset_id]);
   });
 
-  it("says a symbol the deployment has not registered is not registered, and offers nothing to send", async () => {
-    mount();
-    await say("buy 5 NOPE");
-    await waitFor(() => expect(last()?.textContent).toContain("NOPE isn't registered on your deployment."), { timeout: 5_000 });
-    expect(last()?.querySelector('[data-slot="agent-chat-proposal"]')).toBeNull();
-  });
-
-  it("refuses to advise, and lists what it can do for words it does not understand", async () => {
-    mount();
-    await say("should I buy XYZ?");
-    await waitFor(() => expect(last()?.textContent).toContain("I can't advise on what to trade."), { timeout: 5_000 });
-    await say("make me rich");
-    await waitFor(() => expect(last()?.textContent).toMatch(/I didn't catch that\.Try: “buy 10 AAPL”/), { timeout: 5_000 });
-    expect(document.querySelector('[data-slot="agent-chat-proposal"]')).toBeNull();
-  });
-
-  it("answers how it is doing from its positions, with P&L said to be not reported, and sends nothing", async () => {
-    const posts = mount();
+  it("shows the reply alone, with nothing to send, for an answer or a card it cannot read", async () => {
+    const posts = mount(reply("It holds 8 XYZ.", { action: "place_order", summary: {} }));
     await say("how am I doing");
-    await waitFor(() => expect(last()?.textContent).toContain("P&L is not reported by your deployment yet."), { timeout: 5_000 });
-    expect(within(last() as HTMLElement).getByRole("link", { name: "Positions" }).getAttribute("href")).toBe("/positions");
-    expect(posts.filter((p) => p.path.includes("/agents/"))).toEqual([]);
+    await waitFor(() => expect(last()?.querySelector('[data-slot="agent-chat-reply"]')?.textContent).toBe("It holds 8 XYZ."), { timeout: 5_000 });
+    expect(last()?.querySelector('[data-slot="agent-chat-proposal"]')).toBeNull();
+    expect(posts.filter((p) => !p.path.endsWith("/chat"))).toEqual([]);
+  });
+
+  it("says nothing was done when the deployment does not answer", async () => {
+    mount({ status: 503, body: { type: "about:blank", status: 503, title: "x", code: "gateway_unavailable", effect: "none", event_id: null, retryable: true } });
+    await say("buy 10 XYZ");
+    await waitFor(() => expect(last()?.textContent).toContain("Nothing was done."), { timeout: 5_000 });
+    expect(last()?.querySelector('[data-slot="agent-chat-proposal"]')).toBeNull();
   });
 });

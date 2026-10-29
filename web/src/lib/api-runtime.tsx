@@ -10,6 +10,7 @@ import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDige
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
 import { priceRead, priceRoute } from "@/api/price";
+import { WORKSPACE_CHAT_ROUTE, agentChatRoute } from "@/api/chat";
 import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -39,6 +40,7 @@ import {
   type AlertsAnswer,
   type PositionsAnswer,
   type PriceAnswer,
+  type ChatPortAnswer,
   type RecordsAnswer,
   type Runtime,
   RuntimeContext,
@@ -605,6 +607,15 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** The chat (builder 4's route): one exchange per message the owner sends; nothing it answers acts. */
+  const chat = useCallback(
+    async (agentId: string | null, message: string): Promise<ChatPortAnswer> => {
+      const read = await client.chat(agentId === null ? WORKSPACE_CHAT_ROUTE : agentChatRoute(agentId), message);
+      return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+    },
+    [client],
+  );
+
   /** `GET /alerts` (§4.7, DEC-2141): the workspace's owner alerts, with only this member's own deliveries. */
   const alerts = useCallback(async (): Promise<AlertsAnswer> => {
     const read = await client.read("/alerts", alertsRead);
@@ -783,8 +794,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, chat, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, chat, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

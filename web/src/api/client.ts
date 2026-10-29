@@ -5,6 +5,7 @@
  * outcome could not be confirmed is `effect: "unknown"`, never success and never "nothing happened"
  * (API-13). It has no order-placing method (DEC-528).
  */
+import { type ChatAnswer, chatRead } from "./chat";
 import { array, closedEnum, integer, isRecord, nullable, object, string, timestamp, watermark } from "./decode";
 import {
   COMMAND_PHASES,
@@ -114,6 +115,12 @@ export interface WorkspaceClient {
    * `effect: "unknown"`, and the screen reads the member's passkeys again rather than send it twice.
    */
   enrolPasskey(body: JsonObject): Promise<ReadOutcome<Enrolled>>;
+  /**
+   * The owner's words to an agent, or to the workspace when `route` is `/chat` (builder 4's chat
+   * route): the model's reply and at most one typed card. Nothing it answers acts; a lost answer is
+   * `effect: "unknown"`, since the deployment may have journaled the exchange.
+   */
+  chat(route: `/${string}`, message: string): Promise<ReadOutcome<ChatAnswer>>;
 }
 
 /** What a go-live request came to: always a refusal, or an answer the client could not read. */
@@ -370,6 +377,7 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
   }
   const askRegistration = () => posted(REGISTRATION_ROUTE, {}, registrationChallenge, "none");
   const enrolPasskey = (body: JsonObject) => posted(ENROL_ROUTE, body, enrolled, "unknown");
+  const chat = (route: `/${string}`, message: string) => posted(route, { message }, chatRead, "unknown");
 
   const readSession = () => answered(() => fetch(baseUrl + SESSION_ROUTE, { method: "GET", credentials, headers: { Accept: "application/json" } }), sessionPrincipal);
 
@@ -423,5 +431,5 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     return { ok: false, error };
   }
 
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect, askRealMoney, askRegistration, enrolPasskey });
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect, askRealMoney, askRegistration, enrolPasskey, chat });
 }

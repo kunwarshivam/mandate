@@ -320,6 +320,7 @@ describe("no order ticket (DEC-528)", () => {
     commands: ["UI_BUILD", "isAssetId", "prepareApprovalResponse", "prepareAskAgent", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "prepareOwnerExit", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     catalogue: ["instrumentsRead", "signalModelsRead"],
+    chat: ["CHAT_ACTIONS", "WORKSPACE_CHAT_ROUTE", "agentChatRoute", "chatRead"],
     enrol: ["CREATE_TIMEOUT_MS", "ENROL_ROUTE", "REGISTRATION_ROUTE", "browserCreator", "createPasskey", "enrolBody", "enrolStepUpDigest", "enrolled", "passkeyList", "registrationChallenge"],
     decisions: ["DEFERRED_CHECKS", "decisionsOf"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],

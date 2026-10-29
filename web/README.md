@@ -210,12 +210,12 @@ instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read eve
 state the journal has not given is "not reported", a list that cannot be read is never shown as
 empty, and an agent with no account found says so. It also lists the latest 20 records on the
 agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequence, type and time,
-never a body (DEC-2377). An agent's page has "Tell <agent>": the owner types plain words, `src/lib/agent-command.ts`
-reads them as one fixed action (no model), and the screen shows it as one line that is sent only on
-Send. "buy 10 AAPL" asks the agent (`POST /agents/{id}/requests`), "pause", "resume", "stop" and
-"kill switch" are the owner commands with their own step-up, "sell everything" or "exit AAPL" are
-owner exits, and "how am I doing" answers from the positions read. Advice is refused, and anything
-else gets example phrases back. Instruments (`/instruments`) lists the instruments `GET /instruments` registers,
+never a body (DEC-2377). An agent's page has "Tell <agent>": the owner's words go to the deployment's chat route
+(`POST /agents/{id}/chat`, builder 4's), which asks the model and answers with its reply and at most
+one typed card (`src/api/chat.ts`). The reply is shown as the assistant's quoted text; the card as one
+line this page writes from its typed values, sent only on Send through the app's own paths: the ask
+(`POST /agents/{id}/requests`), the owner commands with their step-up, and owner exits. A card it
+cannot read is dropped. Instruments (`/instruments`) lists the instruments `GET /instruments` registers,
 in symbol order, filtered by the symbol typed: display only, with no ranking or suggestion (DEC-528 item 2). An instrument's page shows its last
 trusted daily close from `GET /instruments/{id}/price` (DEC-2152), read every 30 s and labelled with
 its session, never as a live price or a bid; a price the deployment does not report says so. An instrument's page offers each running agent "Ask agent
