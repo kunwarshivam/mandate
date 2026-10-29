@@ -271,6 +271,24 @@
         "requests": {"cpu": "100m", "memory": "128Mi"},
         "limits": {"cpu": "250m", "memory": "256Mi"}
       }
+    },
+    {
+      "name": "news-reader",
+      "row": "News reader, one per workspace, in staging alone (E2-10, DEC-2278, DEC-2084): the single writer of the hosted workspace's news stream, storing each Alpaca news item about its followed agents' theses and holdings as a typed record in the artifact store before journaling it; Postgres, the vault, and data.alpaca.markets only. Its role, `mandate_news_reader`, may write the news stream alone (journal §6.1). It reads the platform's paper news data key once from the vault as `news-reader`, polls under config/sources/allowlist-v3.toml, mounted from the ConfigMap `news-reader-allowlist`, and follows the agents `news.follows` names; with no key it stays not ready, so no cell runs it",
+      "kind": "service",
+      "image": "news-reader",
+      "built": true,
+      "compose": false,
+      "args": ["run", "--workspace", "{hosted_workspace}", "--allowlist", "/etc/mandate/news/allowlist.toml", "--artifacts", "/var/lib/mandate/artifacts", "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault", "--probe", "/tmp/process.sock"],
+      "probe": ["/mandate-news-reader", "probe", "{probe}", "--probe", "/tmp/process.sock"],
+      "db_role": "mandate_news_reader",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres", "vault", "market-data"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "250m", "memory": "256Mi"}
+      }
     }
   ],
   "targets": {

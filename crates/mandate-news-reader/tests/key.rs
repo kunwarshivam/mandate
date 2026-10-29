@@ -14,7 +14,7 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use mandate_connections::record::ConnectionId;
-use mandate_news_reader::{KeyRefusal, read_key, stored_key};
+use mandate_news_reader::{KeyRefusal, read_key, read_then_end, stored_key};
 use mandate_sources::fetch::NewsKeyRefusal;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -109,6 +109,10 @@ struct Recorder {
     identity: Identity,
     answer: fn() -> Result<Option<SecretSlice<u8>>, SourceError>,
     asked: RefCell<Vec<SecretPath>>,
+    /// How many reads had been made at each end of the session, in order.
+    ended: RefCell<Vec<usize>>,
+    /// What ending the session answers.
+    end_answer: fn() -> Result<(), SourceError>,
 }
 
 impl Recorder {
@@ -117,7 +121,15 @@ impl Recorder {
             identity: Identity::NewsReader,
             answer,
             asked: RefCell::new(Vec::new()),
+            ended: RefCell::new(Vec::new()),
+            end_answer: || Ok(()),
         }
+    }
+
+    /// Ends the session, as `OpenBaoSource::end_session` revokes its token.
+    async fn end(&self) -> Result<(), SourceError> {
+        self.ended.borrow_mut().push(self.asked.borrow().len());
+        (self.end_answer)()
     }
 }
 
@@ -185,4 +197,108 @@ fn the_key_is_read_once_from_the_news_data_key_s_path() {
         Some(KeyRefusal::VaultUnavailable)
     );
     assert_eq!(outage.asked.borrow().len(), 1);
+}
+
+/// E2-22: the key is read once and the session is then ended once, after the read, whatever the
+/// read answered, so the token outlives the read by no more than one request. A session the vault
+/// does not end is `vault_unavailable`, and the key read through it is dropped.
+#[test]
+fn the_key_is_read_once_and_the_session_ended_once_after_whatever_the_read_answered() {
+    let vault = Recorder::answering(|| stored(PAPER_KEY));
+    let key = now(read_then_end(&vault, async |v: &Recorder| v.end().await)).unwrap();
+    assert_eq!(key.key_id().expose_secret(), "PKTESTKEYID0001");
+    assert_eq!(vault.asked.borrow().len(), 1, "one read");
+    assert_eq!(*vault.ended.borrow(), [1], "one end, after the read");
+    for (answer, refusal) in [
+        (
+            (|| Err(SourceError::Missing)) as fn() -> _,
+            KeyRefusal::NoKey,
+        ),
+        (|| Ok(None), KeyRefusal::NoKey),
+        (
+            || Err(SourceError::Unavailable),
+            KeyRefusal::VaultUnavailable,
+        ),
+        (
+            || stored(b"AKLIVEKEY:secret"),
+            KeyRefusal::Refused(NewsKeyRefusal::NotPaper),
+        ),
+    ] {
+        let vault = Recorder::answering(answer);
+        let got = now(read_then_end(&vault, async |v: &Recorder| v.end().await));
+        assert_eq!(got.err(), Some(refusal));
+        assert_eq!(vault.asked.borrow().len(), 1, "{refusal:?}: one read");
+        assert_eq!(
+            *vault.ended.borrow(),
+            [1],
+            "{refusal:?}: ended all the same"
+        );
+    }
+    let mut unended = Recorder::answering(|| stored(PAPER_KEY));
+    unended.end_answer = || Err(SourceError::Unavailable);
+    let got = now(read_then_end(&unended, async |v: &Recorder| v.end().await));
+    assert_eq!(
+        got.err(),
+        Some(KeyRefusal::VaultUnavailable),
+        "a session the vault did not end drops the key read through it"
+    );
+    assert_eq!(*unended.ended.borrow(), [1]);
+}
+
+/// The crate's non-test source, file by file: each `src/` file up to its `#[cfg(test)] mod tests`,
+/// so a pin never matches its own text.
+fn non_test_sources() -> Vec<(String, String)> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == "rs"))
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let code = text
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            (
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+                code,
+            )
+        })
+        .collect()
+}
+
+/// E2-22, R2 on #2901: the one call of `read_then_end` outside the tests ends the session with
+/// the real source's own `end_session`, so a no-op end, which every test of `read_then_end` would
+/// pass, cannot ship: the vault token would then live out its whole lifetime.
+#[test]
+fn the_vault_s_own_end_session_is_the_one_end_the_reader_ever_passes() {
+    let sources = non_test_sources();
+    assert!(
+        sources
+            .iter()
+            .any(|(name, code)| name == "key.rs" && code.contains("pub async fn vault_key")),
+        "the pin reads the code it pins"
+    );
+    let calls: Vec<(&str, usize)> = sources
+        .iter()
+        .map(|(name, code)| (name.as_str(), code.matches("read_then_end(").count()))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    assert_eq!(
+        calls,
+        [("key.rs", 1)],
+        "one call of read_then_end, in key.rs"
+    );
+    let key = &sources.iter().find(|(name, _)| name == "key.rs").unwrap().1;
+    assert_eq!(
+        key.matches("read_then_end(&vault, OpenBaoSource::end_session)")
+            .count(),
+        1,
+        "the session is ended by OpenBaoSource::end_session"
+    );
 }

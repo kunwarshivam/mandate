@@ -619,7 +619,7 @@ SCHEMAS[("ctl", "StepUpAsserted")] = rec(
     ("assertion", REF),
 )
 
-# §9.38 v0.112 (DEC-2146): a passkey step-up a `dev` or `ci` test cell counted inside its credential's
+# §9.38 v0.113 (DEC-2146): a passkey step-up a `dev` or `ci` test cell counted inside its credential's
 # enrolment cool-off, appended immediately after its `StepUpAsserted` in one batch (rule 317, judged in
 # `cool_off_waivers.py` with stream rule 318).
 SCHEMAS[("ctl", "StepUpCoolOffWaived")] = rec(
