@@ -44,7 +44,7 @@ IN_CLUSTER = {"postgres", "vault", "model-gateway"}
 # Each destination is (target, protocol, port); `dns` is added for any process with a destination.
 SECTION_3_1 = {
     "migrate": {("postgres", "TCP", 5432)},
-    "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443)},
+    "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443), ("model-gateway", "TCP", 8080)},
     "control": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("identity-provider", "TCP", 443)},
     "journal-verify": {("postgres", "TCP", 5432)},
     "connect-check": {("postgres", "TCP", 5432)},

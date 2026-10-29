@@ -12,6 +12,9 @@ its memory until they move to Postgres (item 6).
   into an emptyDir the API container alone mounts read-only and names in `SSL_CERT_FILE`.
 - The subject links are the operator's ConfigMap, mounted read-only at the one fixed path
   (DEC-1023); with none named the file is absent and every sign-in is refused.
+- Where the model gateway serves this workspace, the API reaches it at `model-gateway:8080` for
+  the agent's chat, and with a live registry reads the chat entries from the gateway's own
+  registry ConfigMap, mounted read-only (DEC-2293, `mandate.apiChat`).
 - In a dev or ci cell only, the local stub token issuer (DEC-2100, DEC-1025) runs as a sidecar on
   the pod's loopback, started and answering before the server starts, since the server fetches
   the stub's key set at its own start and only every five minutes after. Its image can only be a
@@ -63,6 +66,15 @@ its memory until they move to Postgres (item 6).
     limits: {cpu: "50m", memory: "32Mi"}
     requests: {cpu: "50m", memory: "32Mi"}
 {{- end -}}
+{{- /* "true" when the agent's chat reaches the model gateway (DEC-2293): the gateway runs in this cell
+and serves the workspace the API hosts. With a live registry the API also reads its chat entries,
+from the same ConfigMap the gateway mounts; without one the gateway serves the recorded bundle, which
+holds no chat entry, so a run says the chat is unavailable. Called with the chart's root. */ -}}
+{{- define "mandate.apiChat" -}}
+{{- if and (index .Values.images "model-gateway") .Values.modelGateway.workspace (eq .Values.modelGateway.workspace .Values.api.workspace) -}}
+true
+{{- end -}}
+{{- end -}}
 {{- define "mandate.apiEnv" -}}
 {{- $a := .root.Values.api -}}
 {{- $j := .root.Values.journal -}}
@@ -105,6 +117,14 @@ its memory until they move to Postgres (item 6).
 {{- else if $a.stepUpCoolOffWaiverUntil }}
 {{- fail "api.stepUpCoolOffWaiverUntil is the expiry of api.stepUpCoolOffWaiver, and the waiver is off (DEC-2150)" }}
 {{- end }}
+{{- if include "mandate.apiChat" .root }}
+- name: MANDATE_MODEL_GATEWAY
+  value: "model-gateway:8080"
+{{- if .root.Values.modelGateway.registry }}
+- name: MANDATE_CHAT_REGISTRY
+  value: /run/mandate/model-gateway/registry.json
+{{- end }}
+{{- end }}
 {{- if .root.Values.api.vaultBinding }}
 - name: MANDATE_API_VAULT_ADDRESS
   value: {{ include "mandate.vaultAddress" .root | quote }}
@@ -136,6 +156,9 @@ spec:
     {{- end }}
     {{- if .root.Values.api.subjectLinks }}
     {{- $mounts = printf "%s\n- {name: subject-links, mountPath: /etc/mandate/subject-links, subPath: subject-links, readOnly: true}" $mounts }}
+    {{- end }}
+    {{- if and (include "mandate.apiChat" .root) .root.Values.modelGateway.registry }}
+    {{- $mounts = printf "%s\n- {name: model-gateway-registry, mountPath: /run/mandate/model-gateway, readOnly: true}" $mounts }}
     {{- end }}
     {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" (list "--bind" "127.0.0.1:8080" "--probe-bind" "127.0.0.1:8081") "mounts" $mounts) }}
     {{- $container = replace "  env:\n" (printf "  env:\n%s\n" (include "mandate.apiEnv" . | indent 4)) $container }}
@@ -170,6 +193,9 @@ spec:
     {{- end }}
     {{- with .root.Values.api.subjectLinks }}
     {{- $volumes = printf "%s\n- {name: subject-links, configMap: {name: %q, defaultMode: 292, items: [{key: subject-links, path: subject-links}]}}" $volumes . }}
+    {{- end }}
+    {{- if and (include "mandate.apiChat" .root) .root.Values.modelGateway.registry }}
+    {{- $volumes = printf "%s\n- {name: model-gateway-registry, configMap: {name: model-gateway-registry, defaultMode: 292, items: [{key: registry.json, path: registry.json}]}}" $volumes }}
     {{- end }}
     {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
 {{- end -}}
