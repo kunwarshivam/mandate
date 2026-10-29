@@ -299,3 +299,46 @@ fn a_stored_item_it_cannot_read_at_start_stops_it_with_nothing_fetched_or_journa
         assert_eq!(exit(&reader), Some(Exit::Drained), "{case}: it drains");
     }
 }
+
+/// E2-10d: a reader that finds a stored item it cannot read fences nothing. It reads and folds
+/// its stream before it takes the writer epoch, so it refuses `news_stream_unreadable` holding no
+/// epoch, and the earlier writer's next append still commits at its own epoch.
+#[test]
+fn a_reader_that_cannot_read_its_stream_fences_no_earlier_writer() {
+    let (journal, shelf, transport) = workspace_with_one_item();
+    let stream = StreamId::parse(&format!("news:{WS}")).unwrap();
+    let mut earlier = journal.clone();
+    let epoch = earlier.take_ownership(&stream).unwrap();
+    let writer = Writer {
+        workspace: WS.to_owned(),
+        environment: Environment::Paper,
+        epoch,
+    };
+    journal
+        .news_bodies
+        .borrow_mut()
+        .insert(2, b"{not canonical".to_vec());
+    let refused = started(&journal, &shelf, &transport, plus(t0(), 1));
+    assert_eq!(refused.not_ready(), Some("news_stream_unreadable"));
+    assert_eq!(
+        refused.lifecycle().state(),
+        State::Replaying,
+        "started, holding no epoch"
+    );
+    let next = Record::Stored(Stored {
+        source: "alpaca.news".to_owned(),
+        allowlist_version: 3,
+        item_id: "2:2026-10-26T12:30:00.000000000Z".to_owned(),
+        symbols: BTreeSet::from(["SPY".to_owned()]),
+        published_at: at("2026-10-26T12:30:00Z"),
+        knowledge_at: at("2026-10-26T14:45:00Z"),
+        item_ref: ArtifactRef::of(&2_u64.to_be_bytes()),
+        licensed: true,
+    });
+    let drafts = writer.drafts(2, t0(), &[next]).unwrap();
+    let appended = earlier.append(&stream, 2, epoch, t0(), &drafts);
+    assert!(
+        matches!(appended, mandate_journal::AppendOutcome::Committed(_)),
+        "the earlier writer still writes: {appended:?}"
+    );
+}
