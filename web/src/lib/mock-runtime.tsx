@@ -284,8 +284,8 @@ export interface ConnectPort {
  * Where an owner exit came to: settled by the agent's runtime (`applied`, `refused`, `ended`), recorded
  * with no settled outcome read yet, not delivered with the refusal's code, or not known.
  */
-/** Where an owner request ended: the agent took it, refused it (with the reason its steps give), only recorded it, or never got it. */
-export type AskOutcome = { phase: "applied" | "recorded" } | { phase: "refused"; reason: string | null } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+/** Where an owner request ended: the agent took it (§5.5 `taken`, or later), refused it (with the reason its steps give), only recorded it, or never got it. */
+export type AskOutcome = { phase: "taken" | "recorded" } | { phase: "refused"; reason: string | null } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
 
 export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
 

@@ -4,6 +4,7 @@ import { InstrumentScreen, InstrumentSearch, matching } from "./instruments";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import { INSTRUMENTS } from "@/fixtures/mandates";
+import type { Scenario } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { RuntimeProvider } from "@/lib/mock-runtime";
@@ -24,8 +25,8 @@ interface Sent {
   body: Record<string, unknown>;
 }
 
-function mount(node: React.ReactNode) {
-  const server = createMockServer({ workspaceId: WS, scenario: "normal" });
+function mount(node: React.ReactNode, scenario: Scenario = "normal") {
+  const server = createMockServer({ workspaceId: WS, scenario });
   const sent: Sent[] = [];
   const fetch: Fetch = (input, init) => {
     const url = new URL(input);
@@ -92,6 +93,46 @@ describe("asking an agent to buy (DEC-2151)", () => {
     await waitFor(() => expect(ask.querySelector('[data-slot="request-taken"]')).not.toBeNull(), { timeout: 5_000 });
     expect(sent).toEqual([{ path: `/v1/workspaces/${WS}/agents/${SWING.agent_id}/requests`, body: { instrument: INSTRUMENTS.XYZ.asset_id, side: "buy", size: "2.5" } }]);
     expect(within(ask).getByRole("link", { name: "Approvals" }).getAttribute("href")).toBe("/approvals");
+  });
+
+  it("says the agent took the request as soon as the command reads taken (§5.5), while its approval waits", async () => {
+    const server = createMockServer({ workspaceId: WS, scenario: "normal" });
+    let statusReads = 0;
+    const fetch: Fetch = async (input, init) => {
+      const url = new URL(input);
+      if (/\/commands\/[0-9A-Z]{26}$/.test(url.pathname)) {
+        statusReads += 1;
+        return new Response(JSON.stringify({ api_version: "v1", as_of: [], phase: "taken", steps: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return server.fetch(input, init);
+    };
+    render(
+      <RoleProvider>
+        <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={50} retryMs={5}>
+          <InstrumentScreen instrumentId={INSTRUMENTS.XYZ.asset_id} />
+        </ApiRuntimeProvider>
+      </RoleProvider>,
+    );
+    const ask = await askFor(SWING.agent_id);
+    fireEvent.change(within(ask).getByLabelText("Quantity of XYZ"), { target: { value: "1" } });
+    fireEvent.click(within(ask).getByRole("button", { name: "Ask agent to buy" }));
+    await waitFor(() => expect(ask.querySelector('[data-slot="request-taken"]')?.textContent).toMatch(/^Your agent took the request/), { timeout: 1_000 });
+    expect(statusReads).toBe(1);
+  });
+
+  it("shows each agent's mode, and says a paused or exits-only agent won't open a position", async () => {
+    mount(<InstrumentScreen instrumentId={INSTRUMENTS.XYZ.asset_id} />, "paused");
+    await askFor(SWING.agent_id);
+    const running = buildWorkspace("paused").agents.filter((a) => a.mode !== "stopped");
+    expect(running.some((a) => a.mode === "paused")).toBe(true);
+    for (const agent of running) {
+      const item = document.querySelector<HTMLElement>(`[data-agent="${agent.agent_id}"]`);
+      expect(item, agent.agent_id).not.toBeNull();
+      const held = item?.querySelector('[data-slot="ask-held"]');
+      if (agent.mode === "paused") expect(held?.textContent).toMatch(/won't open new positions while paused/);
+      else if (agent.mode === "exits_only") expect(held?.textContent).toMatch(/only exits positions/);
+      else expect(held).toBeNull();
+    }
   });
 
   it("sends nothing for a quantity that is not above zero, and says what to enter", async () => {

@@ -87,6 +87,8 @@ const SENDS = 4;
 /** How many times a recorded command's status is read before the runtime stops following it (spec §6.3 item 4). */
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
+/** An owner's ask is answered once the agent took it (§5.5 `taken`): its approval, when the mandate asks, is already waiting. */
+const ASK_SETTLED: ReadonlySet<CommandPhase> = new Set(["taken", ...SETTLED]);
 
 /** Why the runtime refused an approval answer: the reason its `ApprovalResponded` step carries (journal spec rule 47), or none. */
 function refusalOf(status: CommandStatus): string | null {
@@ -261,10 +263,10 @@ export function ApiRuntimeProvider({
 
   /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3); the settled status, with its steps. */
   const settle = useCallback(
-    async (eventId: string): Promise<CommandStatus | null> => {
+    async (eventId: string, settled: ReadonlySet<CommandPhase> = SETTLED): Promise<CommandStatus | null> => {
       for (let read = 0; read < STATUS_READS && mounted.current; read += 1) {
         const status = await client.commandStatus(eventId);
-        if (status.ok && SETTLED.has(status.value.phase)) {
+        if (status.ok && settled.has(status.value.phase)) {
           await refresh();
           return status.value;
         }
@@ -387,9 +389,9 @@ export function ApiRuntimeProvider({
       if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
       if (delivered.phase === "recorded") onRecorded();
       if (!delivered.eventId) return { phase: "unknown" };
-      const settled = await settle(delivered.eventId);
+      const settled = await settle(delivered.eventId, ASK_SETTLED);
       if (settled?.phase === "refused") return { phase: "refused", reason: refusalOf(settled) };
-      if (settled?.phase === "applied" || settled?.phase === "ended") return { phase: "applied" };
+      if (settled) return { phase: "taken" };
       return delivered.phase === "recorded" ? { phase: "recorded" } : { phase: "unknown" };
     },
     [client, deliver, settle],

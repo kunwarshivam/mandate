@@ -115,11 +115,17 @@ function notSentWords(reason: string, symbol: string): string {
   }
 }
 
+/** Why an agent in this mode takes no new position, so an ask it cannot act on is never a surprise (rule 13: exits still run). */
+const HOLDS_OPENINGS: Readonly<Partial<Record<NonNullable<AgentDetail["mode"]>, string>>> = {
+  paused: "This agent won't open new positions while paused. Resume it to act on a request.",
+  exits_only: "This agent only exits positions now, so it won't open a new one.",
+};
+
 type Step = { step: "idle" } | { step: "sending"; recorded: boolean } | { step: "done"; outcome: AskOutcome };
 
 function OutcomeLine({ outcome, symbol }: { outcome: AskOutcome; symbol: string }) {
   switch (outcome.phase) {
-    case "applied":
+    case "taken":
       return (
         <p className="text-sm" data-slot="request-taken">
           Your agent took the request. If its mandate asks you first, it is waiting in{" "}
@@ -169,6 +175,11 @@ function AskAgent({ agent, instrument }: { agent: AgentDetail; instrument: Catal
         </Link>
         {agent.mode ? <ModeBadge mode={agent.mode} /> : null}
       </div>
+      {agent.mode && HOLDS_OPENINGS[agent.mode] ? (
+        <p className="text-sm" data-slot="ask-held">
+          {HOLDS_OPENINGS[agent.mode]}
+        </p>
+      ) : null}
       <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
           <label htmlFor={sizeId} className="text-sm">

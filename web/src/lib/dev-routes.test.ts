@@ -67,7 +67,7 @@ describe("the /design reference, with its sample figures, stays out of productio
     expect(readFileSync(web("src/components/shell/nav.tsx"), "utf8")).not.toContain("/design");
   });
 
-  it("leaves the e2e build only its Kumo specimen, which answers 404 in every other build", () => {
+  it("leaves the e2e build only its Kumo specimen; every other build renders the not-found page in its place", () => {
     expect(() => KumoSpecimenPage()).toThrow("NEXT_NOT_FOUND");
     expect(readFileSync(web("src/app/(app)/kumo-specimen/page.tsx"), "utf8")).toContain("if (!scenariosEnabled) notFound();");
     expect(readFileSync(web("e2e/flat-fills.spec.ts"), "utf8")).not.toContain('"/design"');

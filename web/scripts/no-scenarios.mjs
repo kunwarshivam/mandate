@@ -3,7 +3,8 @@
 // route under `/dev/` (DEC-2406: the stub sign-in's token route is `next dev` only, so no build, the
 // e2e one included, may hold it). Then it starts the build and asks for the stale scenario by query
 // parameter and by cookie, for the mock workspace API at `/v1` (DEC-975), which only the e2e build
-// serves, and for the stub sign-in's token route, which no build serves. The e2e build
+// serves, for the Kumo specimen, which only the e2e build renders, and for the stub sign-in's token
+// route, which no build serves. The e2e build
 // (`OWLHEAD_E2E_SCENARIOS=1`, scripts/e2e-build.mjs) must accept both, so the flag is checked both ways.
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -16,6 +17,8 @@ import { distDir, isE2eBuild } from "./e2e-build.mjs";
 export const SWITCHER_MARKER = "scenario-switcher";
 const COOKIE = "mandate-scenario";
 const DEGRADED = 'data-slot="status-strip" data-degraded=""';
+/** The Kumo specimen's root (`/kumo-specimen`); a production build renders its soft 404 instead, status 200 and no specimen. */
+const KUMO_SPECIMEN = 'data-specimen="kumo"';
 
 export function findSwitcher(nextDir) {
   const scanned = ["static", "server"].flatMap((d) =>
@@ -52,7 +55,10 @@ export async function probe(origin) {
   const mockApi = await fetch(`${origin}/v1/workspaces/ws_probe/health`, { redirect: "manual" });
   // `next dev` only (DEC-2406): no build, the e2e one included, serves the stub sign-in's token route.
   const stubToken = await fetch(`${origin}/dev/stub-token`, { method: "POST", redirect: "manual", headers: { origin, "x-mandate-request": "1" } });
+  // The e2e build alone renders the Kumo specimen; any other build answers its not-found page.
+  const specimen = await (await fetch(`${origin}/kumo-specimen`, { redirect: "manual" })).text();
   return {
+    rendersKumoSpecimen: specimen.includes(KUMO_SPECIMEN),
     stubTokenStatus: stubToken.status,
     mockApiStatus: mockApi.status,
     paramStatus: byParam.status,
@@ -105,8 +111,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const devRoutes = findDevRoutes(join(process.cwd(), dir));
   if (devRoutes.length) failures.push(`a dev-only route under /dev/ is compiled into the build:\n    ${devRoutes.join("\n    ")}`);
   const seen = await withBuild(probe);
-  const accepts = seen.paramStatus === 307 && seen.paramSetsCookie && seen.cookieRendersStale && seen.mockApiStatus === 200 && seen.stubTokenStatus === 404;
-  const refuses = seen.paramStatus === 200 && !seen.paramSetsCookie && !seen.cookieRendersStale && seen.mockApiStatus === 404 && seen.stubTokenStatus === 404;
+  const accepts = seen.paramStatus === 307 && seen.paramSetsCookie && seen.cookieRendersStale && seen.mockApiStatus === 200 && seen.stubTokenStatus === 404 && seen.rendersKumoSpecimen;
+  const refuses = seen.paramStatus === 200 && !seen.paramSetsCookie && !seen.cookieRendersStale && seen.mockApiStatus === 404 && seen.stubTokenStatus === 404 && !seen.rendersKumoSpecimen;
   if (e2e && !accepts) failures.push(`the e2e build must accept ?scenario=stale and its cookie: ${JSON.stringify(seen)}`);
   if (!e2e && !refuses) failures.push(`a production build must ignore ?scenario= and the scenario cookie, and serve no mock API: ${JSON.stringify(seen)}`);
   if (failures.length) {
