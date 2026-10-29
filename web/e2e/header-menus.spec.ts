@@ -3,15 +3,15 @@ import { recordHref } from "../src/components/stop/commands";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * The header folds alerts and the account menu into "Alerts and account" and the workspace switcher
+ * The header folds the account menu into "Account" and the workspace switcher
  * into an icon as it narrows (`e2e/stop-visible.spec.ts`); below 64rem they are in the tab bar's More
  * sheet (DEC-207). Each still opens, shows its items, and throws nothing, at a width where it is shown.
  */
 
 const CASES = [
-  { width: 768, button: "More", items: ["Alpaca paper", "Paper workspace", "Alerts", "All settings"], role: "dialog" as const },
-  { width: 1024, button: "Alerts and account", items: ["Alerts", "You, owner", "Profile", "Notifications"] },
-  { width: 1280, button: "Your account", items: ["You, owner", "Profile", "Notifications"] },
+  { width: 768, button: "More", items: ["Alpaca paper", "Paper workspace", "Settings"], role: "dialog" as const },
+  { width: 1024, button: "Account", items: ["You, owner", "Settings"] },
+  { width: 1280, button: "Your account", items: ["You, owner", "Settings"] },
   { width: 1024, button: "Workspace: Paper workspace", items: ["Workspaces (fixture)", "Paper workspace", "Second workspace"] },
   { width: 1280, button: "Workspace: Paper workspace", items: ["Workspaces (fixture)", "Paper workspace", "Second workspace"] },
 ];

@@ -49,9 +49,9 @@ test.beforeEach(async ({ page }) => {
 
 const ROUTES = [
   { name: "home", path: "/" },
-  { name: "an agent", path: agentHref(AGENT_IDS.btc, "overview") },
-  { name: "a position", path: agentHref(AGENT_IDS.swing, "positions") },
-  { name: "approvals", path: "/approvals" },
+  { name: "an agent", path: agentHref(AGENT_IDS.btc) },
+  { name: "a new agent", path: "/new" },
+  { name: "settings", path: "/settings" },
   { name: "an approval request", path: `/approvals/${APPROVAL_IDS.swingXyz}` },
   { name: "the kill-switch record", path: recordHref("kill", AGENT_IDS.btc) },
 ];
@@ -119,11 +119,11 @@ test.describe("Stop is fully visible at every width (brief §5, rule 13)", () =>
  * must not hold Stop, so no more than that many frames per navigation may miss it.
  */
 const CAPTURE_FRAMES = 2;
-const HOPS = ["/messages", "/", "/messages", "/"];
+const HOPS = ["/new", "/", "/new", "/"];
 
 test.describe("Stop answers a press while the page cross-fades (brief §5, rule 13)", () => {
   for (const width of [390, 1280]) {
-    test(`${width} px, navigating between home and messages`, async ({ page }) => {
+    test(`${width} px, navigating between home and a new agent`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/");
       await page.waitForLoadState("networkidle");

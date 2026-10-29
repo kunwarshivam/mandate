@@ -3,10 +3,9 @@ import { type Page, type Response, expect, test } from "@playwright/test";
 
 /**
  * The demo's step 5 from web/, against a running local cell on paper (lane W): the owner, signed in
- * through the stub issuer, opens the backtest's report from its link, `/backtests/{id}`, since the
- * API lists no backtests, and sees the report the runner stored, read through the API
- * (`GET /backtests/{id}`, DEC-2400): completed, its comparison with buy and hold drawn, and nothing
- * labelled as fixture data.
+ * through the stub issuer on web/'s Home, reads the backtest's report with that session through the
+ * API (`GET /backtests/{id}`, DEC-2400), since web/ has no report screen (DEC-2293: Home, the
+ * agent's thread and Settings): completed, with its comparison with buy and hold.
  *
  * The driver (`cargo xtask cell demo`, step 5) names the workspace and the backtest, after the Job
  * has run and recorded it, and reads the steps this writes to `OWLHEAD_CELL_RESULT`, so a failure
@@ -50,27 +49,27 @@ async function signedInRead(page: Page, path: string, apiPath: string): Promise<
   }
 }
 
-test("the backtest's report from its link, read through the API", async ({ page }) => {
+test("the backtest's report, read through the API with the owner's web session", async ({ page }) => {
   test.setTimeout(REPORT_MS);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, BACKTEST })) expect(value, `the driver names ${name}`).not.toBe("");
 
-  const link = `/backtests/${encodeURIComponent(BACKTEST)}`;
-  await test.step("the owner opens the report's link, and web/ reads it through the API", async () => {
-    const response = await signedInRead(page, link, `/v1/workspaces/${WORKSPACE}/backtests/${BACKTEST}`);
-    if (response.status() !== 200) refuse(`the API answered ${response.status()} for the backtest: ${(await response.text().catch(() => "")).slice(0, 400)}`);
-    const read = (await response.json()) as { backtest?: { state?: string } };
-    if (read.backtest?.state !== "completed") refuse(`the API served the backtest as ${read.backtest?.state ?? "no state"}, not completed`);
-    step("report_link", link);
-  });
-
-  await test.step("the report the runner stored is shown, with nothing labelled as fixture data", async () => {
-    const compared = page.getByRole("table", { name: "This version and buy and hold" });
-    try {
-      await expect(compared).toBeVisible({ timeout: 30_000 });
-    } catch {
-      refuse(`the report screen showed no comparison with buy and hold; it said: ${((await page.getByRole("main").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").slice(0, 300)}`);
-    }
-    if ((await page.locator("[data-slot=fixture-tag]").count()) > 0) refuse("the report screen labelled its figures as fixture data");
-    step("report_shown");
+  const route = `/v1/workspaces/${WORKSPACE}/backtests/${encodeURIComponent(BACKTEST)}`;
+  await test.step("the owner, signed in on Home, reads the backtest through the API", async () => {
+    const home = await signedInRead(page, "/", `/v1/workspaces/${WORKSPACE}/home`);
+    if (!home.ok()) refuse(`the API answered ${home.status()} for Home`);
+    const read = await page.evaluate(
+      async (url) => {
+        const response = await fetch(url, { credentials: "include", headers: { Accept: "application/json" } });
+        return { status: response.status, body: await response.text() };
+      },
+      `${new URL(home.url()).origin}${route}`,
+    );
+    if (read.status !== 200) refuse(`the API answered ${read.status} for the backtest: ${read.body.slice(0, 400)}`);
+    const served = JSON.parse(read.body) as { backtest?: { state?: string; report?: { benchmark?: unknown; equity?: { benchmark?: unknown[] } } | null } };
+    if (served.backtest?.state !== "completed") refuse(`the API served the backtest as ${served.backtest?.state ?? "no state"}, not completed`);
+    step("report_read", BACKTEST);
+    const report = served.backtest?.report;
+    if (!report?.benchmark || !Array.isArray(report.equity?.benchmark) || report.equity.benchmark.length === 0) refuse("the stored report holds no comparison with buy and hold");
+    step("report_compared");
   });
 });

@@ -49,14 +49,14 @@ async function detailAnswer(page: import("@playwright/test").Page, pathname: str
 test("the kill switch from web/, recorded through the API", async ({ page }) => {
   expect(RESULT, "the driver names where the result goes").not.toBe("");
   const agents = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents` && r.ok());
-  await page.goto("/agents");
+  await page.goto("/");
   const listed = (await (await agents).json()) as { agents?: Array<{ agent_id: string; mode: string }> };
   const named = AGENT ? listed.agents?.find((a) => a.agent_id === AGENT) : undefined;
   if (AGENT && !named) return refuse(`agent ${AGENT} is not in the API's workspace`);
   if (named?.mode === "stopped") return refuse(`agent ${AGENT} is already stopped; web/'s kill switch screen offers nothing to confirm for a stopped agent`);
   const agent = named ?? listed.agents?.find((a) => a.mode !== "stopped");
   if (!agent) return refuse("no agent in the API's workspace to kill");
-  const detailPath = `/v1/workspaces/${WORKSPACE}/agents/${agent.agent_id}`;
+  const detailPath = `/v1/workspaces/${WORKSPACE}/agents/${agent.agent_id}/messages`;
   const detail = await detailAnswer(page, detailPath, `/agents/${agent.agent_id}`);
   if (!detail) return refuse(`web/ made no GET ${detailPath} within ${GET_TIMEOUT_MS} ms`);
   if (detail.status < 200 || detail.status >= 300) return refuse(`the API answered ${detail.status} for ${detailPath}: ${detail.body}`);

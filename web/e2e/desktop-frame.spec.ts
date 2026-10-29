@@ -60,7 +60,7 @@ for (const [name, path] of [
 }
 
 test("tabbing through a long page, no focused control sits under the header", async ({ page }) => {
-  await open(page, "/agents", 1440, 700);
+  await open(page, "/settings", 1440, 700);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const bottom = await page.getByRole("banner").evaluate((el) => el.getBoundingClientRect().bottom);
   await page.locator("#main").focus();

@@ -6,13 +6,13 @@ import { type Page, expect, test } from "@playwright/test";
  * DEC-2134): after the demo scenario has signed the owner in, connected Alpaca paper, confirmed and
  * deployed the agent, and run the trade loop, the owner, signed in through the stub issuer:
  *
- * 1. sees the workspace on paper with its Alpaca paper connection, and Robinhood shown as real money,
- *    off;
- * 2. reads the go-live screen: every risk disclosure and platform limit marked pending counsel, and
- *    the disclosure's acceptance, which the driver made on the host first, read back from the
+ * 1. sees the workspace on paper in Settings with its Alpaca paper connection, and Robinhood shown as
+ *    real money, off;
+ * 2. finds the go-live disclosure's acceptance, which the driver made on the host first, in the
  *    journal;
- * 3. asks to trade real money for the agent, and is refused: real money stays off for a customer
- *    workspace until counsel signs off;
+ * 3. asks to trade real money for the agent with the page's own session, and is refused: real money
+ *    stays off for a customer workspace until counsel signs off, and web/ offers no screen for it
+ *    (DEC-2293: Home, the agent's thread and Settings);
  * 4. finds that refusal journaled as `RealMoneyRefused` on the workspace's control stream, read
  *    through the API's audit read (whose bodies are base64).
  *
@@ -24,7 +24,6 @@ const RESULT = process.env.OWLHEAD_CELL_RESULT ?? "";
 const WORKSPACE = process.env.OWLHEAD_WORKSPACE_ID ?? "";
 const AGENT = process.env.OWLHEAD_CELL_AGENT ?? "";
 const API = process.env.OWLHEAD_API_ORIGIN ?? "";
-const PENDING_COUNSEL = "Pending counsel — not for real-money use";
 /** The whole test's bound, and one page's: `next dev` compiles each route on its first visit. */
 const JOURNEY_MS = Number(process.env.OWLHEAD_CELL_JOURNEY_MS ?? 240_000);
 const PAGE_MS = 90_000;
@@ -85,12 +84,12 @@ async function controlEvents(page: Page, type: string): Promise<Array<{ event_id
   );
 }
 
-test("the customer's journey on Alpaca paper: connections, going live, and real money refused and journaled", async ({ page }) => {
+test("the customer's journey on Alpaca paper: connections in Settings, and real money refused and journaled", async ({ page }) => {
   test.setTimeout(JOURNEY_MS);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, API })) expect(value, `the driver names ${name}`).not.toBe("");
 
   await test.step("the workspace is on paper, with Alpaca paper connected and Robinhood off", async () => {
-    const answer = await signedInRead(page, "/connections", `/v1/workspaces/${WORKSPACE}/connections`);
+    const answer = await signedInRead(page, "/settings", `/v1/workspaces/${WORKSPACE}/connections`);
     const body = (await answer.text().catch(() => "")).slice(0, 600);
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the connections: ${body}`);
     const accounts = page.getByRole("list", { name: "Broker accounts" });
@@ -101,15 +100,7 @@ test("the customer's journey on Alpaca paper: connections, going live, and real 
     step("connections");
   });
 
-  await test.step("the go-live screen marks every disclosure and limit pending counsel", async () => {
-    await page.goto("/go-live", { timeout: PAGE_MS });
-    const disclosures = page.getByRole("region", { name: "Risks of an automated agent" });
-    await expect(disclosures).toBeVisible({ timeout: PAGE_MS });
-    await expect(disclosures.getByText(PENDING_COUNSEL)).toBeVisible();
-    await expect(page.getByRole("region", { name: "Platform limits" }).getByText(PENDING_COUNSEL)).toBeVisible();
-    step("disclosures", String(await disclosures.getByRole("article").count()));
-    const acceptance = page.getByRole("region", { name: "Your acceptance" }).getByRole("status");
-    await expect(acceptance).toHaveAttribute("data-state", "accepted", { timeout: 30_000 });
+  await test.step("the go-live disclosure's acceptance is in the journal", async () => {
     const principal = await page.evaluate(async (api) => {
       const response = await fetch(`${api}/v1/me/session`, { credentials: "include", headers: { Accept: "application/json" } });
       return response.ok ? ((await response.json()) as { principal_id?: string }).principal_id ?? "" : "";
@@ -123,15 +114,21 @@ test("the customer's journey on Alpaca paper: connections, going live, and real 
 
   await test.step("asking for real money is refused, and the agent stays on paper", async () => {
     const before = (await controlEvents(page, "RealMoneyRefused")).length;
-    const region = page.getByRole("region", { name: "Real money" });
-    await region.getByRole("combobox", { name: "Agent" }).selectOption(AGENT);
-    const answered = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/go-live`);
-    await region.getByRole("button", { name: "Ask to trade real money" }).click();
-    const answer = await answered;
-    if (answer.status() !== 409) refuse(`the API answered ${answer.status()} to a real-money request, not 409`);
-    const problem = (await answer.json()) as { code?: string };
+    const answer = await page.evaluate(
+      async ({ api, workspace, agent }) => {
+        const response = await fetch(`${api}/v1/workspaces/${workspace}/agents/${encodeURIComponent(agent)}/go-live`, {
+          method: "POST",
+          credentials: "include",
+          headers: { Accept: "application/json", "Content-Type": "application/json", "X-Mandate-Request": "1", "Idempotency-Key": `celljourney${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}` },
+          body: "{}",
+        });
+        return { status: response.status, body: await response.text() };
+      },
+      { api: API, workspace: WORKSPACE, agent: AGENT },
+    );
+    if (answer.status !== 409) refuse(`the API answered ${answer.status} to a real-money request, not 409`);
+    const problem = JSON.parse(answer.body) as { code?: string };
     if (problem.code !== "live_unavailable") refuse(`the API refused real money as ${problem.code ?? "nothing"}, not live_unavailable`);
-    await expect(region.getByRole("status")).toContainText("real-money trading is off for your workspace until counsel signs off");
     step("real_money_refused");
 
     const after = await controlEvents(page, "RealMoneyRefused");
