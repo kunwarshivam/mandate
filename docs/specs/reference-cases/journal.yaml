@@ -80761,7 +80761,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80785,7 +80785,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80842,7 +80842,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80866,7 +80866,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80923,7 +80923,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80980,7 +80980,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81039,7 +81039,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81063,7 +81063,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81122,7 +81122,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81181,7 +81181,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81265,7 +81265,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81324,7 +81324,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81348,7 +81348,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81379,7 +81379,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81439,7 +81439,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81463,7 +81463,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81521,7 +81521,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81545,7 +81545,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81603,7 +81603,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81661,7 +81661,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81721,7 +81721,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81745,7 +81745,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81805,7 +81805,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81865,7 +81865,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81950,7 +81950,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82010,7 +82010,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82034,7 +82034,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82125,7 +82125,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82149,7 +82149,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82169,6 +82169,2071 @@ step_up_assertions:
       pii_refs: []
     expect:
       outcome: Valid
+cool_off_waivers:
+  spec: docs/specs/journal.md v0.113 §9.38 (DEC-2146)
+  drafts:
+    cool_off_waived:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: challenge.kind
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.challenge
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.challenge
+  - name: challenge.form
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.challenge
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.challenge
+  - name: credential.kind
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.credential
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.credential
+  - name: credential.form
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.credential
+      value: AAECAwQFBgcICQoLDA0ODw==
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: cool_off_ends.kind
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.cool_off_ends
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: cool_off_ends.form
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.cool_off_ends
+      value: '2026-10-20T15:00:05Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cool_off_ends
+  - name: tier.staging
+    clause: '§9.38 `tier`: `dev` or `ci` only'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: staging
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.tier
+  - name: tier.production
+    clause: '§9.38 `tier`: `dev` or `ci` only'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: production
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.tier
+  - name: tier.capitalised
+    clause: '§9.38 `tier`: `dev` or `ci` only'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: CI
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.tier
+  - name: tier.kind
+    clause: '§9.38 `tier`: text'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tier
+  - name: challenge.null
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.challenge
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.challenge
+  - name: credential.null
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.credential
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.credential
+  - name: cool_off_ends.null
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.cool_off_ends
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: tier.null
+    clause: §9.38 types
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tier
+  - name: missing
+    clause: §9.38 closed
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tier
+  - name: extra
+    clause: §9.38 closed
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.reason
+      value: test_cell
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: uncaused
+    clause: 'rule 316: names the event the step-up authorized'
+    base_draft: cool_off_waived
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: by_a_system
+    clause: 'rule 316: the actor is a user'
+    base_draft: cool_off_waived
+    changes:
+    - path: actor
+      value: *id169
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: in_live
+    clause: 'rule 316: paper only'
+    base_draft: cool_off_waived
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: environment
+  - name: at_version_2
+    clause: '§9.38: closed at schema version 1 only'
+    base_draft: cool_off_waived
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: in_a_dev_cell
+    clause: '§9.38 `tier`: `dev`'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: dev
+    expect:
+      outcome: Valid
+  - name: another_credential
+    clause: '§9.38: any credential id'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.credential
+      value: EBESExQVFhcYGRobHB0eHw
+    expect:
+      outcome: Valid
+  batches:
+  - name: the_event_its_assertion_then_its_waiver
+    clause: 'rule 317: one batch, in order'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect: &id172
+      outcome: Valid
+  - name: the_event_and_its_assertion_alone
+    clause: 'rule 317: a waiver only where one was needed'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    expect: *id172
+  - name: alone
+    clause: 'rule 317: its assertion is in the batch'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 0
+      reason: schema
+      path: event_type
+  - name: after_the_event
+    clause: 'rule 317: immediately after the assertion'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: event_type
+  - name: twice
+    clause: 'rule 317: immediately after the assertion, so once'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: event_type
+  - name: of_another_cause
+    clause: 'rule 317: the same cause'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000W2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: causation_id
+  - name: by_another_member
+    clause: 'rule 317: the same actor'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P2
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: actor.id
+  - name: of_another_challenge
+    clause: 'rule 317: the same challenge'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H2
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.challenge
+  - name: of_another_credential
+    clause: 'rule 317: the same credential'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: EBESExQVFhcYGRobHB0eHw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.credential
+  - name: at_another_instant
+    clause: 'rule 317: the same event_time'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:20:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: event_time
+  - name: a_bad_waiver
+    clause: each draft's own rules first
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: causation_id
+  - name: a_bad_assertion
+    clause: rule 253 before rule 317
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 0
+      reason: schema
+      path: event_type
+  streams:
+  - name: waived_inside_the_cool_off
+    clause: 'rule 318: the waiver of an assertion inside the cool-off'
+    records:
+    - &id173
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: two_step_ups_each_waived
+    clause: 'rule 318: each assertion inside the cool-off waived'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    - &id174
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S4
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:20:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H2
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 2
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:20:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H2
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: in_a_dev_cell
+    clause: 'rule 318: either test tier'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: dev
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: at_the_cool_offs_end
+    clause: 'rule 318: a step-up at `cool_off_ends` needs no waiver'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-20T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: after_the_cool_off
+    clause: 'rule 318: after it, none'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-20T15:00:05.250000001Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_second_enrolment
+    clause: 'rule 318: a credential with no cool-off needs no waiver'
+    records:
+    - &id175
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E3
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: EBESExQVFhcYGRobHB0eHw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: null
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: EBESExQVFhcYGRobHB0eHw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: unwaived_inside_the_cool_off
+    clause: 'rule 318: the converse, an assertion inside the cool-off waived'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 1
+  - name: unwaived_then_another_record
+    clause: 'rule 318: the converse, immediately after'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - *id174
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 1
+  - name: the_second_unwaived
+    clause: 'rule 318: the converse, for each assertion'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    - *id174
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 3
+  - name: waived_at_the_cool_offs_end
+    clause: 'rule 318: `cool_off_ends` after the waiver''s time'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-20T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-20T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 2
+  - name: waived_after_the_cool_off
+    clause: 'rule 318: `cool_off_ends` after the waiver''s time'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-20T15:00:05.250000001Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-20T15:00:05.250000001Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 2
+  - name: another_end
+    clause: 'rule 318: the enrolment''s own `cool_off_ends`'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000001Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 2
+  - name: a_second_enrolment_waived
+    clause: 'rule 318: the enrolment''s own `cool_off_ends`, `null`'
+    records:
+    - *id175
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: EBESExQVFhcYGRobHB0eHw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: EBESExQVFhcYGRobHB0eHw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 2
+  - name: another_members
+    clause: 'rule 318: the actor''s own credential'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P2
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 2
+  - name: never_enrolled
+    clause: 'rule 318: an enrolled credential'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 1
+  - name: after_removal
+    clause: 'rule 318: not removed'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 2
+  - name: waived_twice
+    clause: 'rule 318: one waiver per challenge'
+    records:
+    - *id173
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '318'
+      index: 3
 account_closes:
   spec: docs/specs/journal.md v0.75 §9.5 rules 258 to 260 (DEC-2337)
   drafts:
@@ -83302,7 +85367,7 @@ connection_roles:
   - name: made
     clause: 'rule 262: after its OAuth request'
     records:
-    - &id172
+    - &id176
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS000000000000000000
@@ -83362,7 +85427,7 @@ connection_roles:
   - name: refused
     clause: 'rule 262: a refusal after its OAuth request'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83473,7 +85538,7 @@ connection_roles:
   - name: made_for_another_connection
     clause: 'rule 262: of the same connection'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83501,7 +85566,7 @@ connection_roles:
   - name: made_twice
     clause: 'rule 262: at most one per request'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83549,7 +85614,7 @@ connection_roles:
   - name: made_then_refused
     clause: 'rule 262: at most one of either per request'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83598,8 +85663,8 @@ connection_roles:
   - name: two_requests
     clause: 'rule 262: one per request, each its own'
     records:
-    - *id172
-    - &id176
+    - *id176
+    - &id180
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83679,7 +85744,7 @@ connection_roles:
   - name: removed_on_close
     clause: 'rule 263: the exchange''s role once the request closed'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83700,7 +85765,7 @@ connection_roles:
         connection_id: conn_alpaca_paper
       artifact_refs: []
       pii_refs: []
-    - &id173
+    - &id177
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS020000000000000000
@@ -83759,8 +85824,8 @@ connection_roles:
   - name: removed_never_made
     clause: 'rule 263: after its roles were made'
     records:
-    - *id172
-    - *id173
+    - *id176
+    - *id177
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS030000000000000000
@@ -83790,7 +85855,7 @@ connection_roles:
   - name: removed_twice
     clause: 'rule 263: at most once after its roles were made'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83811,7 +85876,7 @@ connection_roles:
         connection_id: conn_alpaca_paper
       artifact_refs: []
       pii_refs: []
-    - *id173
+    - *id177
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS030000000000000000
@@ -83863,7 +85928,7 @@ connection_roles:
   - name: removed_on_close_while_open
     clause: 'rule 263: a closed request''s'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83913,7 +85978,7 @@ connection_roles:
   - name: removed_on_revoke_before_it
     clause: 'rule 263: a revoked connection''s'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -83963,7 +86028,7 @@ connection_roles:
   - name: revoked_exchange_at_once
     clause: 'rule 263: the exchange''s role at once on a revocation, its executor still running'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -84007,7 +86072,7 @@ connection_roles:
         cause: deployed
       artifact_refs: []
       pii_refs: []
-    - &id174
+    - &id178
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS030000000000000000
@@ -84055,7 +86120,7 @@ connection_roles:
   - name: removed_by_an_earlier_requests_refusal
     clause: 'rule 263: names the closer of the request its roles were made for'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -84076,7 +86141,7 @@ connection_roles:
         connection_id: conn_alpaca_paper
       artifact_refs: []
       pii_refs: []
-    - *id173
+    - *id177
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS030000000000000000
@@ -84099,7 +86164,7 @@ connection_roles:
         occasion: request_closed
       artifact_refs: []
       pii_refs: []
-    - &id175
+    - &id179
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS090000000000000000
@@ -84183,7 +86248,7 @@ connection_roles:
   - name: removed_by_a_revocation_before_its_roles
     clause: 'rule 263: names the closer of the request its roles were made for'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -84204,7 +86269,7 @@ connection_roles:
         connection_id: conn_alpaca_paper
       artifact_refs: []
       pii_refs: []
-    - *id174
+    - *id178
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS040000000000000000
@@ -84227,7 +86292,7 @@ connection_roles:
         occasion: revoked
       artifact_refs: []
       pii_refs: []
-    - *id175
+    - *id179
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS050000000000000000
@@ -84277,8 +86342,8 @@ connection_roles:
   - name: removed_by_another_connections_refusal
     clause: 'rule 263: names its own connection''s closer'
     records:
-    - *id172
     - *id176
+    - *id180
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS020000000000000000
@@ -84359,7 +86424,7 @@ connection_roles:
   - name: removed_after_a_second_request_closed
     clause: 'rule 263: once per made roles, the second request''s own'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -84380,7 +86445,7 @@ connection_roles:
         connection_id: conn_alpaca_paper
       artifact_refs: []
       pii_refs: []
-    - *id173
+    - *id177
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS030000000000000000
@@ -84403,7 +86468,7 @@ connection_roles:
         occasion: request_closed
       artifact_refs: []
       pii_refs: []
-    - *id175
+    - *id179
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS050000000000000000
@@ -84482,8 +86547,8 @@ connection_roles:
   - name: removed_after_roles_made_once_closed
     clause: 'rule 263: the exchange''s role of roles made after their request closed'
     records:
-    - *id172
-    - *id173
+    - *id176
+    - *id177
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS020000000000000000
@@ -84531,8 +86596,8 @@ connection_roles:
   - name: removed_after_roles_made_once_revoked
     clause: 'rule 263: the exchange''s role of roles made after their connection was revoked'
     records:
-    - *id172
-    - *id174
+    - *id176
+    - *id178
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS020000000000000000
@@ -84580,7 +86645,7 @@ connection_roles:
   - name: removed_twice_on_revoke
     clause: 'rule 263: at most once after its roles were made'
     records:
-    - *id172
+    - *id176
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS010000000000000000
@@ -84601,7 +86666,7 @@ connection_roles:
         connection_id: conn_alpaca_paper
       artifact_refs: []
       pii_refs: []
-    - *id174
+    - *id178
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z4CS040000000000000000
@@ -85462,7 +87527,7 @@ stepped_up_records:
   - name: confirmed_v3_then_its_assertion
     clause: 'rule 253: the version 3 names the challenge'
     drafts:
-    - &id177
+    - &id181
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4W3A000000000000000W4
@@ -85520,7 +87585,7 @@ stepped_up_records:
       artifact_refs:
       - sha256:6666666666666666666666666666666666666666666666666666666666666666
       pii_refs: []
-    expect: &id178
+    expect: &id182
       outcome: Valid
   - name: confirmed_v2_then_an_assertion
     clause: 'rule 253: version 2 carries no `step_up`'
@@ -85586,7 +87651,7 @@ stepped_up_records:
   - name: confirmed_v3_another_challenge
     clause: 'rule 253: the challenge the record names'
     drafts:
-    - *id177
+    - *id181
     - envelope_version: 1
       environment: paper
       event_id: 01JAA3P4A000000000000000S9
@@ -85684,12 +87749,12 @@ stepped_up_records:
   - name: confirmed_v3_alone
     clause: 'rule 253 judges only an assertion: the record''s converse is the writer''s'
     drafts:
-    - *id177
-    expect: *id178
+    - *id181
+    expect: *id182
   - name: deployed_v3_then_its_assertion
     clause: 'rule 253: the version 3 names the challenge'
     drafts:
-    - &id179
+    - &id183
       envelope_version: 1
       environment: paper
       event_id: 01J9DA00D000000000000000V2
@@ -85744,7 +87809,7 @@ stepped_up_records:
       artifact_refs:
       - sha256:6666666666666666666666666666666666666666666666666666666666666666
       pii_refs: []
-    expect: *id178
+    expect: *id182
   - name: deployed_v2_then_an_assertion
     clause: 'rule 253: version 2 carries no `step_up`'
     drafts:
@@ -85806,7 +87871,7 @@ stepped_up_records:
   - name: deployed_v3_another_challenge
     clause: 'rule 253: the challenge the record names'
     drafts:
-    - *id179
+    - *id183
     - envelope_version: 1
       environment: paper
       event_id: 01JAA3P4A000000000000000S9
@@ -85901,8 +87966,8 @@ stepped_up_records:
   - name: deployed_v3_alone
     clause: 'rule 253 judges only an assertion: the record''s converse is the writer''s'
     drafts:
-    - *id179
-    expect: *id178
+    - *id183
+    expect: *id182
   mappings:
   - name: confirmed_v3
     clause: '§9.9: version 3 maps as version 2, from the same members'
@@ -85921,7 +87986,7 @@ stepped_up_records:
     clause: '§9.24: version 3 maps as version 2, from the same document'
     base_draft: deployed_v3
     changes: []
-    stored: &id180
+    stored: &id184
     - mandate_document
     - deployment_record
     expect:
@@ -85940,7 +88005,7 @@ stepped_up_records:
     changes:
     - path: payload.connection_id
       value: conn_alpaca_paper_02
-    stored: *id180
+    stored: *id184
     expect:
       refused: payload.connection_id
   - name: deployed_v3_not_stored
@@ -86016,9 +88081,9 @@ stepped_up_records:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: &id181
+    expect: &id185
       outcome: Valid
-    processes: &id182
+    processes: &id186
       runtimes:
       - agent_a
       executors:
@@ -86114,7 +88179,7 @@ stepped_up_records:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id181
+    expect: *id185
     processes:
       runtimes:
       - agent_a
@@ -86405,7 +88470,7 @@ stepped_up_records:
         loss_added: '0'
       artifact_refs: []
       pii_refs: []
-    expect: *id181
+    expect: *id185
     processes: *id137
   - name: revoked_after
     clause: rule 201 judges the deployment only
@@ -86492,8 +88557,8 @@ stepped_up_records:
         connection_id: conn_alpaca_paper_01
       artifact_refs: []
       pii_refs: []
-    expect: *id181
-    processes: *id182
+    expect: *id185
+    processes: *id186
 real_money:
   spec: docs/specs/journal.md v0.91 §9.36 (DEC-2134)
   drafts:
@@ -87123,7 +89188,7 @@ real_money:
         decision: null
       artifact_refs: []
       pii_refs: []
-    - &id183
+    - &id187
       envelope_version: 1
       environment: paper
       event_id: 01JAA3G4A000000000000000G2
@@ -87222,7 +89287,7 @@ real_money:
         decision: null
       artifact_refs: []
       pii_refs: []
-    - *id183
+    - *id187
     - envelope_version: 1
       environment: paper
       event_id: 01JAA3G4A000000000000000G3
@@ -87272,7 +89337,7 @@ real_money:
   - name: refused_after_on
     clause: '§9.36: a refusal changes no setting'
     records:
-    - *id183
+    - *id187
     - envelope_version: 1
       environment: paper
       event_id: 01JAA3G4A000000000000000R1
@@ -88763,7 +90828,7 @@ restriction_lifts:
   - name: a_reject_lifts_after_a_clean_report
     clause: 'rule 312: acknowledged, then a clean report'
     records:
-    - &id184
+    - &id188
       envelope_version: 1
       environment: paper
       event_id: 01JBRS00001000000000000000
@@ -88787,7 +90852,7 @@ restriction_lifts:
         risk_clock: '2026-10-26T15:00:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - &id185
+    - &id189
       envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -88820,7 +90885,7 @@ restriction_lifts:
         subject: restriction
       artifact_refs: []
       pii_refs: []
-    - &id186
+    - &id190
       envelope_version: 1
       environment: paper
       event_id: 01JBAS00001000000000000000
@@ -89410,7 +91475,7 @@ restriction_lifts:
   - name: the_connection_lifts_after_its_condition_clears
     clause: 'rule 312: cleared, then acknowledged'
     records:
-    - &id187
+    - &id191
       envelope_version: 1
       environment: paper
       event_id: 01JBRS00001000000000000000
@@ -89434,7 +91499,7 @@ restriction_lifts:
         risk_clock: '2026-10-26T15:00:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - &id188
+    - &id192
       envelope_version: 1
       environment: paper
       event_id: 01JBCS00001000000000000000
@@ -89459,7 +91524,7 @@ restriction_lifts:
         risk_clock: '2026-10-26T15:00:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - &id189
+    - &id193
       envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -89492,7 +91557,7 @@ restriction_lifts:
         subject: restriction
       artifact_refs: []
       pii_refs: []
-    - &id190
+    - &id194
       envelope_version: 1
       environment: paper
       event_id: 01JBCS00002000000000000000
@@ -89546,9 +91611,9 @@ restriction_lifts:
   - name: a_cause_raised_again_after_its_lift
     clause: 'rule 309: a lift ends the cause in force'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -89601,8 +91666,8 @@ restriction_lifts:
   - name: the_next_clean_report_lifts
     clause: 'rule 312: a report still blocked lifts nothing; the next clean one does'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBAS00001000000000000000
@@ -89694,9 +91759,9 @@ restriction_lifts:
   - name: a_second_acknowledgment_after_a_new_raise
     clause: 'rule 311: the cause raised again is lifted by its own'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -89953,9 +92018,9 @@ restriction_lifts:
   - name: a_lift_of_another_cause
     clause: 'rule 310: the cause in force is a reject'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -89988,9 +92053,9 @@ restriction_lifts:
   - name: a_lift_twice
     clause: 'rule 310: a lifted cause is no longer in force'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -90188,9 +92253,9 @@ restriction_lifts:
   - name: closing_only_with_nothing_left
     clause: 'rule 310: no cause is left, so the state is active'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -91375,8 +93440,8 @@ restriction_lifts:
   - name: a_refused_acknowledgment
     clause: 'rule 311: the executor refused the copy'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBRF00001000000000000000
@@ -91462,9 +93527,9 @@ restriction_lifts:
   - name: one_acknowledgment_twice
     clause: 'rule 311: an acknowledgment lifts once'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -91575,9 +93640,9 @@ restriction_lifts:
   - name: an_old_acknowledgment_after_a_new_raise
     clause: 'rule 311: a lift came between its record and the copy'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -91720,9 +93785,9 @@ restriction_lifts:
   - name: an_unknown_report
     clause: 'rule 312: no record has that id'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -91873,9 +93938,9 @@ restriction_lifts:
   - name: a_broker_lift_on_a_connection_record
     clause: 'rule 312: a broker cause''s evidence is a report'
     records:
-    - *id184
-    - *id185
-    - *id186
+    - *id188
+    - *id189
+    - *id190
     - envelope_version: 1
       environment: paper
       event_id: 01JBCS00001000000000000000
@@ -91932,8 +93997,8 @@ restriction_lifts:
   - name: a_report_with_status
     clause: 'rule 312: §7.3 row 1''s `status` still restricts'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBAS00001000000000000000
@@ -91997,8 +94062,8 @@ restriction_lifts:
   - name: a_report_with_trading_blocked
     clause: 'rule 312: §7.3 row 1''s `trading_blocked` still restricts'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBAS00001000000000000000
@@ -92062,8 +94127,8 @@ restriction_lifts:
   - name: a_report_with_account_blocked
     clause: 'rule 312: §7.3 row 1''s `account_blocked` still restricts'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBAS00001000000000000000
@@ -92127,8 +94192,8 @@ restriction_lifts:
   - name: a_report_with_trade_suspended_by_user
     clause: 'rule 312: §7.3 row 1''s `trade_suspended_by_user` still restricts'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBAS00001000000000000000
@@ -92580,9 +94645,9 @@ restriction_lifts:
   - name: the_connection_degraded_again
     clause: 'rule 312: no degradation after the clearance'
     records:
-    - *id187
-    - *id188
-    - *id189
+    - *id191
+    - *id192
+    - *id193
     - envelope_version: 1
       environment: paper
       event_id: 01JBCS00003000000000000000
@@ -92663,9 +94728,9 @@ restriction_lifts:
   - name: the_connection_suspended_again
     clause: 'rule 312: nor a suspension'
     records:
-    - *id187
-    - *id188
-    - *id189
+    - *id191
+    - *id192
+    - *id193
     - envelope_version: 1
       environment: paper
       event_id: 01JBCS00003000000000000000
@@ -92746,9 +94811,9 @@ restriction_lifts:
   - name: the_connection_without_its_acknowledged_change
     clause: 'rule 312: the connection''s `acknowledged` change comes first'
     records:
-    - *id187
-    - *id188
-    - *id189
+    - *id191
+    - *id192
+    - *id193
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -92781,9 +94846,9 @@ restriction_lifts:
   - name: the_connection_acknowledged_by_another
     clause: 'rule 312: the `acknowledged` change is caused by this copy'
     records:
-    - *id187
-    - *id188
-    - *id189
+    - *id191
+    - *id192
+    - *id193
     - envelope_version: 1
       environment: paper
       event_id: 01JBCS00009000000000000000
@@ -93148,8 +95213,8 @@ restriction_lifts:
   - name: a_report_after_the_lift
     clause: 'rule 312: the evidence comes before the lift'
     records:
-    - *id184
-    - *id185
+    - *id188
+    - *id189
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -93469,10 +95534,10 @@ restriction_lifts:
   - name: the_connection_on_an_acknowledged_change
     clause: 'rule 312: the evidence is `condition_cleared`'
     records:
-    - *id187
-    - *id188
-    - *id189
-    - *id190
+    - *id191
+    - *id192
+    - *id193
+    - *id194
     - envelope_version: 1
       environment: paper
       event_id: 01JBXT00001000000000000000
@@ -93511,7 +95576,7 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - &id192
+    - &id196
       envelope_version: 1
       environment: paper
       event_id: 01JBAK00001000000000000000
@@ -93545,7 +95610,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - &id191
+    - &id195
       envelope_version: 1
       environment: paper
       event_id: 01JBHD00001000000000000000
@@ -93873,7 +95938,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -93949,7 +96014,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBHD00002000000000000000
@@ -94115,7 +96180,7 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     account:
     - envelope_version: 1
       environment: paper
@@ -94381,7 +96446,7 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00002000000000000000
@@ -94447,7 +96512,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -94619,7 +96684,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -94662,9 +96727,9 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBHD00002000000000000000
@@ -94731,9 +96796,9 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBHD00002000000000000000
@@ -94800,9 +96865,9 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBHD00002000000000000000
@@ -94871,7 +96936,7 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00002000000000000000
@@ -94905,7 +96970,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -95046,7 +97111,7 @@ reconciliation_acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -95122,9 +97187,9 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -95167,9 +97232,9 @@ reconciliation_acknowledgments:
     environment: paper
     founder_connection: false
     control:
-    - *id192
+    - *id196
     account:
-    - *id191
+    - *id195
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00001000000000000000
@@ -98680,7 +100745,7 @@ news_stream:
       artifact_refs:
       - sha256:4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e
       pii_refs: []
-    expect: &id193
+    expect: &id197
       outcome: Valid
   - name: one_response
     clause: 'rule 285: equal is allowed, one response holds many items'
@@ -98766,7 +100831,7 @@ news_stream:
       artifact_refs:
       - sha256:4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e
       pii_refs: []
-    expect: *id193
+    expect: *id197
   - name: a_later_version
     clause: 'rule 284: a vendor''s later version is a new item id'
     records:
@@ -98851,7 +100916,7 @@ news_stream:
       artifact_refs:
       - sha256:4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e
       pii_refs: []
-    expect: *id193
+    expect: *id197
   - name: stored_twice
     clause: 'rule 284: one record per item id'
     records:

@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from test_cell import PROCESSES, policies, render_all, workloads
+from test_cell import PROCESSES, STAGING_ONLY, policies, render_all, workloads
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
 CHART = CELL / "charts" / "vault"
@@ -599,7 +599,8 @@ def test_values_refuse_a_secret_a_tag_or_a_server_argument():
 def test_the_workspace_reaches_the_vault_it_selects():
     """The workspace chart's vault egress selects this chart's pods on its port, and every workspace
     pod that may reach the vault carries the label the vault's ingress admits (cross-chart trace).
-    The connect finish renders only with `api.connectFinish` (DEC-2348 item 3), so it is on here."""
+    The connect finish renders only with `api.connectFinish` (DEC-2348 item 3), so it is on here; a
+    staging-only process does not render here, and its staging test checks its label (DEC-2084)."""
     vault = render()
     pod_labels = server(vault)["spec"]["template"]["metadata"]["labels"]
     admitted = one(vault, "NetworkPolicy", "vault")["spec"]["ingress"][0]["from"][0]["podSelector"][
@@ -623,7 +624,7 @@ def test_the_workspace_reaches_the_vault_it_selects():
         if labels.get("mandate.dev/egress-vault") == "true":
             assert all(labels.get(k) == v for k, v in admitted.items()), labels
             labelled.add(labels["mandate.dev/process"])
-    declared = {p["name"] for p in PROCESSES if "vault" in p["egress"]}
+    declared = {p["name"] for p in PROCESSES if "vault" in p["egress"] and p["name"] not in STAGING_ONLY}
     assert declared, "no process in processes.json names the vault"
     assert labelled == declared, f"admitted {sorted(labelled)}, declared {sorted(declared)}"
 

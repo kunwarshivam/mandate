@@ -23,7 +23,8 @@
     "founding",
     "executor",
     "alpacaOAuth",
-    "oauthFixture"
+    "oauthFixture",
+    "news"
   ],
   "properties": {
     "workspace": {
@@ -62,6 +63,7 @@
         "model-gateway",
         "exporter",
         "data",
+        "news-reader",
         "deploy-manager",
         "role-provisioner"
       ],
@@ -114,6 +116,11 @@
         "data": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "news-reader": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$",
+          "description": "The news reader (DEC-2084): a released image pinned by digest, never a local build, since no cell runs it"
         },
         "deploy-manager": {
           "type": "string",
@@ -479,6 +486,44 @@
         }
       }
     },
+    "news": {
+      "description": "The news reader's followed agents, each an agent and the broker account its executor trades (DEC-2281), and the user agent the vendor sees (DEC-2084); ids and a contact only, never a secret",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "follows",
+        "userAgent"
+      ],
+      "properties": {
+        "follows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "account"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              "account": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              }
+            }
+          }
+        },
+        "userAgent": {
+          "type": "string",
+          "pattern": "^[ -~]*@[ -~]*$",
+          "minLength": 3,
+          "maxLength": 200
+        }
+      }
+    },
     "executor": {
       "description": "The broker every executor runs over (DEC-2306 item 1); a vault address, never a secret",
       "type": "object",
@@ -572,7 +617,8 @@
         "subjectLinks",
         "ingressPeers",
         "vaultBinding",
-        "connectFinish"
+        "connectFinish",
+        "stepUpCoolOffWaiver"
       ],
       "properties": {
         "org": {
@@ -626,6 +672,10 @@
         "connectFinish": {
           "type": "boolean",
           "description": "The connect finish's Deployment, from the API's image, holding the connection manager's AppRole alone as owner-only files, with egress to the journal and the vault on 8200 (DEC-2348 item 3)."
+        },
+        "stepUpCoolOffWaiver": {
+          "type": "boolean",
+          "description": "MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true: a dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up, each waiver journaled as StepUpCoolOffWaived (DEC-2146); any other tier refuses it"
         }
       }
     },
@@ -777,6 +827,38 @@
         },
         "required": [
           "oauthFixture"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentTier": {
+            "enum": [
+              "dev",
+              "ci"
+            ]
+          }
+        },
+        "required": [
+          "deploymentTier"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "api": {
+            "properties": {
+              "stepUpCoolOffWaiver": {
+                "const": true
+              }
+            },
+            "required": [
+              "stepUpCoolOffWaiver"
+            ]
+          }
+        },
+        "required": [
+          "api"
         ]
       },
       "then": {

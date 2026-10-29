@@ -36,6 +36,7 @@ mod credentials;
 mod deployment;
 mod draft;
 mod gateway;
+pub mod holds;
 mod invalidation;
 mod membership;
 mod merkle;

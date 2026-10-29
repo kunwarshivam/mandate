@@ -121,6 +121,35 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
 ---
+# news-reader: Alpaca's news, REST alone, under the platform's paper data key (DEC-2084). It selects
+# no pod until promotion pins images.news-reader.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-news-reader
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: news-reader
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: data.alpaca.markets
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
 # model-gateway: the model provider; the runtime reaches models only through the gateway.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

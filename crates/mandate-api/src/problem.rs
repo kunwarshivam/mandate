@@ -108,6 +108,14 @@ impl ProblemCode {
             Self::StepUpMethod => ("step_up_method", 401, "Confirmation method not allowed"),
             Self::StepUpMismatch => ("step_up_mismatch", 401, "Confirmation does not match"),
             Self::LiveUnavailable => ("live_unavailable", 409, "Live trading unavailable"),
+            Self::AcknowledgmentUnavailable => {
+                ("acknowledgment_unavailable", 409, "Nothing to acknowledge")
+            }
+            Self::AcknowledgmentRequestInvalid => (
+                "acknowledgment_request_invalid",
+                409,
+                "Request cannot be answered",
+            ),
             Self::DeferralMismatch => (
                 "deferral_mismatch",
                 409,
@@ -170,6 +178,12 @@ pub enum ProblemCode {
     StepUpMethod,
     StepUpMismatch,
     LiveUnavailable,
+    /// An acknowledgment, or its request, of a hold the open list does not serve now for that agent
+    /// and subject (§3.11 item 12, DEC-2144).
+    AcknowledgmentUnavailable,
+    /// An acknowledgment naming a request that is not an unspent request for the same agent, event,
+    /// and subject, or that the caller recorded (§3.11 item 12, DEC-2144).
+    AcknowledgmentRequestInvalid,
     /// A grant of an approval whose request's deferred checks are not exactly its decision's, or
     /// whose decision is not found (§5.2, DEC-2521).
     DeferralMismatch,

@@ -26,7 +26,7 @@ use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
-use mandate_api_server::methods::{Methods, Passkey};
+use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
@@ -45,7 +45,7 @@ use mandate_identity_seal::Seal;
 use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::{ArtifactRef, ArtifactSource, Draft, StoredEvent, check_batch, get_artifact};
 use mandate_time::UtcNanos;
-use support_passkey::{CREDENTIAL, Signer, enrol, enrolled, unb64url};
+use support_passkey::{CREDENTIAL, OTHER_CREDENTIAL, Signer, enrol, enrolled, unb64url};
 
 const APP: &str = "https://app.owlhead.test";
 const T0: i64 = 1_791_000_000;
@@ -121,6 +121,8 @@ enum Port {
     Unbound,
     /// The server's real binding, as `main.rs` binds it (DEC-2126 item 2).
     Methods,
+    /// [`Port::Methods`] in a test cell started with the cool-off waiver (DEC-2146 item 2).
+    Waived(CoolOffWaiver),
 }
 
 fn fixture() -> Fixture {
@@ -169,11 +171,15 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
     let step_up: Arc<dyn StepUp> = match port {
         Port::Accepting => Arc::clone(&asked) as Arc<dyn StepUp>,
         Port::Unbound => Arc::new(Unbound),
-        Port::Methods => Arc::new(Methods {
+        Port::Methods | Port::Waived(_) => Arc::new(Methods {
             passkey: Passkey {
                 challenges: Arc::clone(&challenges),
                 rp: support_passkey::rp(),
                 keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
+                cool_off_waiver: match port {
+                    Port::Waived(waiver) => Some(waiver),
+                    _ => None,
+                },
             },
             cli_confirm: CliConfirm {
                 challenges: Arc::clone(&challenges),
@@ -192,7 +198,7 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| Ok(records.clone())),
         hosted: hosted(),
-        artifacts: None,
+        artifacts: with_store.then(|| Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
         objects: with_store.then(|| Arc::clone(&store) as Arc<dyn ObjectStore>),
         step_up,
         challenges: Arc::clone(&challenges),
@@ -1484,16 +1490,18 @@ fn established_payload() -> String {
 }
 
 /// `seed_control` at schema version 2.
-fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) {
+fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) -> StoredEvent {
     let mut streams = f.journal.streams.lock().expect("unpoisoned");
     let rows = streams.get_mut(&ctl()).expect("seeded");
     let seq = u64::try_from(rows.len()).expect("a count") + 1;
     let added = row(&ctl(), 10 + seq, event_type, payload);
-    rows.push(StoredEvent {
+    let added = StoredEvent {
         seq,
         schema_version: 2,
         ..added
-    });
+    };
+    rows.push(added.clone());
+    added
 }
 
 /// Journal spec v0.54 §9.24 (DEC-1171): the deployment is version 2, naming the document's
@@ -1899,7 +1907,20 @@ fn passkeyed() -> Passkeyed {
 /// [`passkeyed`], with [`CONNECTION`] established on [`ACCOUNT`] at version 2 before Alice
 /// enrols when `established`, so a deployment of `v1` meets §9.24's rule 201.
 fn passkeyed_with(established: bool) -> Passkeyed {
-    let f = built(Port::Methods, true);
+    passkeyed_in(Port::Methods, established, COOLED)
+}
+
+/// Alice's passkey enrolled at [`ENROLLED`], its cool-off past.
+const COOLED: i64 = T0 - 800;
+/// When Alice enrolls, 900 s before the verifier's `now`.
+const ENROLLED: i64 = T0 - 900;
+/// A first enrolment's `cool_off_ends` (rule 249): 24 hours after [`ENROLLED`], so still cooling
+/// at `T0`.
+const COOLING: i64 = ENROLLED + 86_400;
+
+/// [`passkeyed_with`] on `port`, Alice's passkey's `cool_off_ends` at `cool_off_ends`.
+fn passkeyed_in(port: Port, established: bool, cool_off_ends: i64) -> Passkeyed {
+    let f = built(port, true);
     let signer = Signer::es256();
     f.store.put(&signer.cose_key()).expect("the key");
     {
@@ -1921,8 +1942,8 @@ fn passkeyed_with(established: bool) -> Passkeyed {
         }
         enrol(
             &mut rows,
-            T0 - 900,
-            enrolled(alice(), CREDENTIAL, &signer, 0, Some(T0 - 800)),
+            ENROLLED,
+            enrolled(alice(), CREDENTIAL, &signer, 0, Some(cool_off_ends)),
         );
         streams.insert(ctl(), rows.rows);
     }
@@ -2882,4 +2903,1546 @@ fn a_replayed_passkey_resume_answers_as_the_first_and_appends_nothing() {
         text(&self::body(&first), &["command_id"])
     );
     assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// Appends `event_type` at `schema_version` with `payload` to the control stream as a whole
+/// envelope (journal spec §3), which the passkey binding's fold reads, at the next `seq`.
+fn seed_hosted(f: &Fixture, event_type: &str, schema_version: u64, payload: &str) -> StoredEvent {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.get_mut(&ctl()).expect("seeded");
+    let seq = rows.last().map_or(1, |row| row.seq + 1);
+    let payload: serde_json::Value = serde_json::from_str(payload).expect("JSON");
+    let mut envelope =
+        common::control::envelope(&ctl(), seq, "paper", event_type, T0 - 500, payload);
+    envelope["schema_version"] = serde_json::json!(schema_version);
+    let added = common::control::stored(seq, &envelope);
+    rows.push(added.clone());
+    added
+}
+
+/// The instrument a reconciliation hold of `agt_a` holds: SPY's asset id.
+const SPY_ID: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
+
+/// Appends `event_type` with `payload` to `acct1`'s stream, as the account's executor would, at
+/// the next `seq`, `caused_by` the event named or none, recorded at a second of its own.
+fn seed_account(
+    f: &Fixture,
+    event_type: &str,
+    payload: &str,
+    caused_by: Option<&str>,
+) -> StoredEvent {
+    seed_stream(f, &account(), event_type, payload, caused_by)
+}
+
+/// [`seed_account`] on `stream`, which it opens if it holds no row yet.
+fn seed_stream(
+    f: &Fixture,
+    stream: &str,
+    event_type: &str,
+    payload: &str,
+    caused_by: Option<&str>,
+) -> StoredEvent {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.entry(stream.to_owned()).or_default();
+    let seq = rows.last().map_or(1, |row| row.seq + 1);
+    let n = u64::try_from(rows.len()).expect("a count");
+    let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{:03}", 200 + n);
+    let causation = caused_by.map_or("null".to_owned(), |id| format!(r#""{id}""#));
+    let body = to_canonical(&json(&format!(
+        r#"{{"causation_id":{causation},"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
+    )));
+    let added = StoredEvent {
+        stream_id: stream.to_owned(),
+        seq,
+        event_id,
+        event_type: event_type.to_owned(),
+        schema_version: 1,
+        environment: "paper".to_owned(),
+        recorded_at: format!("2026-10-17T11:01:{:02}.000000000Z", n % 60),
+        prev_hash: Digest::ZERO,
+        hash: Digest::of(&body),
+        body,
+    };
+    rows.push(added.clone());
+    added
+}
+
+fn limit(limit: &str) -> String {
+    format!(r#"{{"agent_id":"agt_a","limit":"{limit}"}}"#)
+}
+
+fn restriction(cause: &str, state: &str) -> String {
+    format!(r#"{{"cause":"{cause}","reason_code":"account_restricted","restriction":"{state}"}}"#)
+}
+
+fn mode_applied(agent: &str, to: &str, restriction: &str, originated: bool) -> String {
+    format!(
+        r#"{{"agent":"{agent}","originated":{originated},"restriction":"{restriction}","to":"{to}"}}"#
+    )
+}
+
+/// An acknowledgment's body, or a request's when `request` is `None` and `answers` is false.
+fn ack_body(
+    event: &str,
+    subject: &str,
+    request: Option<&str>,
+    evidence: &str,
+    assertion: Option<serde_json::Value>,
+) -> String {
+    let request = request.map_or("null".to_owned(), |id| format!(r#""{id}""#));
+    with_assertion(
+        &format!(
+            r#"{{"acknowledged":"{event}","subject":"{subject}","request":{request},"record":null,"step_up":{evidence}}}"#
+        ),
+        assertion,
+    )
+}
+
+/// A request's body: an acknowledgment's without `request`.
+fn request_body(
+    event: &str,
+    subject: &str,
+    evidence: &str,
+    assertion: Option<serde_json::Value>,
+) -> String {
+    with_assertion(
+        &format!(
+            r#"{{"acknowledged":"{event}","subject":"{subject}","record":null,"step_up":{evidence}}}"#
+        ),
+        assertion,
+    )
+}
+
+impl Passkeyed {
+    /// Alice's `acknowledge` challenge for `agt_a`'s acknowledgment that `confirms` the hold
+    /// `event` of `subject`, naming `request`, bound to §3.11 item 12's object at the control
+    /// stream's head now, written here member by member in canonical order.
+    fn ack_challenge(
+        &self,
+        confirms: &str,
+        event: &str,
+        subject: &str,
+        request: Option<&str>,
+        key: &str,
+    ) -> Issued {
+        let head = control(&self.f).last().expect("rows").seq;
+        let request = request.map_or(String::new(), |id| format!(r#""request":"{id}","#));
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent":"agt_a","bid":null,"bid_size":null,"confirms":"{confirms}","control_head":"{head}","event":"{event}","floor":null,"instrument":null,{request}"subject":"{subject}"}}"#
+        ))));
+        self.challenge_for("acknowledge", bound, key)
+    }
+
+    /// Posts `body` to `agt_a`'s route `route` under `key`.
+    fn post_ack(&self, route: &str, key: &str, body: &str) -> Reply {
+        post(
+            &self.f,
+            &ws(&format!("/agents/agt_a/{route}")),
+            &self.cookie,
+            Some(key),
+            body.as_bytes(),
+        )
+    }
+}
+
+fn list(w: &Passkeyed, query: &str) -> Reply {
+    get(&w.f, &ws(&format!("/acknowledgments{query}")), &w.cookie)
+}
+
+/// The listed holds' `event`s, in order.
+fn listed(reply: &Reply) -> Vec<String> {
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    match self::body(reply).get("acknowledgments") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| text(item, &["event"]).to_owned())
+            .collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The list reads each hold that stands now, by journal spec §9.28's checks 1 and 2 for its
+/// subject, and none that a later record lifted, superseded, or removed: a limit lifted, a cause
+/// lifted, a reconciliation hold removed, a copied mode, and a mode that holds nothing.
+#[test]
+fn the_list_serves_each_standing_hold_and_none_that_ended() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let f = &w.f;
+    let lifted = seed_account(f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    seed_account(f, "RiskLimitLifted", &limit("max_daily_loss"), None);
+    let superseded = seed_account(f, "RiskLimitTriggered", &limit("lifetime_floor"), None);
+    let floor = seed_account(f, "RiskLimitTriggered", &limit("lifetime_floor"), None);
+    let gone = seed_account(
+        f,
+        "AccountRestrictionChanged",
+        &restriction("broker_reject", "closing_only"),
+        None,
+    );
+    seed_account(
+        f,
+        "AccountRestrictionLifted",
+        r#"{"cause":"broker_reject","restriction":"active"}"#,
+        None,
+    );
+    let notice = seed_account(
+        f,
+        "AccountRestrictionChanged",
+        &restriction("broker_notice", "blocked"),
+        None,
+    );
+    let spy = format!("reconciliation:{SPY_ID}");
+    let removed = seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "exits_only", &spy, true),
+        None,
+    );
+    seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "normal", &spy, true),
+        None,
+    );
+    seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "paused", "reconciliation:fees", false),
+        None,
+    );
+    seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "paused", "kill_switch", true),
+        None,
+    );
+    let cash = seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("*", "paused", "reconciliation:cash", true),
+        None,
+    );
+    let held = seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "exits_only", &spy, true),
+        None,
+    );
+    let reply = list(&w, "?state=open");
+    assert_eq!(
+        listed(&reply),
+        [&floor, &notice, &cash, &held].map(|row| row.event_id.clone()),
+        "not {:?}",
+        [&lifted, &superseded, &gone, &removed].map(|row| &row.event_id)
+    );
+    let items = match self::body(&reply).get("acknowledgments") {
+        Some(Value::Array(items)) => items.clone(),
+        other => panic!("{other:?}"),
+    };
+    let expected = [
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":null,"raised_at":"{}","reason":{{"limit":"lifetime_floor"}},"request":null,"subject":"limit"}}"#,
+            account(),
+            floor.event_id,
+            floor.recorded_at
+        ),
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":"paused","raised_at":"{}","reason":{{"cause":"broker_notice"}},"request":null,"subject":"restriction"}}"#,
+            account(),
+            notice.event_id,
+            notice.recorded_at
+        ),
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":"paused","raised_at":"{}","reason":{{"instrument":null,"kind":"cash","restriction":"reconciliation:cash"}},"request":null,"subject":"reconciliation"}}"#,
+            account(),
+            cash.event_id,
+            cash.recorded_at
+        ),
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":"exits_only","raised_at":"{}","reason":{{"instrument":"{SPY_ID}","kind":"instrument","restriction":"{spy}"}},"request":null,"subject":"reconciliation"}}"#,
+            account(),
+            held.event_id,
+            held.recorded_at
+        ),
+    ];
+    for (item, want) in items.iter().zip(&expected) {
+        assert_eq!(to_canonical(item), to_canonical(&json(want)));
+    }
+    assert_eq!(items.len(), expected.len());
+    assert_eq!(listed(&list(&w, "?agent=agt_a&state=open")), listed(&reply));
+}
+
+/// The list's query is `state=open` and an optional deployed `agent`; anything else is `invalid`,
+/// and a record of a hold that cannot be read fails the read rather than shorten it.
+#[test]
+fn the_list_refuses_another_query_and_fails_on_a_record_it_cannot_read() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    for query in [
+        "",
+        "?state=closed",
+        "?state=open&agent=agt_zz",
+        "?state=open&agent=",
+        "?state=open&agent=agt_a&agent=agt_a",
+        "?agent=agt_a&state=open&agent=agt_a",
+        "?state=open&state=open",
+        "?state=open&x=1",
+    ] {
+        refused(&list(&w, query), 422, ProblemCode::Invalid);
+    }
+    seed_account(&w.f, "RiskLimitTriggered", r#"{"agent_id":"agt_a"}"#, None);
+    refused(
+        &list(&w, "?state=open"),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+}
+
+/// The executor's evidence as §9.28 records it: `authenticated_at` the whole second.
+fn recorded_evidence(issued: &Issued) -> Value {
+    let second = UtcNanos::parse(&issued.issued_at)
+        .expect("a timestamp")
+        .secs();
+    json(&format!(
+        r#"{{"assertion_id":"{}","authenticated_at":{second},"method":"passkey"}}"#,
+        issued.id
+    ))
+}
+
+/// The last two control rows: the acknowledgment record `event_type` at version 2 under §3.4's
+/// id for `operation`, then its `StepUpAsserted`, in one batch the journal admits.
+fn asserted_record(w: &Passkeyed, issued: &Issued, event_type: &str, operation: &str) -> Value {
+    let rows = control(&w.f);
+    let (record, assertion) = (&rows[rows.len() - 2], &rows[rows.len() - 1]);
+    assert_eq!(
+        (record.event_type.as_str(), assertion.event_type.as_str()),
+        (event_type, "StepUpAsserted")
+    );
+    assert_eq!(record.event_id, derived(operation, KEY_3));
+    assert_eq!(
+        assertion.event_id,
+        derived(&format!("{operation}_step_up_asserted"), KEY_3)
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let drafts: Vec<Draft> = [record, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()));
+    assert_eq!(
+        parse(&record.body).expect("JSON").get("schema_version"),
+        Some(&Value::Int(mandate_canon::Int::new(2).expect("2")))
+    );
+    assert!(!w.held(issued), "the challenge is taken");
+    payload(record)
+}
+
+/// An acknowledgment of a standing limit, under passkey step-up bound to its hold and subject,
+/// commits `OwnerAcknowledged` version 2 with §9.28's members as the CLI writes them, the user
+/// from the session, then its `StepUpAsserted`; a repeat under its key answers as the first.
+#[test]
+fn an_acknowledgment_of_a_standing_hold_records_owner_acknowledged_version_2() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let first = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let recorded = asserted_record(&w, &issued, "OwnerAcknowledged", "acknowledge");
+    let second = UtcNanos::parse(text(&self::body(&first), &["served_at"]))
+        .expect("a timestamp")
+        .secs();
+    let clock = UtcNanos::from_parts(second, 0)
+        .expect("a second")
+        .to_string();
+    let want = format!(
+        r#"{{"agent":"agt_a","event":"{}","independent_required":false,"request":null,"requested_by":"{ALICE}","risk_clock":"{clock}","step_up":{},"subject":"limit","submitted_at":{second},"user":"{ALICE}"}}"#,
+        hold.event_id,
+        String::from_utf8(to_canonical(&recorded_evidence(&issued))).expect("UTF-8")
+    );
+    assert_eq!(to_canonical(&recorded), to_canonical(&json(&want)));
+    let after = control(&w.f).len();
+    let again = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// A request for a standing hold commits `OwnerAcknowledgmentRequested` version 2, Alice its
+/// requester, then its `StepUpAsserted`; the list then serves it beside its hold.
+#[test]
+fn a_request_records_owner_acknowledgment_requested_version_2_and_the_list_serves_it() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let spy = format!("reconciliation:{SPY_ID}");
+    let hold = seed_account(
+        &w.f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "exits_only", &spy, true),
+        None,
+    );
+    let issued = w.ack_challenge(
+        "request_ack",
+        &hold.event_id,
+        "reconciliation",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = request_body(
+        &hold.event_id,
+        "reconciliation",
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgment-requests", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let recorded = asserted_record(
+        &w,
+        &issued,
+        "OwnerAcknowledgmentRequested",
+        "acknowledgment_request",
+    );
+    let second = UtcNanos::parse(text(&self::body(&reply), &["served_at"]))
+        .expect("a timestamp")
+        .secs();
+    let clock = UtcNanos::from_parts(second, 0)
+        .expect("a second")
+        .to_string();
+    let want = format!(
+        r#"{{"agent":"agt_a","event":"{}","independent_required":true,"requested_by":"{ALICE}","risk_clock":"{clock}","step_up":{},"subject":"reconciliation","submitted_at":{second}}}"#,
+        hold.event_id,
+        String::from_utf8(to_canonical(&recorded_evidence(&issued))).expect("UTF-8")
+    );
+    assert_eq!(to_canonical(&recorded), to_canonical(&json(&want)));
+    let request = derived("acknowledgment_request", KEY_3);
+    let item = match self::body(&list(&w, "?state=open")).get("acknowledgments") {
+        Some(Value::Array(items)) => items[0].clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        item.get("request").map(to_canonical),
+        Some(to_canonical(&json(&format!(
+            r#"{{"event_id":"{request}","requested_by":"{ALICE}"}}"#
+        ))))
+    );
+}
+
+/// Every refusal commits nothing and keeps the challenge, at the first check that fails: a hold
+/// that does not stand or of another subject (`acknowledgment_unavailable`), no step-up
+/// (`step_up_required`), a method other than passkey (`step_up_method`), passkey evidence without
+/// its assertion (`step_up_missing`), and an assertion the port refuses.
+#[test]
+fn a_refused_acknowledgment_commits_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let lifted = seed_account(&w.f, "RiskLimitTriggered", &limit("profit_stop"), None);
+    seed_account(&w.f, "RiskLimitLifted", &limit("profit_stop"), None);
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let passkey = Passkeyed::evidence(&issued, "passkey");
+    let cli = Passkeyed::evidence(&issued, "cli_confirm");
+    let forged = w.signer.assert(b"another challenge", 11);
+    let before = control(&w.f).len();
+    let cases = [
+        (
+            ack_body(
+                &lifted.event_id,
+                "limit",
+                None,
+                &passkey,
+                Some(signed.json(CREDENTIAL)),
+            ),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        ),
+        (
+            ack_body(
+                &hold.event_id,
+                "restriction",
+                None,
+                &passkey,
+                Some(signed.json(CREDENTIAL)),
+            ),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        ),
+        (
+            ack_body(&hold.event_id, "limit", None, "null", None),
+            401,
+            ProblemCode::StepUpRequired,
+        ),
+        (
+            ack_body(&hold.event_id, "limit", None, &cli, None),
+            401,
+            ProblemCode::StepUpMethod,
+        ),
+        (
+            ack_body(&hold.event_id, "limit", None, &passkey, None),
+            401,
+            ProblemCode::StepUpMissing,
+        ),
+    ];
+    for (body, status, code) in cases {
+        refused(&w.post_ack("acknowledgments", KEY_3, &body), status, code);
+    }
+    let reply = w.post_ack(
+        "acknowledgments",
+        KEY_3,
+        &ack_body(
+            &hold.event_id,
+            "limit",
+            None,
+            &passkey,
+            Some(forged.json(CREDENTIAL)),
+        ),
+    );
+    assert_eq!(
+        reply.status,
+        401,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// An acknowledgment naming a request is refused `acknowledgment_request_invalid` unless the
+/// request is unspent, names the same agent, hold, and subject (a version 1 request read as
+/// `limit`), and is another user's; a valid one records the requester and requires independence.
+#[test]
+fn an_acknowledgment_answers_only_another_users_unspent_matching_request() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let event = &hold.event_id;
+    let asked_of = |agent: &str, requested_by: &str, subject: &str| {
+        format!(
+            r#"{{"agent":"{agent}","event":"{event}","independent_required":true,"requested_by":"{requested_by}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"subject":"{subject}","submitted_at":1}}"#
+        )
+    };
+    let asked = |requested_by: &str, subject: &str| asked_of("agt_a", requested_by, subject);
+    let own = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(ALICE, "limit"),
+    );
+    let other_subject = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(BOB, "restriction"),
+    );
+    let bobs = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(BOB, "limit"),
+    );
+    let spent = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(BOB, "limit"),
+    );
+    let other_agent = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked_of("agt_b", BOB, "limit"),
+    );
+    seed_hosted(
+        &w.f,
+        "OwnerAcknowledged",
+        2,
+        &format!(
+            r#"{{"agent":"agt_a","event":"{event}","independent_required":true,"request":"{}","requested_by":"{BOB}","risk_clock":"2026-10-17T11:00:00Z","step_up":null,"subject":"limit","submitted_at":1,"user":"{ALICE}"}}"#,
+            spent.event_id
+        ),
+    );
+    let keys = [
+        "k7Z-9_gggggggggg",
+        "k8Z-9_hhhhhhhhhh",
+        "k9Z-9_iiiiiiiiii",
+        "kAZ-9_jjjjjjjjjj",
+    ];
+    for (request, key) in [&own, &other_subject, &spent, &other_agent]
+        .into_iter()
+        .zip(keys)
+    {
+        let issued = w.ack_challenge("acknowledge", event, "limit", Some(&request.event_id), key);
+        let signed = w.signer.assert(&issued.bytes, 11);
+        let body = ack_body(
+            event,
+            "limit",
+            Some(&request.event_id),
+            &Passkeyed::evidence(&issued, "passkey"),
+            Some(signed.json(CREDENTIAL)),
+        );
+        let before = control(&w.f).len();
+        refused(
+            &w.post_ack("acknowledgments", KEY_3, &body),
+            409,
+            ProblemCode::AcknowledgmentRequestInvalid,
+        );
+        assert_eq!(control(&w.f).len(), before, "{}", request.event_id);
+    }
+    let issued = w.ack_challenge(
+        "acknowledge",
+        event,
+        "limit",
+        Some(&bobs.event_id),
+        "k6Z-9_ffffffffff",
+    );
+    let signed = w.signer.assert(&issued.bytes, 12);
+    let body = ack_body(
+        event,
+        "limit",
+        Some(&bobs.event_id),
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let recorded = asserted_record(&w, &issued, "OwnerAcknowledged", "acknowledge");
+    assert_eq!(text(&recorded, &["requested_by"]), BOB);
+    assert_eq!(text(&recorded, &["user"]), ALICE);
+    assert_eq!(text(&recorded, &["request"]), bobs.event_id);
+    assert_eq!(
+        recorded.get("independent_required"),
+        Some(&Value::Bool(true))
+    );
+}
+
+/// A version 1 request carries no `subject` and is read as `limit`: it answers a limit's
+/// acknowledgment, never a restriction's.
+#[test]
+fn a_version_1_request_is_a_limits_request() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let notice = seed_account(
+        &w.f,
+        "AccountRestrictionChanged",
+        &restriction("broker_notice", "closing_only"),
+        None,
+    );
+    let event = &notice.event_id;
+    let v1 = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        1,
+        &format!(
+            r#"{{"agent":"agt_a","event":"{event}","independent_required":true,"requested_by":"{BOB}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"submitted_at":1}}"#
+        ),
+    );
+    let issued = w.ack_challenge(
+        "acknowledge",
+        event,
+        "restriction",
+        Some(&v1.event_id),
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        event,
+        "restriction",
+        Some(&v1.event_id),
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::AcknowledgmentRequestInvalid,
+    );
+    assert!(w.held(&issued));
+}
+
+/// A live workspace's acknowledgment is `live_unavailable`, and a member without the
+/// `Acknowledge` row is `forbidden`, each before the hold is read and with nothing recorded.
+#[test]
+fn an_acknowledgment_is_paper_only_and_the_acknowledge_rows_alone() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let body = ack_body(&hold.event_id, "limit", None, "null", None);
+    let bob = signed_in(&w.f, bob());
+    let reply = post(
+        &w.f,
+        &ws("/agents/agt_a/acknowledgments"),
+        &bob,
+        Some(KEY_3),
+        body.as_bytes(),
+    );
+    refused(&reply, 403, ProblemCode::Forbidden);
+    workspace_in(&w.f, "live");
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::LiveUnavailable,
+    );
+    refused(
+        &w.post_ack(
+            "acknowledgment-requests",
+            KEY_3,
+            &request_body(&hold.event_id, "limit", "null", None),
+        ),
+        409,
+        ProblemCode::LiveUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before);
+}
+
+/// An acknowledgment's status follows its account-stream copy: `taken` once copied, and `applied`
+/// once the executor's lift, caused by the copy, follows; a refusal caused by the original is
+/// `refused` (§5.5).
+#[test]
+fn an_acknowledgments_status_follows_its_copy_to_the_lift() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let command = text(&self::body(&reply), &["command_id"]).to_owned();
+    let phase = || {
+        let reply = get(&w.f, &ws(&format!("/commands/{command}")), &w.cookie);
+        assert_eq!(
+            reply.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        text(&self::body(&reply), &["phase"]).to_owned()
+    };
+    assert_eq!(phase(), "recorded");
+    let copy = seed_account(&w.f, "OwnerAcknowledged", "{}", Some(&command));
+    assert_eq!(phase(), "taken");
+    seed_account(
+        &w.f,
+        "RiskLimitLifted",
+        &limit("max_daily_loss"),
+        Some(&copy.event_id),
+    );
+    assert_eq!(phase(), "applied");
+    seed_stream(
+        &w.f,
+        &format!("agent:{WORKSPACE}:agt_a"),
+        "AgentModeChanged",
+        "{}",
+        Some(&command),
+    );
+    let reply = get(&w.f, &ws(&format!("/commands/{command}")), &w.cookie);
+    let steps: Vec<String> = match self::body(&reply).get("steps") {
+        Some(Value::Array(steps)) => steps
+            .iter()
+            .map(|step| text(step, &["event_type"]).to_owned())
+            .collect(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        steps,
+        ["AgentModeChanged", "OwnerAcknowledged", "RiskLimitLifted"],
+        "in stream then seq order: the agent's stream before the account's (§3.11 item 12)"
+    );
+}
+
+/// A limit of another agent on the account blocks only that agent: the list for `agt_a` leaves it
+/// out, and an acknowledgment of it posted to `agt_a` is `acknowledgment_unavailable` with nothing
+/// recorded, rather than journaled for the executor to refuse.
+#[test]
+fn another_agents_limit_is_not_acknowledged_through_this_agent() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let theirs = seed_account(
+        &w.f,
+        "RiskLimitTriggered",
+        r#"{"agent_id":"agt_z","limit":"max_daily_loss"}"#,
+        None,
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open")),
+        std::slice::from_ref(&theirs.event_id)
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open&agent=agt_a")),
+        Vec::<String>::new()
+    );
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &theirs.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &theirs.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::AcknowledgmentUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before);
+    assert!(w.held(&issued));
+}
+
+/// A request answers only the hold it names: with two of `agt_a`'s limits standing, another
+/// user's unspent request for the second does not answer an acknowledgment of the first, which is
+/// refused `acknowledgment_request_invalid` with nothing recorded and the challenge kept (§3.11
+/// item 12, check 6).
+#[test]
+fn a_request_for_another_hold_of_the_same_agent_answers_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let first = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let second = seed_account(&w.f, "RiskLimitTriggered", &limit("profit_stop"), None);
+    let for_second = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &format!(
+            r#"{{"agent":"agt_a","event":"{}","independent_required":true,"requested_by":"{BOB}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"subject":"limit","submitted_at":1}}"#,
+            second.event_id
+        ),
+    );
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &first.event_id,
+        "limit",
+        Some(&for_second.event_id),
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &first.event_id,
+        "limit",
+        Some(&for_second.event_id),
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::AcknowledgmentRequestInvalid,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// An acknowledgment or a request posted to an agent that is not deployed here is `not_found`
+/// with nothing recorded, before the hold is read (§3.11 item 12, check 3): `agt_a` before its
+/// deploy, and `agt_q`, never deployed, while `agt_a`'s limit stands.
+#[test]
+fn an_acknowledgment_to_an_undeployed_agent_is_not_found() {
+    let w = passkeyed_with(true);
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let posted = |agent: &str, route: &str, body: &str| {
+        post(
+            &w.f,
+            &ws(&format!("/agents/{agent}/{route}")),
+            &w.cookie,
+            Some(KEY_3),
+            body.as_bytes(),
+        )
+    };
+    let acknowledgment = ack_body(&hold.event_id, "limit", None, "null", None);
+    let request = request_body(&hold.event_id, "limit", "null", None);
+    let before = control(&w.f).len();
+    refused(
+        &posted("agt_a", "acknowledgments", &acknowledgment),
+        404,
+        ProblemCode::NotFound,
+    );
+    w.deployed();
+    let deployed = control(&w.f).len();
+    for (route, body) in [
+        ("acknowledgments", &acknowledgment),
+        ("acknowledgment-requests", &request),
+    ] {
+        refused(&posted("agt_q", route, body), 404, ProblemCode::NotFound);
+    }
+    assert!(deployed > before, "the deploy is recorded");
+    assert_eq!(control(&w.f).len(), deployed, "nothing more is recorded");
+}
+
+/// A request is refused as an acknowledgment is, with nothing recorded and the challenge kept: a
+/// hold that does not stand, no step-up, a method other than passkey, and no assertion.
+#[test]
+fn a_refused_request_commits_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let lifted = seed_account(&w.f, "RiskLimitTriggered", &limit("profit_stop"), None);
+    seed_account(&w.f, "RiskLimitLifted", &limit("profit_stop"), None);
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "request_ack",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let passkey = Passkeyed::evidence(&issued, "passkey");
+    let cli = Passkeyed::evidence(&issued, "cli_confirm");
+    let before = control(&w.f).len();
+    for (body, status, code) in [
+        (
+            request_body(
+                &lifted.event_id,
+                "limit",
+                &passkey,
+                Some(signed.json(CREDENTIAL)),
+            ),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        ),
+        (
+            request_body(&hold.event_id, "limit", "null", None),
+            401,
+            ProblemCode::StepUpRequired,
+        ),
+        (
+            request_body(&hold.event_id, "limit", &cli, None),
+            401,
+            ProblemCode::StepUpMethod,
+        ),
+        (
+            request_body(&hold.event_id, "limit", &passkey, None),
+            401,
+            ProblemCode::StepUpMissing,
+        ),
+    ] {
+        refused(
+            &w.post_ack("acknowledgment-requests", KEY_3, &body),
+            status,
+            code,
+        );
+    }
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// A control stream that moves between the challenge and the call changes the digest's
+/// `control_head`, so the port answers `step_up_mismatch` and nothing is recorded (§3.11 item 12).
+#[test]
+fn an_acknowledgment_after_the_control_stream_moved_is_a_step_up_mismatch() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    seed_hosted(
+        &w.f,
+        "AgentModeChanged",
+        1,
+        r#"{"agent_id":"agt_a","to":"paused"}"#,
+    );
+    let before = control(&w.f).len();
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        401,
+        ProblemCode::StepUpMismatch,
+    );
+    assert_eq!(control(&w.f).len(), before);
+}
+
+/// The operation a route's `StepUpCoolOffWaived` is derived under (§3.4): its assertion's, with
+/// `_cool_off_waived` for `_asserted`.
+fn waived_operation(asserted: &str) -> String {
+    format!(
+        "{}_cool_off_waived",
+        asserted
+            .strip_suffix("_asserted")
+            .expect("an assertion's operation")
+    )
+}
+
+/// The last three control rows are `authorized`, its `StepUpAsserted`, then its
+/// `StepUpCoolOffWaived` (DEC-2146 item 4, journal spec §9.38): ids from §3.4 under `operation`
+/// and `key`, both step-up records caused by the authorized event, all three at one `event_time`,
+/// the waiver naming the challenge, the credential, [`COOLING`] and `tier`, and the batch admitted
+/// by the journal's batch rules, 253 and 317 among them.
+fn journals_the_waiver(
+    f: &Fixture,
+    authorized: &str,
+    operation: &str,
+    asserted: &str,
+    key: &str,
+    issued: &Issued,
+    tier: &str,
+) {
+    let rows = control(f);
+    let last: Vec<&StoredEvent> = rows.iter().rev().take(3).rev().collect();
+    let types: Vec<&str> = last.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        [authorized, "StepUpAsserted", "StepUpCoolOffWaived"],
+        "the event, its assertion, then the waiver, in one batch"
+    );
+    let (event, assertion, waiver) = (last[0], last[1], last[2]);
+    assert_eq!(event.event_id, derived(operation, key));
+    assert_eq!(assertion.event_id, derived(asserted, key));
+    assert_eq!(
+        waiver.event_id,
+        derived(&waived_operation(asserted), key),
+        "the waiver's id is §3.4's under its own operation"
+    );
+    let expected = format!(
+        r#"{{"challenge":"{}","cool_off_ends":"{}","credential":"{CREDENTIAL}","tier":"{tier}"}}"#,
+        issued.id,
+        at(COOLING)
+    );
+    assert_eq!(
+        String::from_utf8(to_canonical(&payload(waiver))).expect("UTF-8"),
+        expected
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let envelope = |row: &StoredEvent| parse(&row.body).expect("JSON");
+    let member = |row: &StoredEvent, name: &str| {
+        envelope(row)
+            .get(name)
+            .map(to_canonical)
+            .unwrap_or_else(|| panic!("{} has {name}", row.event_type))
+    };
+    for record in [assertion, waiver] {
+        assert_eq!(
+            envelope(record).get("causation_id").and_then(Value::as_str),
+            Some(event.event_id.as_str()),
+            "{} is caused by the event it authorized (rules 253, 317)",
+            record.event_type
+        );
+        for name in ["event_time", "actor", "environment"] {
+            assert_eq!(
+                member(record, name),
+                member(event, name),
+                "{} shares the event's {name} (DEC-2146 item 4)",
+                record.event_type
+            );
+        }
+    }
+    let drafts: Vec<Draft> = last
+        .iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()), "rules 253 and 317 admit it");
+}
+
+/// DEC-2146 items 1 and 4: in a `ci` or `dev` cell started with the waiver, a version's
+/// confirmation with a passkey still in its 24-hour cool-off commits, and journals the waiver
+/// after its assertion, naming the cell's tier.
+#[test]
+fn a_test_cells_waived_confirm_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    for (waiver, tier) in [(CoolOffWaiver::Ci, "ci"), (CoolOffWaiver::Dev, "dev")] {
+        let w = passkeyed_in(Port::Waived(waiver), false, COOLING);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            202,
+            "{tier}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        journals_the_waiver(
+            &w.f,
+            "MandateConfirmed",
+            "confirm_version",
+            "confirm_version_step_up_asserted",
+            KEY,
+            &issued,
+            tier,
+        );
+        assert!(!w.held(&issued), "{tier}: the challenge is taken");
+    }
+}
+
+/// DEC-2146 item 3: a deployment is a route that appends its assertion, so it carries the waiver
+/// the same way.
+#[test]
+fn a_ci_cells_waived_deploy_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
+    w.funded();
+    w.confirmed();
+    let issued = w.deploy_challenge();
+    let signed = w.signer.assert(&issued.bytes, 10);
+    let reply = deploy(
+        &w.f,
+        &w.cookie,
+        KEY_2,
+        &w.deploy_body(&issued, Some(signed.json(CREDENTIAL))),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    journals_the_waiver(
+        &w.f,
+        "AgentDeployed",
+        "deploy",
+        "deploy_step_up_asserted",
+        KEY_2,
+        &issued,
+        "ci",
+    );
+    assert_eq!(
+        events(&w.f, "StepUpCoolOffWaived").len(),
+        2,
+        "the confirmation's waiver, then the deployment's: one per step-up"
+    );
+}
+
+/// DEC-2146 items 1 and 2: without the waiver the same cell keeps the cool-off. A passkey still
+/// cooling is `step_up_missing`, nothing is appended, and the challenge is kept.
+#[test]
+fn without_the_waiver_a_fresh_passkey_is_still_step_up_missing() {
+    let w = passkeyed_in(Port::Methods, false, COOLING);
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)))),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(events(&w.f, "StepUpAsserted").is_empty());
+    assert!(events(&w.f, "StepUpCoolOffWaived").is_empty());
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// A request that tries to turn the waiver on: its target, its extra headers, and its body.
+type Smuggled = (String, Vec<(&'static str, &'static str)>, String);
+
+/// DEC-2146 item 2: nothing a request carries turns the waiver on: not a header, a query, a body
+/// member, or the evidence's own members. Each such confirm of a cooling passkey on a server
+/// started without the waiver commits nothing and keeps the challenge.
+#[test]
+fn no_header_query_or_request_member_turns_the_waiver_on() {
+    let w = passkeyed_in(Port::Methods, false, COOLING);
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let plain = w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)));
+    let cookie = format!("{COOKIE_NAME}={}", w.cookie);
+    let path = ws(&format!("/mandate-versions/{}/confirm", version("v1")));
+    let mut asks: Vec<Smuggled> = Vec::new();
+    for (name, value) in [
+        ("X-Mandate-Cool-Off-Waiver", "true"),
+        ("Mandate-Api-Passkey-Cool-Off-Waiver", "true"),
+        ("Mandate-Deployment-Tier", "ci"),
+        ("X-Mandate-Deployment-Tier", "dev"),
+    ] {
+        asks.push((path.clone(), vec![(name, value)], plain.clone()));
+    }
+    for query in [
+        "?cool_off_waiver=true",
+        "?MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true",
+        "?tier=ci",
+    ] {
+        asks.push((format!("{path}{query}"), Vec::new(), plain.clone()));
+    }
+    let mut members: serde_json::Value = serde_json::from_str(&plain).expect("JSON");
+    members["cool_off_waiver"] = serde_json::json!(true);
+    members["tier"] = serde_json::json!("ci");
+    asks.push((path.clone(), Vec::new(), members.to_string()));
+    let mut inner: serde_json::Value = serde_json::from_str(&plain).expect("JSON");
+    inner["step_up"]["cool_off_waived"] = serde_json::json!(true);
+    inner["step_up_assertion"]["cool_off_waiver"] = serde_json::json!("ci");
+    asks.push((path.clone(), Vec::new(), inner.to_string()));
+    for (target, extra, body) in asks {
+        let mut headers = vec![
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Cookie", cookie.as_str()),
+            ("Content-Type", "application/json"),
+            ("Idempotency-Key", KEY),
+        ];
+        headers.extend(extra.iter().copied());
+        let reply = send(w.f.addr, "POST", &target, &headers, body.as_bytes());
+        assert!(
+            matches!(reply.status, 401 | 404 | 422),
+            "{target} {extra:?}: {} {:?}",
+            reply.status,
+            String::from_utf8_lossy(&reply.body)
+        );
+        assert!(
+            events(&w.f, "MandateConfirmed").is_empty(),
+            "{target} {extra:?}"
+        );
+        assert!(
+            events(&w.f, "StepUpCoolOffWaived").is_empty(),
+            "{target} {extra:?}"
+        );
+        assert!(w.held(&issued), "{target} {extra:?}: the challenge is kept");
+    }
+}
+
+/// DEC-2146 items 3 and 4: the waiver counts only a step-up inside the cool-off. With the waiver
+/// on, a passkey whose cool-off ended at the verifier's `now` exactly, or earlier, commits as
+/// before, with no `StepUpCoolOffWaived` (rule 318's near-miss).
+#[test]
+fn the_waiver_writes_nothing_for_a_passkey_past_its_cool_off() {
+    for ends in [T0, COOLED] {
+        let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), false, ends);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            202,
+            "{ends}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let rows = control(&w.f);
+        assert_eq!(
+            rows.last().map(|row| row.event_type.as_str()),
+            Some("StepUpAsserted"),
+            "{ends}: no waiver follows the assertion"
+        );
+        assert!(events(&w.f, "StepUpCoolOffWaived").is_empty());
+    }
+}
+
+/// DEC-2146 item 3: resume and Stop append their assertion, so each carries the waiver. In a `ci`
+/// cell with the waiver, a fresh passkey's resume, then its Stop with release, each commit their
+/// `OwnerCommandIssued` with the evidence, then its `StepUpAsserted`, then its
+/// `StepUpCoolOffWaived`.
+#[test]
+fn a_ci_cells_waived_resume_and_stop_with_a_fresh_passkey_commit_and_journal_the_waiver() {
+    for (route, kind, confirms, body) in [
+        (
+            "resume",
+            "resume",
+            "resume",
+            resume_body as fn(&str, _) -> String,
+        ),
+        ("stop", "stop", "stop_release", stop_body),
+    ] {
+        let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
+        w.deployed();
+        let issued = w.command_challenge(kind, confirms);
+        let signed = w.signer.assert(&issued.bytes, 11);
+        let evidence = Passkeyed::evidence(&issued, "passkey");
+        let reply = post(
+            &w.f,
+            &ws(&format!("/agents/agt_a/{route}")),
+            &w.cookie,
+            Some(KEY_3),
+            body(&evidence, Some(signed.json(CREDENTIAL))).as_bytes(),
+        );
+        assert_eq!(
+            reply.status,
+            202,
+            "{route}: {}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        journals_the_waiver(
+            &w.f,
+            "OwnerCommandIssued",
+            route,
+            &format!("{route}_step_up_asserted"),
+            KEY_3,
+            &issued,
+            "ci",
+        );
+        let rows = control(&w.f);
+        let command = payload(&rows[rows.len() - 3]);
+        assert_eq!(
+            command.get("step_up").map(to_canonical),
+            Some(to_canonical(&json(&evidence))),
+            "{route}: the command records the evidence the runtime judges"
+        );
+        assert!(!w.held(&issued), "{route}: the challenge is taken");
+    }
+}
+
+/// DEC-2146 item 3: an acknowledgment appends its assertion, so it carries the waiver the same way.
+/// In a `ci` cell with the waiver, a fresh passkey's acknowledgment of a standing limit commits
+/// `OwnerAcknowledged`, its `StepUpAsserted`, then its `StepUpCoolOffWaived`.
+#[test]
+fn a_ci_cells_waived_acknowledgment_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    journals_the_waiver(
+        &w.f,
+        "OwnerAcknowledged",
+        "acknowledge",
+        "acknowledge_step_up_asserted",
+        KEY_3,
+        &issued,
+        "ci",
+    );
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// DEC-2146 items 1 and 2: without the waiver, an acknowledgment signed with a passkey still in
+/// its cool-off is `step_up_missing`: nothing is appended, the challenge is kept, and the hold
+/// still stands in the list. Alice deploys with her cooled passkey, then enrols a second whose
+/// `cool_off_ends` is a day off.
+#[test]
+fn without_the_waiver_a_fresh_passkeys_acknowledgment_is_step_up_missing_and_the_hold_stands() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let fresh = Signer::es256();
+    w.f.store.put(&fresh.cose_key()).expect("the key");
+    let enrolment = enrolled(alice(), OTHER_CREDENTIAL, &fresh, 0, Some(COOLING));
+    seed_hosted(&w.f, "CredentialEnrolled", 2, &enrolment.to_string());
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = fresh.assert(&issued.bytes, 1);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(OTHER_CREDENTIAL)),
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is appended");
+    assert!(w.held(&issued), "the challenge is kept");
+    assert_eq!(
+        listed(&list(&w, "?agent=agt_a&state=open")),
+        [hold.event_id],
+        "the hold still stands"
+    );
+}
+
+/// §3.11 item 12's order: the hold standing (check 4) is judged before step-up (check 6), so an
+/// acknowledgment of a hold that does not stand, with no step-up at all, is
+/// `acknowledgment_unavailable`, not `step_up_required`, and records nothing.
+#[test]
+fn an_acknowledgment_of_no_standing_hold_is_unavailable_before_step_up_is_judged() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let lifted = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    seed_account(&w.f, "RiskLimitLifted", &limit("max_daily_loss"), None);
+    let before = control(&w.f).len();
+    for route in ["acknowledgments", "acknowledgment-requests"] {
+        let body = match route {
+            "acknowledgments" => ack_body(&lifted.event_id, "limit", None, "null", None),
+            _ => request_body(&lifted.event_id, "limit", "null", None),
+        };
+        refused(
+            &w.post_ack(route, KEY_3, &body),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        );
+    }
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+}
+
+/// A repeat under the key replays before the hold is read (§3.4 step 1), so once the
+/// acknowledgment's hold has been lifted, the repeat still answers as the first did, appending
+/// nothing.
+#[test]
+fn a_repeated_acknowledgment_replays_after_its_hold_is_lifted() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let first = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    seed_account(&w.f, "RiskLimitLifted", &limit("max_daily_loss"), None);
+    let after = control(&w.f).len();
+    let again = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// An account stream the holds are read from that cannot be read fails the acknowledgment with
+/// `journal_unavailable`, never reading it as holding nothing: nothing is recorded, the challenge
+/// is kept, and the list fails the same way.
+#[test]
+fn an_unreadable_account_stream_fails_the_acknowledgment_closed() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    w.f.journal
+        .failing
+        .lock()
+        .expect("unpoisoned")
+        .insert(account());
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "the challenge is kept");
+    let listed = list(&w, "?state=open");
+    assert_eq!(
+        listed.status,
+        503,
+        "{}",
+        String::from_utf8_lossy(&listed.body)
+    );
 }

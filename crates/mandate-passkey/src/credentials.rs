@@ -42,6 +42,9 @@ const REMOVED: &str = "CredentialRemoved";
 /// §9.32's record of an assertion's counter, which step-up's view reads under rule 254
 /// (DEC-2323).
 const ASSERTED: &str = "StepUpAsserted";
+/// §9.38's record of a test cell's waived cool-off, which step-up's view reads under rule 318
+/// (DEC-2146).
+const WAIVED: &str = "StepUpCoolOffWaived";
 
 /// A key's algorithm, §9.31's `passkey_alg` ([DEC-660]).
 ///
@@ -90,6 +93,29 @@ pub struct Assertion {
     pub challenge: String,
     /// The signature counter the assertion carried.
     pub sign_count: u32,
+    /// The record's `event_time`, which rule 318's converse judges against the credential's
+    /// `cool_off_ends` (journal spec §9.38).
+    pub event_time: UtcNanos,
+}
+
+/// A `StepUpCoolOffWaived` (journal spec §9.38, [DEC-2146]), as the fold reads it: whose waiver it
+/// was, of which credential and challenge, the `cool_off_ends` it waived, and when.
+///
+/// [DEC-2146]: ../../../docs/project/decisions/DEC-2146.md
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiver {
+    /// The record's `seq` on the control stream.
+    pub seq: u64,
+    /// The member who stepped up, the record's actor.
+    pub member: PrincipalId,
+    /// The credential whose cool-off was waived.
+    pub credential: String,
+    /// The waived step-up's challenge, its ULID text.
+    pub challenge: String,
+    /// The enrolment's `cool_off_ends` the waiver names.
+    pub cool_off_ends: UtcNanos,
+    /// The record's `event_time`.
+    pub event_time: UtcNanos,
 }
 
 /// A `CredentialRemoved`, as the fold reads it.
@@ -112,6 +138,8 @@ pub enum CredentialRecord {
     Removed(Removal),
     /// A `StepUpAsserted`.
     Asserted(Assertion),
+    /// A `StepUpCoolOffWaived`.
+    Waived(Waiver),
 }
 
 /// Why a credential read gives no answer.
@@ -148,6 +176,9 @@ pub fn credential_record(
         .ok_or(at("event_type"))?;
     if event_type == ASSERTED {
         return assertion(seq, envelope).map(Some);
+    }
+    if event_type == WAIVED {
+        return waiver(seq, envelope).map(Some);
     }
     if event_type != ENROLLED && event_type != REMOVED {
         return Ok(None);
@@ -245,12 +276,62 @@ fn assertion(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialE
     if !artifact_ref(text("assertion", "payload.assertion")?) {
         return Err(at("payload.assertion"));
     }
+    let event_time = envelope
+        .get("event_time")
+        .and_then(Value::as_str)
+        .and_then(|t| UtcNanos::parse(t).ok())
+        .ok_or(at("event_time"))?;
     Ok(CredentialRecord::Asserted(Assertion {
         seq,
         member,
         credential: credential.to_owned(),
         challenge: challenge.to_owned(),
         sign_count,
+        event_time,
+    }))
+}
+
+/// A `StepUpCoolOffWaived` at schema version 1 (journal spec §9.38) in the control-stream
+/// `envelope` at `seq`, its member read from its actor, mapped whole or not at all.
+///
+/// # Errors
+/// [`CredentialError::Unreadable`] naming the member at fault.
+pub fn waiver(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialError> {
+    let at = |member| CredentialError::Unreadable { seq, member };
+    if envelope.get("schema_version").and_then(Value::as_int) != Some(1) {
+        return Err(at("schema_version"));
+    }
+    let member = envelope
+        .get("actor")
+        .and_then(|a| a.get("id"))
+        .and_then(Value::as_str)
+        .and_then(|id| decode_ulid(id).ok())
+        .map(PrincipalId)
+        .ok_or(at("actor.id"))?;
+    let payload = envelope.get("payload").ok_or(at("payload"))?;
+    let text = |name: &str, path| payload.get(name).and_then(Value::as_str).ok_or(at(path));
+    let challenge = text("challenge", "payload.challenge")?;
+    if decode_ulid(challenge).is_err() {
+        return Err(at("payload.challenge"));
+    }
+    let credential = text("credential", "payload.credential")?;
+    if !credential_id(credential) {
+        return Err(at("payload.credential"));
+    }
+    let cool_off_ends = UtcNanos::parse(text("cool_off_ends", "payload.cool_off_ends")?)
+        .map_err(|_| at("payload.cool_off_ends"))?;
+    let event_time = envelope
+        .get("event_time")
+        .and_then(Value::as_str)
+        .and_then(|t| UtcNanos::parse(t).ok())
+        .ok_or(at("event_time"))?;
+    Ok(CredentialRecord::Waived(Waiver {
+        seq,
+        member,
+        credential: credential.to_owned(),
+        challenge: challenge.to_owned(),
+        cool_off_ends,
+        event_time,
     }))
 }
 
@@ -292,7 +373,7 @@ impl CredentialFold {
     /// holds none.
     ///
     /// # Errors
-    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for `member`.
+    /// [`CredentialError::Broken`] when a record breaks rule 251, 254 or 318 for `member`.
     pub fn passkeys(&self, member: PrincipalId) -> Result<Vec<&Enrolment>, CredentialError> {
         let folded = self.fold();
         if let Some(seq) = folded.broken.get(&member) {
@@ -309,7 +390,7 @@ impl CredentialFold {
     /// 254 carried, else the enrolment's; `None` when it is not held.
     ///
     /// # Errors
-    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for its holder.
+    /// [`CredentialError::Broken`] when a record breaks rule 251, 254 or 318 for its holder.
     pub fn last_count(&self, credential: &str) -> Result<Option<u32>, CredentialError> {
         let folded = self.fold();
         let Some(holder) = folded.holder(credential) else {
@@ -358,15 +439,34 @@ impl CredentialFold {
         }
     }
 
+    /// The `seq` of the first record that breaks stream rule 318 (journal spec §9.38), or `None`:
+    /// a waiver that names a credential its actor does not hold, a `cool_off_ends` other than that
+    /// enrolment's or not after the waiver's `event_time`, or a challenge already waived; or an
+    /// assertion inside its credential's cool-off that the next record does not waive.
+    ///
+    /// # Errors
+    /// None: every record the fold holds has already mapped.
+    pub fn first_waiver_break(&self) -> Result<Option<u64>, CredentialError> {
+        Ok(self.fold().waiver_break)
+    }
+
     /// The records replayed: each credential's history, the members broken and from which `seq`,
     /// the enrolments the records that keep rule 251 leave held, in enrolment order, and each held
     /// credential's last kept counter with the challenges its assertions used.
     fn fold(&self) -> Folded<'_> {
         let mut folded = Folded::default();
         for record in &self.records {
-            if let CredentialRecord::Asserted(assertion) = record {
-                folded.assert(assertion);
-                continue;
+            folded.settle_owed(record);
+            match record {
+                CredentialRecord::Asserted(assertion) => {
+                    folded.assert(assertion);
+                    continue;
+                }
+                CredentialRecord::Waived(waiver) => {
+                    folded.waive(waiver);
+                    continue;
+                }
+                CredentialRecord::Enrolled(_) | CredentialRecord::Removed(_) => {}
             }
             let Some((credential, member)) = record.names() else {
                 continue;
@@ -390,6 +490,9 @@ impl CredentialFold {
                 entry.enroller = matches!(record, CredentialRecord::Enrolled(_)).then_some(member);
             }
         }
+        if let Some(owed) = folded.owed.take() {
+            folded.break_318(owed.member, &owed.credential, owed.seq);
+        }
         folded
     }
 }
@@ -410,6 +513,11 @@ struct Folded<'a> {
     held: Vec<&'a Enrolment>,
     last: BTreeMap<&'a str, u32>,
     challenges: BTreeSet<&'a str>,
+    /// Rule 318: the challenges waived so far, the assertion inside its credential's cool-off the
+    /// very next record must waive, and the `seq` of the first record that broke the rule.
+    waived: BTreeSet<&'a str>,
+    owed: Option<&'a Assertion>,
+    waiver_break: Option<u64>,
 }
 
 impl<'a> Folded<'a> {
@@ -434,9 +542,64 @@ impl<'a> Folded<'a> {
         own && rises && !self.challenges.contains(assertion.challenge.as_str())
     }
 
+    /// The enrolment of `credential` while it is held, among the records that keep rule 251.
+    fn enrolment(&self, credential: &str) -> Option<&'a Enrolment> {
+        self.held
+            .iter()
+            .copied()
+            .find(|e| e.credential == credential)
+    }
+
+    /// Rule 318's converse, before `next` is folded: an owed assertion is settled only by a waiver
+    /// at the very next `seq` naming its challenge; any other next record breaks the rule at the
+    /// assertion.
+    fn settle_owed(&mut self, next: &CredentialRecord) {
+        let Some(owed) = self.owed.take() else {
+            return;
+        };
+        let waives = matches!(next, CredentialRecord::Waived(w)
+            if owed.seq.checked_add(1) == Some(w.seq) && w.challenge == owed.challenge);
+        if !waives {
+            self.break_318(owed.member, &owed.credential, owed.seq);
+        }
+    }
+
+    /// Rule 318 broken at `seq` by `member`'s record naming `credential`: step-up is disabled for
+    /// the member and the credential's holder from the earliest `seq` either is broken at.
+    fn break_318(&mut self, member: PrincipalId, credential: &str, seq: u64) {
+        self.waiver_break = Some(self.waiver_break.map_or(seq, |first| first.min(seq)));
+        let holder = self.holder(credential);
+        for broken in std::iter::once(member).chain(holder) {
+            let first = self.broken.entry(broken).or_insert(seq);
+            *first = (*first).min(seq);
+        }
+    }
+
+    /// Folds one waiver under rule 318: the actor holds the credential, the waiver names that
+    /// enrolment's `cool_off_ends`, which is after the waiver's `event_time`, and no waiver named
+    /// its challenge before; otherwise the rule breaks at the waiver.
+    fn waive(&mut self, waiver: &'a Waiver) {
+        let keeps = self.enrolment(&waiver.credential).is_some_and(|e| {
+            e.member == waiver.member && e.cool_off_ends == Some(waiver.cool_off_ends)
+        }) && waiver.cool_off_ends > waiver.event_time
+            && !self.waived.contains(waiver.challenge.as_str());
+        if !keeps {
+            self.break_318(waiver.member, &waiver.credential, waiver.seq);
+        }
+        self.waived.insert(&waiver.challenge);
+    }
+
     /// Folds one assertion: a kept one raises its credential's last counter and uses its
-    /// challenge; a breaking one disables step-up for its member and the credential's holder.
+    /// challenge; a breaking one disables step-up for its member and the credential's holder. An
+    /// assertion of a held credential inside its cool-off, whichever member made it, is owed a
+    /// waiver by the next record (rule 318's converse).
     fn assert(&mut self, assertion: &'a Assertion) {
+        if self.enrolment(&assertion.credential).is_some_and(|e| {
+            e.cool_off_ends
+                .is_some_and(|ends| ends > assertion.event_time)
+        }) {
+            self.owed = Some(assertion);
+        }
         if self.keeps_rule_254(assertion) {
             self.last
                 .insert(&assertion.credential, assertion.sign_count);
@@ -470,7 +633,7 @@ impl CredentialRecord {
         match self {
             Self::Enrolled(e) => Some((&e.credential, e.member)),
             Self::Removed(r) => Some((&r.credential, r.member)),
-            Self::Asserted(_) => None,
+            Self::Asserted(_) | Self::Waived(_) => None,
         }
     }
 
@@ -480,6 +643,7 @@ impl CredentialRecord {
             Self::Enrolled(e) => e.seq,
             Self::Removed(r) => r.seq,
             Self::Asserted(a) => a.seq,
+            Self::Waived(w) => w.seq,
         }
     }
 }

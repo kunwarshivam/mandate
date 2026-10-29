@@ -16,6 +16,10 @@ its memory until they move to Postgres (item 6).
   the pod's loopback, started and answering before the server starts, since the server fetches
   the stub's key set at its own start and only every five minutes after. Its image can only be a
   local build, and the chart refuses it in any other tier.
+- In a dev or ci cell only, `api.stepUpCoolOffWaiver` sets the API's
+  `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`, which waives a first passkey's enrolment cool-off at
+  step-up and journals each waiver (DEC-2146). The chart refuses it in any other tier, as the API
+  does at its start.
 */ -}}
 {{- define "mandate.stubIssuer" -}}
 {{- $tier := .root.Values.deploymentTier -}}
@@ -82,6 +86,14 @@ its memory until they move to Postgres (item 6).
   value: /run/credentials
 - name: SSL_CERT_FILE
   value: /run/ca-bundle/ca-certificates.crt
+{{- if $a.stepUpCoolOffWaiver }}
+{{- $tier := .root.Values.deploymentTier }}
+{{- if not (has $tier (list "dev" "ci")) }}
+{{- fail (printf "api.stepUpCoolOffWaiver waives a first passkey's cool-off only in a dev or ci cell, and deploymentTier is %q (DEC-2146)" $tier) }}
+{{- end }}
+- name: MANDATE_API_STEP_UP_COOL_OFF_WAIVER
+  value: "true"
+{{- end }}
 {{- if .root.Values.api.vaultBinding }}
 - name: MANDATE_API_VAULT_ADDRESS
   value: {{ include "mandate.vaultAddress" .root | quote }}

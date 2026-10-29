@@ -4,7 +4,7 @@
 mock_provider "digitalocean" {
   mock_data "digitalocean_kubernetes_versions" {
     defaults = {
-      valid_versions = ["1.35.9-do.1"]
+      valid_versions = ["1.35.9-do.2"]
     }
   }
 }
@@ -14,7 +14,7 @@ variables {
   region                     = "nyc3"
   vpc_id                     = "c0ffee00-0000-4000-8000-000000000000"
   node_tag                   = "mandate-staging-nodes"
-  kubernetes_version         = "1.35.9-do.1"
+  kubernetes_version         = "1.35.9-do.2"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = ["203.0.113.7/32"]
 }
@@ -23,7 +23,7 @@ run "cluster_is_pinned_small_and_fenced" {
   command = plan
 
   assert {
-    condition     = digitalocean_kubernetes_cluster.this.version == "1.35.9-do.1"
+    condition     = digitalocean_kubernetes_cluster.this.version == "1.35.9-do.2"
     error_message = "The cluster does not run the pinned version."
   }
 
