@@ -315,6 +315,46 @@ mod tests {
         );
     }
 
+    /// An update or a replacement names the attributes it changes, by name alone, so a diff that
+    /// returns on every plan (staging's cluster `update` of 2026-10-29) shows which field moves; a
+    /// create or a delete, which changes every attribute, names none.
+    #[test]
+    fn an_update_names_the_attributes_it_changes_and_no_value() {
+        let plan = serde_json::json!({
+            "resource_changes": [
+                { "address": "module.cell.module.doks.digitalocean_kubernetes_cluster.this",
+                  "change": { "actions": ["update"],
+                              "before": { "version": "1.35.9-do.1", "name": "mandate-staging",
+                                          "tags": ["a"], "dropped": "gone" },
+                              "after": { "version": "1.35.9-do.2", "name": "mandate-staging",
+                                         "tags": ["a"] },
+                              "after_unknown": { "updated_at": true, "name": false } } },
+                { "address": "module.cloudflare.cloudflare_dns_record.api",
+                  "change": { "actions": ["delete", "create"],
+                              "before": { "content": "old.cfargotunnel.com" },
+                              "after": { "content": "new.cfargotunnel.com" } } },
+                { "address": "module.cloudflare.cloudflare_zero_trust_tunnel_cloudflared.this",
+                  "change": { "actions": ["create"], "after": { "name": "secret-name" } } },
+                { "address": "terraform_data.applied_commit",
+                  "change": { "actions": ["update"], "before": { "input": "x" },
+                              "after": { "input": "x" } } }
+            ]
+        });
+        let summary = plan_summary(&plan);
+        assert_eq!(
+            summary,
+            [
+                "update module.cell.module.doks.digitalocean_kubernetes_cluster.this (changes: dropped, updated_at, version)",
+                "delete+create module.cloudflare.cloudflare_dns_record.api (changes: content)",
+                "create module.cloudflare.cloudflare_zero_trust_tunnel_cloudflared.this",
+                "update terraform_data.applied_commit (changes: none named)",
+            ]
+        );
+        for value in ["1.35.9", "mandate-staging", "cfargotunnel", "secret-name"] {
+            assert!(!summary.join("\n").contains(value), "{value} printed");
+        }
+    }
+
     /// The audit's item 1: the plan summary carries addresses and actions and no value.
     #[test]
     fn the_plan_summary_holds_no_value() {
