@@ -282,6 +282,30 @@ fn step_up_fails_closed_from_the_first_rule_318_break_and_route_two_reads_no_wai
     }
 }
 
+/// Rule 318's converse wants the waiver immediately after its assertion on the stream, the very
+/// next `seq`. A waiver of the same challenge after any other row (here one at `seq` 3 that no
+/// credential record maps) does not settle it: the rule breaks at the assertion, for the member.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_waiver_after_another_row_does_not_settle_its_assertion() {
+    let fold = CredentialFold::new([
+        record(1, Step::Enrol(0, 0, true)),
+        record(2, Step::Assert(0, 0, 0, 0)),
+        record(4, Step::Waive(0, 0, 0, 0, 0)),
+    ]);
+    assert_eq!(fold.first_waiver_break(), Ok(Some(2)));
+    assert_eq!(
+        fold.passkeys(member(0)),
+        Err(CredentialError::Broken { seq: 2 })
+    );
+    let immediate = CredentialFold::new([
+        record(1, Step::Enrol(0, 0, true)),
+        record(2, Step::Assert(0, 0, 0, 0)),
+        record(3, Step::Waive(0, 0, 0, 0, 0)),
+    ]);
+    assert_eq!(immediate.first_waiver_break(), Ok(None));
+}
+
 /// One random step among two members, three credentials and three challenges: an enrolment with
 /// or without a cool-off, a removal, an assertion at one of three instants, or a waiver of one of
 /// two ends at one of three instants.
