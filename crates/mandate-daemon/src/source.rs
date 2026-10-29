@@ -29,7 +29,7 @@ use mandate_time::UtcNanos;
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, FeedItem};
-use crate::runtime::{ContextUnread, ResearchParts, ResearchSource};
+use crate::runtime::{ContextUnread, ResearchParts, ResearchSource, StoredNews};
 
 /// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
 /// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
@@ -443,6 +443,7 @@ impl ResearchSource for CellSource {
                 .collect::<BTreeSet<Symbol>>(),
             events,
             event_triggers,
+            stored: StoredNews::default(),
         })
     }
 }

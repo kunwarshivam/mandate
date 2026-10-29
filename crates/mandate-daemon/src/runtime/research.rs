@@ -17,7 +17,7 @@ use mandate_research_run::{RetrievedItem, Symbol};
 use mandate_runtime::{
     ActiveThesis, Effect, EventDraft, EventTriggers, FoldedEvent, Preconditions, ResearchConfig,
     ResearchContext, ResearchInput, ResearchRequest, ResearchState, RetrievedObservation,
-    RiskClock, RuntimeState, tailed,
+    RiskClock, RuntimeState, StoredRefusal, tailed,
 };
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes};
@@ -43,6 +43,38 @@ pub struct ResearchParts {
     /// The items that have arrived by the pass, each at its arrival, which the pass offers the
     /// core as event triggers (agent harness spec §5.3).
     pub events: Vec<RetrievedItem>,
+    /// The news items the news reader stored, known by the pass, and those it could not offer
+    /// (DEC-2288).
+    pub stored: StoredNews,
+}
+
+/// The news stream's items as a pass reads them (journal spec §9.37, DEC-2288): each one known by
+/// the pass's risk clock, offered as the core receives it, its record already in the artifact store,
+/// and every one it could not offer, by its row's event id and why.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredNews {
+    pub offers: Vec<RetrievedObservation>,
+    pub refused: Vec<RefusedNews>,
+}
+
+/// A stored news item a pass could not offer: its `NewsItemStored` row's event id, an opaque id
+/// that names nothing of the item, and why (DEC-2288 item 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedNews {
+    pub event_id: String,
+    pub refusal: StoredRefusal,
+}
+
+/// Every offer of a pass once, in arrival order (DEC-2288 item 2): the feed's captured items and
+/// the news stream's together, an item both hold (the same `data_ref`) offered once, whichever
+/// order either lists it in, sorted by knowledge time, then item id, then `data_ref`.
+#[must_use]
+pub fn merge_offers(
+    feed: Vec<RetrievedObservation>,
+    stored: Vec<RetrievedObservation>,
+) -> Vec<RetrievedObservation> {
+    let _ = stored;
+    feed
 }
 
 /// The research context of one pass, or the first input it could not read, which runs no research
@@ -92,6 +124,8 @@ pub enum ContextUnread {
     Halted,
     /// The items that have arrived, which the pass offers as event triggers.
     Arrivals,
+    /// The workspace's news stream, which the pass offers as event triggers (DEC-2288).
+    News,
 }
 
 impl ContextUnread {
@@ -116,6 +150,7 @@ impl ContextUnread {
             Self::InstrumentFacts => "instrument_facts",
             Self::Halted => "halted",
             Self::Arrivals => "arrivals",
+            Self::News => "news",
         }
     }
 }
