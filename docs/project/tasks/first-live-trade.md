@@ -345,8 +345,11 @@ download, `inspect`, the preflight and the run read it from the workspace and th
 
 **A. Before the day (laptop prerequisites).**
 
-1. A checkout of `main` at the commit to be run, and `bash .cursor/install.sh` (Rust from
-   `rust-toolchain.toml`, PostgreSQL 18 if the package manager has it).
+1. A checkout of `main` at the commit to be run, Rust from rustup (it reads
+   `rust-toolchain.toml`), and PostgreSQL 18 running locally. On a Mac, skip
+   `.cursor/install.sh`: its tools are x86_64 Linux builds, and R0 needs none of them. Instead run
+   `brew install postgresql@18` and `brew services start postgresql@18`, and put its `bin` on the
+   path: `export PATH="$(brew --prefix postgresql@18)/bin:$PATH"`, for `createdb` and `psql`.
 2. Build both binaries:
 
    ```bash
@@ -377,7 +380,8 @@ download, `inspect`, the preflight and the run read it from the workspace and th
 
 **B. The workspace and its configuration (once).**
 
-1. `mandate workspace open --workspace ws_live --environment live "${J[@]}"` prints `opened ctl:ws_live`.
+1. `mandate workspace open --workspace ws_live --environment live "${J[@]}"` prints `opened
+   ctl:ws_live as event … at seq 1`.
 2. The bars, downloaded on the run day itself so they end on the last completed session. Pick a
    cheap broad ETF priced under about 90 USD a share (DEC-529 item 2) as `<TICKER>`.
 
@@ -496,14 +500,14 @@ download, `inspect`, the preflight and the run read it from the workspace and th
    laptop (DEC-923). In the second terminal:
 
    ```bash
-   mandate approvals list --agent agent_r0 "${O[@]}" "${J[@]}"      # <APPROVAL> pending
+   mandate approvals list --agent agent_r0 "${O[@]}" "${J[@]}"      # <APPROVAL> agent_r0 pending …
    mandate approvals show <APPROVAL> --agent agent_r0 "${O[@]}" "${J[@]}"   # read it; code <CODE>
    mandate approvals approve <APPROVAL> --agent agent_r0 --code <CODE> "${O[@]}" "${J[@]}"
    ```
 
    Read the shown request before approving: one share of `<TICKER>`, a limit at most the cap.
-   Doing nothing skips it at its deadline. The approve answers `Admitted and sent to the
-   executor; the gate still decides.`
+   Doing nothing skips it at its deadline. The approve prints `granted <APPROVAL> as event … at
+   seq … for sha256:…`, then `Admitted and sent to the executor; the gate still decides.`
 4. **Let it finish.** The run places one `place_equity_order` and watches it. Once the entry
    fills, it books the fill and sends B3's protective GTC stop-limit sell of the share, at stop =
    entry stop and limit = stop × (1 − 0.01) (DEC-1151). It prints `submitted <ENTRY>` and
@@ -536,27 +540,27 @@ download, `inspect`, the preflight and the run read it from the workspace and th
 
    Compare them with Robinhood's history. A difference is a finding to record, never to edit.
 4. **The restart sends nothing.** `MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> "${RUN[@]}"
-   --place-one-order` is refused before any place call. Expect `the account the connection binds
-   is not flat` (DEC-470 item 1), whether the share is still held or the stop has sold it. The
-   record is spent either way (DEC-910 item 3), but the lapse checks flatness first, and until R23
-   is decided it counts a sold-out position that Robinhood still lists as a zero row. Only if
-   Robinhood lists no row after a sale is the refusal `the connection record is spent`. Either
-   refusal passes; both send nothing.
+   --place-one-order` is refused before any place call. While the share is held, expect `the
+   account the connection binds is not flat` (DEC-470 item 1). Once the stop or a manual sale has
+   sold it, expect `the connection record is spent` (DEC-910 item 3): a sold-out position's row
+   of quantity zero counts as flat ([DEC-2390](../decisions/DEC-2390.md) item 1, which decided
+   R23). Either refusal passes; both send nothing.
 5. Record the evidence (no account number) in R0's docs PR.
 
 **G. While the share is held, and the kill switch.**
 
 - The stop rests at Robinhood with no process running. Its GTC expiry is not published, so check
   it in the app periodically, and re-place it by hand if it lapsed (DEC-529 item 7).
-- **Kill switch.** The shipping CLI has no `mandate agent kill`, `stop` or `exit`. They are in the
-  library, but no command reaches them (DEC-1152, not closed). So the kill switch for R0 is the
-  broker's:
+- **Kill switch.** The CLI now has `mandate agent pause`, `kill`, `stop` and `exit`, but each
+  only commits the owner's command to the journal, which a running stream owner applies. After
+  R0's run exits nothing runs, so they reach nothing at Robinhood, and the kill switch for R0 is
+  the broker's:
   1. press Ctrl-C in the run terminal; the run sends nothing after it stops;
   2. in the Robinhood app, cancel the open order and, to flatten, sell the share;
   3. remove the MCP connection's access in Robinhood's settings.
-- After a stop fill or a manual sale, the platform cannot book the sale: Robinhood publishes no
-  sale price (DEC-1152). Do not run the agent again on this record. If it is run, it is refused
-  before any place call, as `not flat` until R23 is decided (F.4). A second entry needs a fresh
+- After a stop fill or a manual sale, R0's journal does not record the sale: no process runs to
+  read it. Do not run the agent again on this record. If it is run, it is refused before any
+  place call, as `the connection record is spent` (F.4). A second entry needs a fresh
   connect check, connection record, version and deployment (DEC-529 item 13, DEC-910 item 3).
 
 ## Decisions
