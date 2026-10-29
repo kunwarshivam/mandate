@@ -152,6 +152,11 @@ function problem(status: number, code: string, effect: "none" | "recorded", retr
   return respond(status, { type: "about:blank", status, title: "Request refused", code, effect, event_id: null, retryable }, "application/problem+json");
 }
 
+/** A 422 `invalid` naming the one member it refuses, as `violations[].path` does (§3.5). */
+function invalidAt(path: string, code: string): Response {
+  return respond(422, { type: "about:blank", status: 422, title: "Request refused", code: "invalid", effect: "none", event_id: null, retryable: false, violations: [{ path, code, message: "refused" }] }, "application/problem+json");
+}
+
 /** `read-models/health.schema.json`: each component's state and freshness, aged against `servedAt`. An `ok` component is never stale; every fixture feed carries its time. */
 function healthBody(health: Health, servedAt: string) {
   const component = (name: keyof Health) => {
@@ -659,6 +664,13 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const refused = judgePasskey(members.step_up, members.step_up_assertion, "deploy", deployStepUpDigest(agent, version as `sha256:${string}`));
       if (refused) return problem(refused.status, refused.code, "none");
       deployedAgents.set(agent, version);
+    }
+    if (match.operation === "ask_agent" && !repeated) {
+      const agent = agentOf(decodeURIComponent(route.split("/")[2] ?? ""));
+      if (!agent || agent.mode === "stopped") return problem(404, "not_found", "none");
+      const size = typeof members.size === "string" ? members.size : null;
+      if (size === null || !/^(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/.test(size) || /^0(\.0*)?$/.test(size)) return invalidAt("/size", "not_positive");
+      if (!agent.mandate.universe.pinned_instruments.some((i) => i.asset_id === members.instrument)) return invalidAt("/instrument", "not_pinned");
     }
     if (match.operation === "create_version" && (typeof members.environment !== "string" || members.environment === "live")) return problem(422, "invalid", "none");
     const path = prefix + route;
