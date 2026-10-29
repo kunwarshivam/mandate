@@ -151,6 +151,13 @@ const DATA_PACKAGE: &str = "mandate-datad";
 const MODEL_GATEWAY_DOCKERFILE: &str = "deploy/cell/images/model-gateway.Dockerfile";
 const MODEL_GATEWAY_PROCESS: &str = "model-gateway";
 const MODEL_GATEWAY_PACKAGE: &str = "mandate-gatewayd";
+/// The workspace news reader's image (E2-10c, DEC-2085): the news stream's single writer, running
+/// in the cell on the recorded news it carries and a fixture key, reaching no vault and no host.
+const NEWS_READER_DOCKERFILE: &str = "deploy/cell/images/news-reader.Dockerfile";
+const NEWS_READER_PROCESS: &str = "news-reader";
+const NEWS_READER_PACKAGE: &str = "mandate-news-reader";
+/// The cell's recorded news, which the news reader's image carries under `news/`.
+const NEWS_RECORDING: &str = "deploy/cell/news-reader/recorded-news.json";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -744,7 +751,7 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 12] = [
+const BUILT_PACKAGES: [&str; 13] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
@@ -757,6 +764,7 @@ const BUILT_PACKAGES: [&str; 12] = [
     DATA_PACKAGE,
     DISPATCHER_PACKAGE,
     MODEL_GATEWAY_PACKAGE,
+    NEWS_READER_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -769,7 +777,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 13] = [
+pub const IMAGE_PACKAGES: [&str; 14] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -782,6 +790,7 @@ pub const IMAGE_PACKAGES: [&str; 13] = [
     BUILT_PACKAGES[9],
     BUILT_PACKAGES[10],
     BUILT_PACKAGES[11],
+    BUILT_PACKAGES[12],
     STUB_PACKAGE,
 ];
 
@@ -1011,6 +1020,21 @@ fn model_gateway_image() -> Result<Option<String>> {
     local_tag_with(MODEL_GATEWAY_PROCESS, &[MODEL_GATEWAY_PACKAGE], &files).map(Some)
 }
 
+/// The cell's `news-reader` image (E2-10c, DEC-2085): this checkout's `mandate-news-reader`, with
+/// the cell's recorded news beside it. `None` where the `mandate` image is pulled, as for the API
+/// server, whose pod lays out the artifact store the reader writes.
+fn news_reader_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag_with(
+        NEWS_READER_PROCESS,
+        &[NEWS_READER_PACKAGE],
+        &[NEWS_RECORDING.to_owned()],
+    )
+    .map(Some)
+}
+
 /// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
 /// `mandate` image is pulled, as for the runtime, which reads what it stores.
 fn data_image() -> Result<Option<String>> {
@@ -1110,11 +1134,15 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(gateway) = model_gateway_image()? {
         sets.push(format!("images.{MODEL_GATEWAY_PROCESS}={gateway}"));
     }
+    if let Some(reader) = news_reader_image()? {
+        sets.push(format!("images.{NEWS_READER_PROCESS}={reader}"));
+    }
     Ok(sets)
 }
 
 /// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`,
-/// `dispatcher`, `data`, `model-gateway`, `deploy-manager` and `role-provisioner` images from this
+/// `dispatcher`, `data`, `model-gateway`, `news-reader`, `deploy-manager` and `role-provisioner`
+/// images from this
 /// checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
@@ -1134,6 +1162,7 @@ pub fn up() -> Result<()> {
     let dispatcher = dispatcher_image()?;
     let data = data_image()?;
     let gateway = model_gateway_image()?;
+    let reader = news_reader_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -1171,6 +1200,14 @@ pub fn up() -> Result<()> {
             MODEL_GATEWAY_DOCKERFILE,
             MODEL_GATEWAY_PACKAGE,
             &files,
+        )?;
+    }
+    if let Some(reader) = &reader {
+        build_image(
+            reader,
+            NEWS_READER_DOCKERFILE,
+            NEWS_READER_PACKAGE,
+            &[(NEWS_RECORDING, "news/recorded-news.json")],
         )?;
     }
     if let Some(stub) = &stub {
@@ -1220,6 +1257,7 @@ pub fn up() -> Result<()> {
         manager.as_ref(),
         provisioner.as_ref(),
         gateway.as_ref(),
+        reader.as_ref(),
     ]
     .into_iter()
     .flatten()
@@ -3091,7 +3129,10 @@ pub fn setup(workspace: &str) -> Result<()> {
     Ok(())
 }
 
-/// Opens a fresh control stream with the CLI in the cell, then exports and verifies it.
+/// Opens a fresh control stream with the CLI in the cell, then exports and verifies it; then, where
+/// the cell runs the news reader, checks that it holds its stream and that its role writes no
+/// other ([`news_reader_writes_only_news`]), after the verify, so a seeded run still breaks on the
+/// tampered segment alone.
 fn journal(seeded: bool) -> Result<Verdict> {
     let id = run_id()?;
     let stream_workspace = format!("drill{id}");
@@ -3132,7 +3173,90 @@ fn journal(seeded: bool) -> Result<Verdict> {
             "the exported control stream did not verify:\n{logs}"
         )));
     }
+    if let Some(broken) = news_reader_writes_only_news(&id)? {
+        return Ok(Verdict::Broken(broken));
+    }
     Ok(Verdict::Held)
+}
+
+/// What is wrong with the cell's news reader (E2-10c, DEC-2085), or `None`. Where `cell up` built
+/// its image, the reader runs on its recording and holds the hosted workspace's news stream: its
+/// head is there, at an epoch it took. And the hot store refuses its role every other stream
+/// (migration 0002): a session authorized as `mandate_news_reader` that writes a control stream's
+/// head is refused `insufficient_privilege` (42501) with 0002's message, and nothing is written,
+/// read back as the superuser. Nothing is written outside the probe's own stream, `ctl:newsdrill<id>`.
+fn news_reader_writes_only_news(id: &str) -> Result<Option<String>> {
+    if news_reader_image()?.is_none() {
+        return Ok(None);
+    }
+    kubectl(&[
+        "rollout",
+        "status",
+        &format!("deployment/{NEWS_READER_PROCESS}"),
+        "--namespace",
+        NAMESPACE,
+        "--timeout=120s",
+    ])
+    .context("waiting for the news reader to run on its recording")?;
+    let epoch = on_primary(&format!(
+        "SELECT writer_epoch FROM journal.stream_heads WHERE stream_id = 'news:{DEMO_WORKSPACE}'"
+    ))?;
+    if epoch.parse::<u64>().map_or(true, |epoch| epoch == 0) {
+        return Ok(Some(format!(
+            "the news reader holds no epoch on news:{DEMO_WORKSPACE}: {epoch:?}"
+        )));
+    }
+    let probe = format!("ctl:newsdrill{id}");
+    let refused = refusal_on_primary(&format!(
+        "SET SESSION AUTHORIZATION mandate_news_reader; \
+         INSERT INTO journal.stream_heads (stream_id, seq, hash, writer_epoch) \
+         VALUES ('{probe}', 0, decode(repeat('00', 32), 'hex'), 1)"
+    ))?;
+    let Some(refusal) = refused else {
+        return Ok(Some(format!(
+            "the news reader's role wrote {probe}'s head: migration 0002 did not refuse it"
+        )));
+    };
+    if !(refusal.contains("42501") && refusal.contains("writes only news streams")) {
+        return Ok(Some(format!(
+            "the news reader's write to {probe} was refused, but not by migration 0002: {refusal}"
+        )));
+    }
+    let written = on_primary(&format!(
+        "SELECT count(*) FROM journal.stream_heads WHERE stream_id = '{probe}'"
+    ))?;
+    if written != "0" {
+        return Ok(Some(format!(
+            "the news reader's refused write to {probe} left {written} heads"
+        )));
+    }
+    Ok(None)
+}
+
+/// `sql` run as [`on_primary`] runs it, with psql's verbose errors, so a refusal names its
+/// SQLSTATE: the refusal's text, or `None` when it ran.
+fn refusal_on_primary(sql: &str) -> Result<Option<String>> {
+    let primary = journal_pod("primary")?;
+    let ran = kubectl(&[
+        "exec",
+        "--namespace",
+        NAMESPACE,
+        &primary,
+        "-c",
+        "postgres",
+        "--",
+        "psql",
+        "-X",
+        "-v",
+        "VERBOSITY=verbose",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-d",
+        "mandate",
+        "-tAc",
+        sql,
+    ]);
+    Ok(ran.err().map(|refused| format!("{refused:#}")))
 }
 
 /// Adds an init container after the exports that changes the first hex digit of the first event's
@@ -6791,6 +6915,39 @@ mod tests {
             demo_research()
                 .iter()
                 .any(|(_, name)| name == "research/research.json")
+        );
+        Ok(())
+    }
+
+    /// The news reader's image (E2-10c, DEC-2085): built with the cell's others and followed by the
+    /// cell jobs, its Dockerfile copies exactly that binary and the cell's recording on an empty
+    /// base as non-root, and the local cell's values run it on that recording.
+    #[test]
+    fn the_cell_builds_the_news_readers_image_over_the_recording() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&NEWS_READER_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&NEWS_READER_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(NEWS_READER_DOCKERFILE))?;
+        for line in [
+            "FROM scratch",
+            "COPY mandate-news-reader /mandate-news-reader",
+            "COPY news/ /usr/local/share/mandate/news/",
+            "USER 65532:65532",
+        ] {
+            assert!(dockerfile.contains(line), "{line}: {dockerfile}");
+        }
+        assert!(root.join(NEWS_RECORDING).is_file());
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == NEWS_READER_PROCESS)
+            .context("processes.json has no news reader")?;
+        assert_eq!(process["image"], NEWS_READER_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-news-reader");
+        let values = fs::read_to_string(root.join(WORKSPACE_VALUES))?;
+        assert!(
+            values.contains("news:\n  recorded: true"),
+            "the local cell runs the reader on its recording"
         );
         Ok(())
     }

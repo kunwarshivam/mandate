@@ -46,9 +46,15 @@ spec:
     {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "bars-reader") }}
     {{- end }}
     {{- if eq .p.name "news-reader" }}
+    {{- $allowlist := "- {name: news-reader-allowlist, configMap: {name: news-reader-allowlist, defaultMode: 292, items: [{key: allowlist.toml, path: allowlist.toml}]}}" }}
+    {{- if .root.Values.news.recorded }}
+    {{- $_ := set $launch "mounts" "- {name: news-reader-allowlist, mountPath: /etc/mandate/news, readOnly: true}" }}
+    {{- $volumes = $allowlist }}
+    {{- else }}
     {{- $_ := set $launch "mounts" "- {name: news-reader-allowlist, mountPath: /etc/mandate/news, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
-    {{- $volumes = printf "- {name: news-reader-allowlist, configMap: {name: news-reader-allowlist, defaultMode: 292, items: [{key: allowlist.toml, path: allowlist.toml}]}}\n%s" (include "mandate.vaultVolumes" (dict "root" .root "role" "news-reader")) }}
+    {{- $volumes = printf "%s\n%s" $allowlist (include "mandate.vaultVolumes" (dict "root" .root "role" "news-reader")) }}
     {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "news-reader") }}
+    {{- end }}
     {{- end }}
     {{- if and (eq .p.name "model-gateway") .root.Values.modelGateway.registry }}
     {{- $_ := set $launch "mounts" "- {name: model-gateway-registry, mountPath: /run/mandate/model-gateway, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}

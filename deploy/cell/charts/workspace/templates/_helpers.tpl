@@ -22,7 +22,8 @@ hosted workspace's control stream as its own journal role and Postgres, logs in 
 `bars-reader`, and reaches its data host; with `recorded` it holds no journal role, since it reads
 no stream. The news reader's launch gains `--user-agent news.userAgent` and one `--follow
 <agent>=<account>` for each of `news.follows`, the agents whose theses and holdings it polls
-(DEC-2281 item 1, DEC-2084 item 5). */ -}}
+(DEC-2281 item 1, DEC-2084 item 5). With `news.recorded` it runs on the recording its image
+carries in place of the vault's flags, and reaches Postgres alone (DEC-2085). */ -}}
 {{- define "mandate.processes" -}}
 {{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
 {{- $out := list -}}
@@ -39,6 +40,10 @@ no stream. The news reader's launch gains `--user-agent news.userAgent` and one 
 {{- end -}}
 {{- end -}}
 {{- if eq .name "news-reader" -}}
+{{- if $.Values.news.recorded -}}
+{{- $_ := set . "args" (list "run" "--workspace" "{hosted_workspace}" "--allowlist" "/etc/mandate/news/allowlist.toml" "--artifacts" "/var/lib/mandate/artifacts" "--recorded" "/usr/local/share/mandate/news/recorded-news.json" "--probe" "/tmp/process.sock") -}}
+{{- $_ := set . "egress" (list "postgres") -}}
+{{- end -}}
 {{- $words := list "--user-agent" $.Values.news.userAgent -}}
 {{- range $.Values.news.follows -}}
 {{- $words = concat $words (list "--follow" (printf "%s=%s" .agent .account)) -}}
@@ -416,12 +421,17 @@ managed paper workspaces (DEC-2283). */}}
 {{- end }}
 {{- end }}
 {{- /* The news reader (DEC-2084 items 2 and 5): staging's alone, since its key is the platform's
-paper news data key (DEC-2277), never a local cell, where with no key it is never ready; paper
+paper news data key (DEC-2277), never a local cell, where with no key it is never ready, but with
+`news.recorded`, which only the local cell may name, at dev or ci, on its recording (DEC-2085); paper
 only, as its binary is; beside the API server, whose pod lays out the artifact store it writes;
 and with at least one followed agent, without which it refuses `no_follows` and is never
 ready. */}}
 {{- if eq .p.name "news-reader" }}
-{{- if or .root.Values.localImages (ne .root.Values.deploymentTier "staging") }}
+{{- if .root.Values.news.recorded }}
+{{- if not (and .root.Values.localImages (has .root.Values.deploymentTier (list "dev" "ci"))) }}
+{{- fail (printf "news.recorded runs the news reader on its recording in the local cell alone, at dev or ci, and localImages is %v and deploymentTier %q (DEC-2085)" .root.Values.localImages .root.Values.deploymentTier) }}
+{{- end }}
+{{- else if or .root.Values.localImages (ne .root.Values.deploymentTier "staging") }}
 {{- fail (printf "images.news-reader runs the news reader in staging alone, and deploymentTier is %q: its key is the platform's paper news data key (DEC-2277, DEC-2084)" .root.Values.deploymentTier) }}
 {{- end }}
 {{- if ne .root.Values.environment "paper" }}

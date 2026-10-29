@@ -98,12 +98,15 @@ data:
   # (DEC-2283), staging's alone, which lists no instrument.
   source: recorded
 
-# The news reader (E2-10, DEC-2084), rendered only with images.news-reader, in staging alone. Each
-# followed agent is `{agent, account}`: an agent whose theses and holdings it polls, and the broker
-# account its executor trades (DEC-2281). They are owner choices, so only the founder's overlay
-# names them, and the chart refuses an empty list, with which the reader is never ready. The user
-# agent is the contact the vendor sees, never a secret.
+# The news reader (E2-10, DEC-2084), rendered only with images.news-reader, in staging alone, or
+# with `recorded` in the local cell alone, on the recording its image carries and a fixture key,
+# reaching no vault and no host (DEC-2085). Each followed agent is `{agent, account}`: an agent
+# whose theses and holdings it polls, and the broker account its executor trades (DEC-2281). They
+# are owner choices, so only the founder's overlay names them in a hosted cell, and the chart
+# refuses an empty list, with which the reader is never ready. The user agent is the contact the
+# vendor sees, never a secret.
 news:
+  recorded: false
   follows: []
   userAgent: "Mandate news reader ops@owlhead.ai"
 

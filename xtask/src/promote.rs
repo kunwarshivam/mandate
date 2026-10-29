@@ -308,7 +308,7 @@ mod tests {
         (
             "mandate-news-reader",
             "news-reader",
-            "news.follows in staging's overlay, platform/news-data-key and vault-approle-news-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M), and the cell's run of the reader against a recorded news fixture (E2-10c): the chart refuses the reader without followed agents, without its key it is never ready and holds the whole workspace release unready, and without the cell's run staging would be the first real run of the chart and the binary together, so it is promoted in the change after all three (DEC-2084 item 8)",
+            "news.follows in staging's overlay, platform/news-data-key and vault-approle-news-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M), and E2-10c's stored-once link green, the demo scenario's proof in the cell that each recorded item about a followed agent's thesis is journaled once: the chart refuses the reader without followed agents, without its key it is never ready and holds the whole workspace release unready, and without that link staging would be the first run that stores news, so it is promoted in the change after all three (DEC-2084 item 8, DEC-2085 item 6)",
         ),
     ];
 

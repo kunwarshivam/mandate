@@ -37,6 +37,14 @@ data:
     - symbol: QQQ
       assetId: eb82ffb0-efd6-4f4e-9307-8fead28e04f6
       anchor: 2026-10-23=140
+# The news reader, when `cargo xtask cell up` names its image: on the recording its image carries
+# and the fixture key, reaching no vault and no host (DEC-2085), following the demo's research
+# agent, whose account the demo scenario names per run.
+news:
+  recorded: true
+  follows:
+    - agent: demo-research
+      account: 01KDER0000000000000000000A
 # The notification dispatcher, when `cargo xtask cell up` names its image, which also sets its
 # binary's digest as `dispatcher.build`: the demo owner as its one email recipient, mailed only
 # through the recorded transport, which sends nothing (DEC-2516).

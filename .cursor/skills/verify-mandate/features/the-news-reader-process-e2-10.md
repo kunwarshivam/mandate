@@ -26,7 +26,9 @@
   it as `news-reader` in staging alone (DEC-2084): with `images.news-reader` and `news.follows`,
   as `mandate_news_reader`, with its AppRole copied into its vault directory, the allowlist v3
   ConfigMap `news-reader-allowlist`, the artifact store read-write, and egress to Postgres, the
-  vault and `data.alpaca.markets` alone; release ships it and promotion holds it. The parsed news item keeps the vendor's
+  vault and `data.alpaca.markets` alone; release ships it and promotion holds it; with `news.recorded`, in the local cell alone, it runs on
+  the recording its `news-reader` image carries (DEC-2085), and the `journal` drill checks it holds
+  its stream and that its role's write to a control stream is refused. The parsed news item keeps the vendor's
   tickers in `mandate-sources`' `Draft`.
 - **Tests:** `crates/mandate-news-reader/tests/key.rs` (the vault's answer decides the key or why
   there is none; no byte of the key in any refusal, error or `Debug` output;

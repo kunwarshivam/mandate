@@ -1107,6 +1107,7 @@ def test_staging_stores_iex_bars_as_bars_reader_and_its_own_journal_role():
 # names once its key is in the vault.
 NEWS = (
     "--set", f"images.news-reader={PLACEHOLDER.format('news-reader')}",
+    "--set", "news.recorded=false",
     "--set", "news.follows[0].agent=agent_a",
     "--set", "news.follows[0].account=acct_1",
 )
@@ -1195,6 +1196,7 @@ def test_the_news_reader_renders_in_staging_alone_on_paper_and_with_a_followed_a
         "--set", "deploymentTier=staging", "--set", "api.workspace=01KDEM0000000000000000000W",
         "--set", f"images.api={PLACEHOLDER.format('api')}",
         "--set", f"images.news-reader={PLACEHOLDER.format('news-reader')}",
+        "--set", "news.recorded=false", "--set-json", "news.follows=[]",
     )
     assert "news.follows, the agents the news reader follows, is required" in unfollowed.stderr, unfollowed.stderr
     backtest = reader_alone("--set", "environment=backtest")
