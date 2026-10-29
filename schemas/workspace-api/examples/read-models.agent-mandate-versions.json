@@ -1,0 +1,59 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-28T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-28T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acct_paper_1",
+      "seq": 88,
+      "hash": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "recorded_at": "2026-10-28T14:29:00.000000000Z"
+    }
+  ],
+  "agent_id": "agt_demo_spy",
+  "account_ref": "acct_paper_1",
+  "in_effect": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+  "stopped_at": null,
+  "versions": [
+    {
+      "mandate_version": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+      "base_version": null,
+      "classification": "first_version",
+      "created_at": "2026-10-20T09:00:00.000000000Z",
+      "confirmed_at": "2026-10-20T09:05:00.000000000Z",
+      "confirmation_id": "01JB3K6F0C9R2V7N4M8Q1T5W40",
+      "deployed_at": "2026-10-20T09:10:00.000000000Z",
+      "application": null
+    },
+    {
+      "mandate_version": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+      "base_version": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+      "classification": "risk_reducing",
+      "created_at": "2026-10-22T10:00:00.000000000Z",
+      "confirmed_at": "2026-10-22T10:05:00.000000000Z",
+      "confirmation_id": "01JB3K6F0C9R2V7N4M8Q1T5W41",
+      "deployed_at": null,
+      "application": {
+        "result": "applied",
+        "reason": null,
+        "recorded_at": "2026-10-22T10:05:03.000000000Z"
+      }
+    },
+    {
+      "mandate_version": "sha256:3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+      "base_version": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+      "classification": "risk_increasing",
+      "created_at": "2026-10-27T11:00:00.000000000Z",
+      "confirmed_at": "2026-10-27T11:05:00.000000000Z",
+      "confirmation_id": "01JB3K6F0C9R2V7N4M8Q1T5W42",
+      "deployed_at": null,
+      "application": null
+    }
+  ]
+}

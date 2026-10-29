@@ -1314,6 +1314,39 @@ fn the_news_reader_role_writes_only_news_streams() {
     });
 }
 
+/// The `events` table's own trigger refuses the news reader, not only `event_ids`'s: with the
+/// application role holding the id of a stream that is not news, the news reader's row in `events`
+/// alone is refused with migration 0002's refusal, and nothing is written (R1 on #2896).
+#[test]
+fn the_news_reader_s_event_row_alone_is_refused_outside_news() {
+    let Some(db) = TestDb::new() else { return };
+    news_role(&db);
+    let news = db.pool_as(Some(NEWS_ROLE));
+    db.block_on(async {
+        run(
+            &db.app,
+            "INSERT INTO event_ids (event_id, stream_id, seq) VALUES ('agent-z1', 'agent:ws_1:z', 1)",
+        )
+        .await
+        .unwrap();
+        let event = format!(
+            "INSERT INTO events (stream_id, seq, event_id, event_type, schema_version, environment,
+                                 recorded_at, prev_hash, hash, body)
+             VALUES ('agent:ws_1:z', 1, 'agent-z1', 'StreamOpened', 1, 'paper', 't', {ZERO},
+                     sha256('{{}}'::bytea), '{{}}'::bytea)"
+        );
+        let (code, message) = refusal(run(&news, &event).await);
+        assert_eq!(code, INSUFFICIENT_PRIVILEGE, "{message}");
+        assert!(message.contains(NEWS_REFUSAL), "{message}");
+        let rows: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM events WHERE stream_id = 'agent:ws_1:z'")
+                .fetch_one(&db.admin)
+                .await
+                .unwrap();
+        assert_eq!(rows, 0, "the refused event was not written");
+    });
+}
+
 /// Logged in as the news reader, a SET ROLE to the application role does not lift the refusal:
 /// the session's user is still the news reader's.
 #[test]

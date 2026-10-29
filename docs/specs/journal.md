@@ -7706,6 +7706,10 @@ tier, a configuration DEC-2146 item 2 refuses everywhere but there.
   `cool_off_ends` exactly, which needs no waiver, and a second enrolment, whose `cool_off_ends` is
   `null`.
 
+§9.32's `step_up_assertions` streams judge rule 254 alone, so each is a valid journal for every
+other rule. Their assertions are made at or after their credential's `cool_off_ends` and need no
+waiver, which the generator checks for every one of them.
+
 ## 10. Anchoring
 
 - **Frequency:** every 5 minutes (configurable) and at each end of day.
