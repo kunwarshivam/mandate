@@ -643,7 +643,8 @@ windows with current status data; otherwise the exit price ladder in §5.6) → 
   - **The certain part,** `k-<switch>-<n>`, has the sub-ledger as its quantity. Each send of it
     sells at most the lower of the sub-ledger less every live non-protective sell the switch
     reaches, and the long position less every live non-protective sell in the instrument and every
-    `Unknown` protective sell; neither counts its own order. It is raised, gated and sent without
+    `Unknown` protective sell; neither counts its own order, and the gate judges the send so
+    capped (§5.3 rule 4). It is raised, gated and sent without
     waiting on any `Unknown` order: not for the close (DEC-485 item 2), not at §5.3 rule 9, not for
     an `Unknown` opening (§5.3 rule 5), and not for an `Unknown` protective order in §5.4's
     sequence. It still waits for a `Submitting` order and for the cancels of confirmed orders.
