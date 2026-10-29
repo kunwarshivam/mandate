@@ -80761,7 +80761,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80785,7 +80785,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80842,7 +80842,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80866,7 +80866,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80923,7 +80923,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -80980,7 +80980,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81039,7 +81039,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81063,7 +81063,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81122,7 +81122,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81181,7 +81181,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81265,7 +81265,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81324,7 +81324,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81348,7 +81348,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81379,7 +81379,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81439,7 +81439,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81463,7 +81463,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81521,7 +81521,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81545,7 +81545,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81603,7 +81603,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81661,7 +81661,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81721,7 +81721,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81745,7 +81745,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81805,7 +81805,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81865,7 +81865,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -81950,7 +81950,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82010,7 +82010,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82034,7 +82034,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82125,7 +82125,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82149,7 +82149,7 @@ step_up_assertions:
       stream_id: ctl:ws_01J8Z2
       event_type: StepUpAsserted
       schema_version: 1
-      event_time: '2026-10-19T15:00:05.250000000Z'
+      event_time: '2026-10-20T15:00:05.250000000Z'
       clock_source: local
       causation_id: 01JAA3P4A000000000000000E2
       correlation_id: null
@@ -82257,18 +82257,8 @@ cool_off_waivers:
       outcome: Invalid
       reason: non_canonical
       path: payload.cool_off_ends
-  - name: tier.staging
-    clause: '§9.38 `tier`: `dev` or `ci` only'
-    base_draft: cool_off_waived
-    changes:
-    - path: payload.tier
-      value: staging
-    expect:
-      outcome: Invalid
-      reason: non_canonical
-      path: payload.tier
   - name: tier.production
-    clause: '§9.38 `tier`: `dev` or `ci` only'
+    clause: '§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)'
     base_draft: cool_off_waived
     changes:
     - path: payload.tier
@@ -82278,11 +82268,21 @@ cool_off_waivers:
       reason: non_canonical
       path: payload.tier
   - name: tier.capitalised
-    clause: '§9.38 `tier`: `dev` or `ci` only'
+    clause: '§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)'
     base_draft: cool_off_waived
     changes:
     - path: payload.tier
       value: CI
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.tier
+  - name: tier.staging_capitalised
+    clause: '§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: Staging
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -82404,6 +82404,14 @@ cool_off_waivers:
     changes:
     - path: payload.tier
       value: dev
+    expect:
+      outcome: Valid
+  - name: in_a_staging_cell
+    clause: '§9.38 `tier`: `staging`, before its expiry (DEC-2150)'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: staging
     expect:
       outcome: Valid
   - name: another_credential
@@ -98320,6 +98328,14 @@ account_activity:
       value: unprotected_interval_limit
     expect:
       outcome: Valid
+  - name: abandoned_flatten_covered
+    clause: '§9.5: each reason'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: flatten_covered
+    expect:
+      outcome: Valid
   - name: abandoned_w_intent
     clause: '§9.5: the executor''s own exit''s intent is an `id`'
     base_draft: abandoned
@@ -101485,7 +101501,7 @@ news_stream:
       pii_refs: []
   fuzz_seed: 2278
 exit_intents:
-  spec: docs/specs/journal.md v0.108 §9.1's `intent` type (DEC-2845)
+  spec: docs/specs/journal.md v0.114 §9.1's `intent` type (DEC-2845, DEC-2857)
   drafts:
     received_v1:
       envelope_version: 1
@@ -101763,7 +101779,7 @@ exit_intents:
       pii_refs: []
   invalid_drafts:
   - name: received_v1_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101773,7 +101789,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101783,7 +101799,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101793,7 +101809,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101803,7 +101819,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101813,7 +101829,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101823,7 +101839,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101833,7 +101849,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101843,7 +101859,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101853,7 +101869,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101863,7 +101879,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101873,7 +101889,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101883,7 +101899,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101893,7 +101909,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101903,7 +101919,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101913,7 +101929,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101923,7 +101939,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101933,7 +101949,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101943,7 +101959,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101953,7 +101969,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101963,7 +101979,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101973,7 +101989,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101983,7 +101999,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -101995,7 +102011,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v1_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v1
     changes:
     - path: payload.intent_id
@@ -102004,8 +102020,88 @@ exit_intents:
       outcome: Invalid
       reason: non_canonical
       path: payload.intent_id
+  - name: received_v1_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v1_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
   - name: received_v2_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102015,7 +102111,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102025,7 +102121,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102035,7 +102131,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102045,7 +102141,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102055,7 +102151,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102065,7 +102161,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102075,7 +102171,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102085,7 +102181,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102095,7 +102191,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102105,7 +102201,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102115,7 +102211,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102125,7 +102221,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102135,7 +102231,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102145,7 +102241,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102155,7 +102251,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102165,7 +102261,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102175,7 +102271,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102185,7 +102281,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102195,7 +102291,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102205,7 +102301,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102215,7 +102311,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102225,7 +102321,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102237,7 +102333,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: received_v2_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: received_v2
     changes:
     - path: payload.intent_id
@@ -102246,8 +102342,88 @@ exit_intents:
       outcome: Invalid
       reason: non_canonical
       path: payload.intent_id
+  - name: received_v2_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: received_v2_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
   - name: gate_v1_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102257,7 +102433,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102267,7 +102443,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102277,7 +102453,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102287,7 +102463,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102297,7 +102473,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102307,7 +102483,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102317,7 +102493,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102327,7 +102503,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102337,7 +102513,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102347,7 +102523,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102357,7 +102533,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102367,7 +102543,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102377,7 +102553,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102387,7 +102563,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102397,7 +102573,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102407,7 +102583,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102417,7 +102593,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102427,7 +102603,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102437,7 +102613,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102447,7 +102623,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102457,7 +102633,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102467,7 +102643,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102479,7 +102655,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v1_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v1
     changes:
     - path: payload.intent_id
@@ -102488,8 +102664,88 @@ exit_intents:
       outcome: Invalid
       reason: non_canonical
       path: payload.intent_id
+  - name: gate_v1_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v1_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
   - name: gate_v2_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102499,7 +102755,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102509,7 +102765,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102519,7 +102775,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102529,7 +102785,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102539,7 +102795,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102549,7 +102805,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102559,7 +102815,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102569,7 +102825,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102579,7 +102835,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102589,7 +102845,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102599,7 +102855,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102609,7 +102865,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102619,7 +102875,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102629,7 +102885,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102639,7 +102895,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102649,7 +102905,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102659,7 +102915,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102669,7 +102925,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102679,7 +102935,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102689,7 +102945,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102699,7 +102955,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102709,7 +102965,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102721,7 +102977,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: gate_v2_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: gate_v2
     changes:
     - path: payload.intent_id
@@ -102730,8 +102986,88 @@ exit_intents:
       outcome: Invalid
       reason: non_canonical
       path: payload.intent_id
+  - name: gate_v2_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: gate_v2_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
   - name: request_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102741,7 +103077,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102751,7 +103087,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102761,7 +103097,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102771,7 +103107,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102781,7 +103117,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102791,7 +103127,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102801,7 +103137,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102811,7 +103147,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102821,7 +103157,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102831,7 +103167,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102841,7 +103177,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102851,7 +103187,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102861,7 +103197,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102871,7 +103207,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102881,7 +103217,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102891,7 +103227,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102901,7 +103237,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102911,7 +103247,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102921,7 +103257,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102931,7 +103267,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102941,7 +103277,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102951,7 +103287,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102963,7 +103299,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: request_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: request
     changes:
     - path: payload.intent_id
@@ -102972,8 +103308,88 @@ exit_intents:
       outcome: Invalid
       reason: non_canonical
       path: payload.intent_id
+  - name: request_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: request_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
   - name: protection_v1_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -102983,7 +103399,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -102993,7 +103409,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103003,7 +103419,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103013,7 +103429,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103023,7 +103439,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103033,7 +103449,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103043,7 +103459,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103053,7 +103469,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103063,7 +103479,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103073,7 +103489,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103083,7 +103499,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103093,7 +103509,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103103,7 +103519,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103113,7 +103529,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103123,7 +103539,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103133,7 +103549,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103143,7 +103559,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103153,7 +103569,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103163,7 +103579,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103173,7 +103589,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103183,7 +103599,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103193,7 +103609,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103205,7 +103621,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v1_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v1
     changes:
     - path: payload.intent_id
@@ -103214,8 +103630,88 @@ exit_intents:
       outcome: Invalid
       reason: non_canonical
       path: payload.intent_id
+  - name: protection_v1_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v1_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
   - name: protection_v2_flatten_without_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103225,7 +103721,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_without_dash
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103235,7 +103731,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_empty_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103245,7 +103741,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_leading_zero
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103255,7 +103751,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_n_1000
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103265,7 +103761,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_negative_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103275,7 +103771,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_n_letter
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103285,7 +103781,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_n_not_ascii
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103295,7 +103791,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_two_ns
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103305,7 +103801,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103315,7 +103811,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_lower_case_switch
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103325,7 +103821,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_switch_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103335,7 +103831,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_watchdog_upper_case_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103345,7 +103841,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_watchdog_with_n
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103355,7 +103851,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_watchdog_event_not_a_ulid
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103365,7 +103861,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_another_prefix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103375,7 +103871,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_ulid_with_suffix
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103385,7 +103881,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_the_order_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103395,7 +103891,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_a_random_id
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103405,7 +103901,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_empty
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103415,7 +103911,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_watchdog_event_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103425,7 +103921,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_switch_after_7
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103435,7 +103931,7 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_flatten_trailing_newline
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
@@ -103447,11 +103943,91 @@ exit_intents:
       reason: non_canonical
       path: payload.intent_id
   - name: protection_v2_watchdog_leading_space
-    clause: '§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero'
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
     base_draft: protection_v2
     changes:
     - path: payload.intent_id
       value: ' w-01JAE3A0A000000000000000W1'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_without_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_upper_case
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2R
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_twice
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2rr
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_leading_zero
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-02r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_n_1000
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-1000r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_before_n
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-r2
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_dash
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2-r
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: protection_v2_remainder_of_a_watchdog
+    clause: '§9.1: exactly `w-{ulid}`, `k-{ulid}-{n}` or `k-{ulid}-{n}r`, `n` from 0 to 999 with no leading zero'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1r
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -103559,6 +104135,30 @@ exit_intents:
       value: k-01JAE3A0A000000000000000K1-999
     expect:
       outcome: Valid
+  - name: received_v1_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: received_v1_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: received_v1_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: received_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
+    expect:
+      outcome: Valid
   - name: received_v2_watchdog
     clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
     base_draft: received_v2
@@ -103589,6 +104189,30 @@ exit_intents:
     changes:
     - path: payload.intent_id
       value: k-01JAE3A0A000000000000000K1-999
+    expect:
+      outcome: Valid
+  - name: received_v2_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: received_v2_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: received_v2_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: received_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
     expect:
       outcome: Valid
   - name: gate_v1_watchdog
@@ -103623,6 +104247,30 @@ exit_intents:
       value: k-01JAE3A0A000000000000000K1-999
     expect:
       outcome: Valid
+  - name: gate_v1_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: gate_v1_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: gate_v1_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: gate_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
+    expect:
+      outcome: Valid
   - name: gate_v2_watchdog
     clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
     base_draft: gate_v2
@@ -103653,6 +104301,30 @@ exit_intents:
     changes:
     - path: payload.intent_id
       value: k-01JAE3A0A000000000000000K1-999
+    expect:
+      outcome: Valid
+  - name: gate_v2_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: gate_v2_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: gate_v2_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: gate_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
     expect:
       outcome: Valid
   - name: request_watchdog
@@ -103687,6 +104359,30 @@ exit_intents:
       value: k-01JAE3A0A000000000000000K1-999
     expect:
       outcome: Valid
+  - name: request_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: request_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: request_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: request
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
+    expect:
+      outcome: Valid
   - name: protection_v1_watchdog
     clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
     base_draft: protection_v1
@@ -103719,6 +104415,30 @@ exit_intents:
       value: k-01JAE3A0A000000000000000K1-999
     expect:
       outcome: Valid
+  - name: protection_v1_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: protection_v1_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: protection_v1_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: protection_v1
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
+    expect:
+      outcome: Valid
   - name: protection_v2_watchdog
     clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
     base_draft: protection_v2
@@ -103749,6 +104469,30 @@ exit_intents:
     changes:
     - path: payload.intent_id
       value: k-01JAE3A0A000000000000000K1-999
+    expect:
+      outcome: Valid
+  - name: protection_v2_remainder_first
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-0r
+    expect:
+      outcome: Valid
+  - name: protection_v2_remainder_third
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2r
+    expect:
+      outcome: Valid
+  - name: protection_v2_remainder_last
+    clause: '§9.1: an `intent` is a ULID or the executor''s own exit''s, trading spec §2.3'
+    base_draft: protection_v2
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-999r
     expect:
       outcome: Valid
 gate_v3:

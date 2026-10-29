@@ -30,11 +30,30 @@ pub struct Journal {
     /// The news stream's row bodies a test replaces, by `seq`, as a store that cannot be trusted
     /// would answer them: what the reader reads at start, never what the journal holds.
     pub news_bodies: Rc<RefCell<BTreeMap<u64, Vec<u8>>>>,
+    /// Run once, on the journal, as the next `take_ownership` begins: another writer's append
+    /// landing between a start's first read of its stream and the epoch it takes.
+    pub before_ownership: Rc<RefCell<Option<BeforeOwnership>>>,
+    /// What the store's clock answers once a test sets it, `None` for a store that cannot answer;
+    /// unset, it answers a time far past every test's, so it bounds nothing (DEC-2292).
+    pub store_clock: Rc<Cell<Option<Option<UtcNanos>>>>,
 }
+
+/// What [`Journal::before_ownership`] runs.
+pub type BeforeOwnership = Box<dyn FnOnce(&mut MemoryStore)>;
 
 impl Store for Journal {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        let hook = self.before_ownership.borrow_mut().take();
+        if let Some(hook) = hook {
+            hook(&mut self.memory);
+        }
         self.memory.take_ownership(stream)
+    }
+
+    fn clock(&self) -> Option<UtcNanos> {
+        self.store_clock
+            .get()
+            .unwrap_or_else(|| UtcNanos::from_parts(253_402_300_799, 0).ok())
     }
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {

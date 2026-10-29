@@ -94,3 +94,7 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
       - run: node scripts/workers.mjs size .wrangler/dry-run
         if: steps.app.outputs.present == 'true'
+      # The built Worker answers the public site's / and the app's, under wrangler dev with no account
+      # (2026-10-29: a Worker that threw on every Next request built, bundled and deployed green).
+      - run: node scripts/workers.mjs smoke
+        if: steps.app.outputs.present == 'true'

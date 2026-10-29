@@ -368,6 +368,7 @@ const PRE_ENV: &[(&str, &[&str])] = &[(
         "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
         "NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN",
         "NEXT_PUBLIC_OWLHEAD_APP_ORIGIN",
+        "NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL",
     ],
 )];
 

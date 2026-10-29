@@ -21,4 +21,6 @@
   A `connection_unavailable` cause can also be in force while the connection reads `active`: a lost
   credential whose state change the journal did not take before the drain (DEC-2839 item 2), so the
   lift must not require a `condition_cleared` out of `degraded` or `suspended` in that case.
+  Slice C changes, in the same change, the differential test in `acknowledge.rs` (#2947): its
+  assertion that no restriction is lifted until E7-2y, and its `causes` oracle, to fold lifts.
 <!-- section: E7 Alpaca connector and recovery -->

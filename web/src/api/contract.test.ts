@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Fetch, OPERATIONS, createWorkspaceClient } from "./client";
-import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareOwnerCommand, prepareOwnerExit } from "./commands";
+import { type CommandScope, prepareApprovalResponse, prepareAskAgent, prepareConfirm, prepareOwnerCommand, prepareOwnerExit } from "./commands";
 import { createMockServer } from "./mock-server";
 import { NOT_COMMANDS, WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
@@ -58,6 +58,7 @@ const SCHEMA_OF: Readonly<Record<Exclude<Operation, "deploy">, string>> = {
   hold_openings: "hold-request",
   stop: "stop-request",
   owner_exit: "owner-exit-request",
+  ask_agent: "owner-request",
   acknowledge: "acknowledge-request",
   kill_switch: "kill-switch-request",
   approval_response: "approval-response-request",
@@ -219,7 +220,9 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
     }
     const exit = prepareOwnerExit(client, view.agents[0].agent_id, EXIT_ASSET, EXIT_RECORD);
     if (exit.ok) for (const c of exit.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
-    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version", "owner_exit"]));
+    const ask = prepareAskAgent(client, view.agents[0].agent_id, EXIT_ASSET, "2.5");
+    if (ask.ok) for (const c of ask.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
+    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version", "owner_exit", "ask_agent"]));
     for (const { operation, body } of bodies) {
       const schema = schemaFor(operation);
       for (const member of schema.required ?? []) expect(Object.hasOwn(body, member), `${operation} needs ${member}`).toBe(true);

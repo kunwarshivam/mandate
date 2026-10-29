@@ -913,6 +913,7 @@ fn evented(wired: &Wired) {
             symbol: Symbol::new("AAPL").unwrap(),
             expires_at: RiskClock::from_secs(NOW + 86_400 * 30),
         }],
+        stored: mandate_daemon::StoredNews::default(),
     });
 }
 
@@ -1122,5 +1123,147 @@ fn an_item_no_thesis_covers_journals_nothing_and_the_pass_goes_on() {
             .and_then(|t| t.get("kind"))
             .and_then(Value::as_str),
         Some("schedule")
+    );
+}
+
+const STORED_ROW: &[u8] = include_bytes!("../../../fixtures/news/licensed.row.json");
+const STORED_RECORD: &[u8] = include_bytes!("../../../fixtures/news/licensed.record.json");
+const STORED_REF: &str = "sha256:bbf39bbd6017fb65b0b82df4d4c25ec382d7072bcc2ea2b6f30ed7eb7792f90b";
+
+/// News triggers, the stored SPY item `offers` and the refusals `refused`, and an active thesis on
+/// SPY.
+fn stored_news(wired: &Wired, refused: Vec<mandate_daemon::RefusedNews>) {
+    evented(wired);
+    if let Some(evented) = wired.source.evented.borrow_mut().as_mut() {
+        evented.events = Vec::new();
+        evented.active[0].symbol = Symbol::new("SPY").unwrap();
+        evented.stored = mandate_daemon::StoredNews {
+            offers: vec![
+                mandate_runtime::RetrievedObservation::stored(STORED_ROW, STORED_RECORD).unwrap(),
+            ],
+            refused,
+        };
+    }
+}
+
+fn refused(event_id: &str, refusal: mandate_runtime::StoredRefusal) -> mandate_daemon::RefusedNews {
+    mandate_daemon::RefusedNews {
+        event_id: event_id.to_owned(),
+        refusal,
+    }
+}
+
+/// DEC-2288: a news item the news reader stored, on a thesis's instrument, brings one `monitor`
+/// run forward whose `ObservationRecorded` names the row's `item_ref` as it is. Its record is
+/// already in the artifact store, so the pass stores nothing for it, and a later pass that offers
+/// it again starts nothing.
+#[test]
+fn a_stored_news_item_on_a_thesis_brings_one_monitor_run_forward() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    stored_news(&wired, Vec::new());
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    let puts = wired.shelf.put.borrow().len();
+    let alerts = process.step(at(NOW + 60));
+    assert!(alerts.is_empty(), "{:?}", keys(&alerts));
+    let observed = stored(&rig, "ObservationRecorded");
+    assert_eq!(observed.len(), 1, "{:?}", kinds(&rig));
+    let payload = observed[0].get("payload").unwrap();
+    assert_eq!(
+        payload.get("data_ref").and_then(Value::as_str),
+        Some(STORED_REF)
+    );
+    assert_eq!(
+        payload.get("source").and_then(Value::as_str),
+        Some("alpaca.news")
+    );
+    assert!(
+        !wired.shelf.put.borrow()[puts..]
+            .iter()
+            .any(|bytes| bytes.as_slice() == STORED_RECORD),
+        "the stored record is not put again"
+    );
+    let started = run_started(&rig);
+    assert_eq!(started.len(), 1, "{:?}", kinds(&rig));
+    let start = started[0].get("payload").unwrap();
+    assert_eq!(start.get("kind").and_then(Value::as_str), Some("monitor"));
+    assert_eq!(
+        start
+            .get("trigger")
+            .and_then(|t| t.get("cause"))
+            .and_then(Value::as_str),
+        observed[0].get("event_id").and_then(Value::as_str)
+    );
+    tick(&rig, NOW + 120);
+    assert!(process.step(at(NOW + 120)).is_empty());
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1);
+    assert_eq!(starts(&wired).len(), 1);
+}
+
+/// DEC-2288 item 3: a stored record that is not the one its row names is an integrity failure,
+/// alerted once per item with the row's event id alone; unreadable records are alerted once, with
+/// no subject, until a pass finds none. Neither stops the other items, nor the research.
+#[test]
+fn refused_stored_items_are_alerted_mismatches_once_each_and_unreadables_once() {
+    use mandate_runtime::StoredRefusal::{Mismatch, Unreadable};
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    let mut process = running(&rig, &wired);
+    let alerted = |process: &mut RuntimeProcess<Rig>, secs: i64, refusals| {
+        stored_news(&wired, refusals);
+        tick(&rig, secs);
+        let mut alerts: Vec<(&'static str, Option<String>)> = process
+            .step(at(secs))
+            .into_iter()
+            .map(|alert| (alert.key, alert.subject))
+            .collect();
+        alerts.sort();
+        alerts
+    };
+    let mismatch = |id: &str| ("news_record_mismatch", Some(id.to_owned()));
+    let unreadable = ("news_record_unreadable", None);
+    assert_eq!(
+        alerted(
+            &mut process,
+            NOW + 60,
+            vec![
+                refused("01EVENTA", Mismatch),
+                refused("01EVENTB", Unreadable),
+                refused("01EVENTC", Unreadable)
+            ]
+        ),
+        vec![mismatch("01EVENTA"), unreadable.clone()]
+    );
+    assert_eq!(
+        stored(&rig, "ObservationRecorded").len(),
+        1,
+        "the readable item is offered"
+    );
+    assert_eq!(
+        alerted(
+            &mut process,
+            NOW + 120,
+            vec![
+                refused("01EVENTA", Mismatch),
+                refused("01EVENTB", Unreadable),
+                refused("01EVENTD", Mismatch)
+            ]
+        ),
+        vec![mismatch("01EVENTD")],
+        "each mismatch once; unreadables still there"
+    );
+    assert_eq!(alerted(&mut process, NOW + 180, Vec::new()), Vec::new());
+    assert_eq!(
+        alerted(
+            &mut process,
+            NOW + 240,
+            vec![
+                refused("01EVENTA", Mismatch),
+                refused("01EVENTE", Unreadable)
+            ]
+        ),
+        vec![unreadable],
+        "unreadables again after a pass with none; the old mismatch never again"
     );
 }

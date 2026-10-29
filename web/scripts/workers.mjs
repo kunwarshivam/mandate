@@ -1,14 +1,17 @@
 // The Cloudflare Workers host (DEC-823, DEC-731, DEC-1005). CI builds the Worker with OpenNext (`npm run cf:build`),
 // has Wrangler write the bundle it would upload (`wrangler deploy --dry-run --outdir`, which needs no
 // Cloudflare account or token), and runs `node scripts/workers.mjs size <outdir>`, which fails when the
-// Worker is over its budget, or when the dry run left no Worker to measure. `hostingProblems` lists what would stop the app from running on Workers,
+// Worker is over its budget, or when the dry run left no Worker to measure; then `node scripts/workers.mjs smoke`
+// boots that Worker under `wrangler dev` and fails unless the public site and the app both answer `/` 200. `hostingProblems` lists what would stop the app from running on Workers,
 // leave a second host deploying, or let anything but the deploy job of `web-deploy.yml` on `main` deploy or
 // reach the Cloudflare token; the unit tests run it against this tree.
 
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { request } from "node:http";
 import { gzipSync } from "node:zlib";
 
 /** The Worker's size budget (DEC-731 item 6): Workers Free's 3 MiB gzip cap, under the paid plan's 10 MiB. */
@@ -68,6 +71,112 @@ export function sizeCommand(args) {
   }
   const problems = sizeProblems(size);
   const summary = `Worker: ${mib(size.rawBytes)} raw of ${mib(WORKER_BUDGET.rawBytes)}, ${mib(size.gzipBytes)} gzip of ${mib(WORKER_BUDGET.gzipBytes)}`;
+  return { status: problems.length === 0 ? 0 : 1, lines: [summary, ...problems] };
+}
+
+/**
+ * What the pre-deploy smoke asks the built Worker (2026-10-29's outage, when every request the Next
+ * server handled threw while static files and the host redirects still answered): the public site's
+ * root and the app's, each by its own host.
+ */
+export const SMOKE_REQUESTS = [
+  { host: "owlhead.ai", path: "/" },
+  { host: "app.owlhead.ai", path: "/" },
+];
+
+/** The runtime variables the smoke runs the Worker with: the dashboard's data source (DEC-823, DEC-975), with an API that answers nothing. */
+const SMOKE_VARS = ["OWLHEAD_DATA_SOURCE:api", "OWLHEAD_API_ORIGIN:https://api.invalid"];
+const SMOKE_READY_MS = 90_000;
+const SMOKE_REQUEST_MS = 30_000;
+
+/**
+ * Each of `SMOKE_REQUESTS` that was not answered 200, one line each, with the first error line the
+ * Worker answered, never its stack.
+ * @param {{ host: string, path: string, status: number, body: string }[]} answers
+ * @returns {string[]}
+ */
+export function smokeProblems(answers) {
+  return SMOKE_REQUESTS.flatMap(({ host, path }) => {
+    const answer = answers.find((a) => a.host === host && a.path === path);
+    if (!answer) return [`${host}${path} was not asked`];
+    if (answer.status === 200) return [];
+    const said = (answer.body.split("\n").find((line) => /\S/.test(line)) ?? "").trim().slice(0, 240);
+    return [`${host}${path} answered ${answer.status}${said ? `: ${said}` : ""}`];
+  });
+}
+
+/**
+ * Starts the built Worker (`.open-next/`, as `wrangler.jsonc` names it) under `wrangler dev`, asks it
+ * each of `SMOKE_REQUESTS` by its host, and stops it, its `workerd` children included. Needs no
+ * Cloudflare account or token: `wrangler dev` runs locally.
+ * @returns {Promise<{ host: string, path: string, status: number, body: string }[]>}
+ */
+export async function serveWorker() {
+  const port = 8700 + Math.floor(Math.random() * 200);
+  const args = ["dev", "--port", String(port), "--ip", "127.0.0.1", ...SMOKE_VARS.flatMap((v) => ["--var", v])];
+  const child = spawn(join("node_modules", ".bin", "wrangler"), args, { detached: true, env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"] });
+  const stop = () => {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
+  };
+  try {
+    await new Promise((ready, refuse) => {
+      let seen = "";
+      const timer = setTimeout(() => refuse(new Error(`wrangler dev was not ready within ${SMOKE_READY_MS / 1000} s: ${seen.slice(-400)}`)), SMOKE_READY_MS);
+      const watch = (chunk) => {
+        seen += String(chunk);
+        if (/Ready on http/.test(seen)) {
+          clearTimeout(timer);
+          ready(undefined);
+        }
+      };
+      child.stdout.on("data", watch);
+      child.stderr.on("data", watch);
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        refuse(new Error(`wrangler dev exited ${code} before it was ready: ${seen.slice(-400)}`));
+      });
+    });
+    const ask = ({ host, path }) =>
+      new Promise((answer, refuse) => {
+        const sent = request({ host: "127.0.0.1", port, path, method: "GET", headers: { host }, timeout: SMOKE_REQUEST_MS }, (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () => answer({ host, path, status: response.statusCode ?? 0, body }));
+        });
+        sent.on("timeout", () => sent.destroy(new Error(`${host}${path} did not answer within ${SMOKE_REQUEST_MS / 1000} s`)));
+        sent.on("error", refuse);
+        sent.end();
+      });
+    const answers = [];
+    for (const asked of SMOKE_REQUESTS) answers.push(await ask(asked));
+    return answers;
+  } finally {
+    stop();
+  }
+}
+
+/**
+ * `node scripts/workers.mjs smoke`, without exiting: status 0 when the built Worker answers each of
+ * `SMOKE_REQUESTS` 200, 1 when it does not or never starts, 2 for a bad command line; one line each.
+ * @param {string[]} args
+ * @param {() => Promise<{ host: string, path: string, status: number, body: string }[]>} serve
+ * @returns {Promise<{ status: number, lines: string[] }>}
+ */
+export async function smokeCommand(args, serve = serveWorker) {
+  if (args.length !== 1 || args[0] !== "smoke") return { status: 2, lines: ["usage: node scripts/workers.mjs smoke"] };
+  let answers;
+  try {
+    answers = await serve();
+  } catch (error) {
+    return { status: 1, lines: [error instanceof Error ? error.message : String(error)] };
+  }
+  const problems = smokeProblems(answers);
+  const summary = `Worker smoke: ${answers.map((a) => `${a.host}${a.path} ${a.status}`).join(", ")}`;
   return { status: problems.length === 0 ? 0 : 1, lines: [summary, ...problems] };
 }
 
@@ -297,6 +406,7 @@ function workflowProblems(tree) {
   if (!/npm run cf:build/.test(yml)) problems.push(`${WEB_WORKFLOW}: must build the Worker with npm run cf:build`);
   if (!/wrangler deploy --dry-run --outdir/.test(yml)) problems.push(`${WEB_WORKFLOW}: must bundle the Worker with wrangler deploy --dry-run --outdir`);
   if (!/node scripts\/workers\.mjs size/.test(yml)) problems.push(`${WEB_WORKFLOW}: must check the Worker's budget with node scripts/workers.mjs size`);
+  if (!/node scripts\/workers\.mjs smoke/.test(yml)) problems.push(`${WEB_WORKFLOW}: must boot the built Worker and ask it for / with node scripts/workers.mjs smoke`);
   if (/\bsecrets\b|\bvars\./.test(yml)) problems.push(`${WEB_WORKFLOW}: reads a secret or a variable; the pull-request build has no credential (ES-12, DEC-1005 item 2)`);
   if (!/^ {2}pull_request:/m.test(yml) || /^ {2}push:/m.test(yml)) problems.push(`${WEB_WORKFLOW}: runs on pull requests and never on a push; the deploy workflow handles main (DEC-1005 item 1)`);
   return problems;
@@ -304,7 +414,8 @@ function workflowProblems(tree) {
 
 const invokedAsScript = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedAsScript) {
-  const { status, lines } = sizeCommand(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  const { status, lines } = args[0] === "smoke" ? await smokeCommand(args) : sizeCommand(args);
   for (const line of lines) (status === 0 ? console.log : console.error)(line);
   process.exitCode = status;
 }

@@ -45,8 +45,8 @@ use mandate_api_server::challenges::Challenges;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
-    COOL_OFF_WAIVER, INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store, check_bind,
-    check_database_url, check_environment, check_internal_paper, check_key_set_tier,
+    COOL_OFF_WAIVER, COOL_OFF_WAIVER_UNTIL, INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store,
+    check_bind, check_database_url, check_environment, check_internal_paper, check_key_set_tier,
     cool_off_waiver, internal_paper_workspace, read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
@@ -74,6 +74,7 @@ use mandate_journal::ArtifactSource;
 use mandate_journal_pg::PgJournal;
 use mandate_passkey::RelyingParty;
 use mandate_release::startup::{TIER_VAR, Tier};
+use mandate_time::UtcNanos;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
@@ -162,8 +163,9 @@ struct Start {
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
     ingress: Vec<IpAddr>,
     connect: ConnectBinding,
-    /// The test cell's waiver of a first passkey's cool-off, when set (DEC-2146 item 2).
-    cool_off_waiver: Option<CoolOffWaiver>,
+    /// The waiver of a first passkey's cool-off and its expiry, when set (DEC-2146 item 2,
+    /// DEC-2150 item 2).
+    cool_off_waiver: Option<(CoolOffWaiver, Option<UtcNanos>)>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -224,7 +226,11 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
             name: reduction::INGRESS_PEERS,
         })?;
     let ingress = reduction::ingress_peers(ingress_setting.as_deref())?;
-    let waiver = cool_off_waiver(tier, env::var_os(COOL_OFF_WAIVER).as_deref())?;
+    let waiver = cool_off_waiver(
+        tier,
+        env::var_os(COOL_OFF_WAIVER).as_deref(),
+        env::var_os(COOL_OFF_WAIVER_UNTIL).as_deref(),
+    )?;
     let start = Start {
         settings,
         key,
@@ -310,7 +316,8 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
                 let store: Arc<dyn ArtifactSource + Send + Sync> = store;
                 store
             }),
-            cool_off_waiver: start.cool_off_waiver,
+            cool_off_waiver: start.cool_off_waiver.map(|(waiver, _)| waiver),
+            cool_off_waiver_until: start.cool_off_waiver.and_then(|(_, until)| until),
         },
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),

@@ -5,7 +5,7 @@
 mock_provider "digitalocean" {
   mock_data "digitalocean_kubernetes_versions" {
     defaults = {
-      valid_versions = ["1.35.9-do.1"]
+      valid_versions = ["1.35.9-do.2"]
     }
   }
 }
@@ -15,7 +15,7 @@ variables {
   region                     = "sfo2"
   vpc_id                     = "vpc-1"
   node_tag                   = "mandate-prod-cell1-nodes"
-  kubernetes_version         = "1.35.9-do.1"
+  kubernetes_version         = "1.35.9-do.2"
   ha_control_plane           = true
   system_pool                = { size = "s-2vcpu-4gb", count = 3 }
   workspace_pool             = { size = "s-4vcpu-8gb", count = 2 }
@@ -26,7 +26,7 @@ run "the_cluster_is_fenced_and_pinned" {
   command = plan
 
   assert {
-    condition     = digitalocean_kubernetes_cluster.this.ha && !digitalocean_kubernetes_cluster.this.auto_upgrade && !digitalocean_kubernetes_cluster.this.registry_integration && digitalocean_kubernetes_cluster.this.version == "1.35.9-do.1"
+    condition     = digitalocean_kubernetes_cluster.this.ha && !digitalocean_kubernetes_cluster.this.auto_upgrade && !digitalocean_kubernetes_cluster.this.registry_integration && digitalocean_kubernetes_cluster.this.version == "1.35.9-do.2"
     error_message = "HA on, auto-upgrade and registry integration off, the version pinned."
   }
 

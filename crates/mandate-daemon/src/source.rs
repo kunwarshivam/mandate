@@ -2,6 +2,7 @@
 //! bundle, the deployment's mandate document, and the workspace's control and agent streams. A
 //! fact it cannot read gives the pass no context; it never fills one in (DEC-2210 item 4).
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::RangeInclusive;
@@ -9,7 +10,9 @@ use std::rc::Rc;
 
 use mandate_canon::{Digest, Value, parse};
 use mandate_gateway::meter::SharedMeter;
-use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
+use mandate_journal::{
+    ArtifactError, ArtifactRef, ArtifactSource, Environment, StoredEvent, StreamId, TrustedStart,
+};
 use mandate_num::Usd;
 use mandate_research::{
     AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
@@ -18,7 +21,8 @@ use mandate_research::{
 };
 use mandate_research_run::{InstrumentFact, ItemKind, RetrievedItem, Symbol};
 use mandate_runtime::{
-    ActiveThesis, EventTriggers, JournalCatalog, Preconditions, RiskClock, RuntimeState,
+    ActiveThesis, EventTriggers, JournalCatalog, Preconditions, RetrievedObservation, RiskClock,
+    RuntimeState, StoredRefusal,
 };
 use mandate_spec::Mandate;
 use mandate_spec::document::EventTrigger;
@@ -29,7 +33,7 @@ use mandate_time::UtcNanos;
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, FeedItem};
-use crate::runtime::{ContextUnread, ResearchParts, ResearchSource};
+use crate::runtime::{ContextUnread, RefusedNews, ResearchParts, ResearchSource, StoredNews};
 
 /// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
 /// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
@@ -73,12 +77,61 @@ pub fn last_research_reservation(
 pub trait Rows {
     /// The stream's records, or `None` when they cannot be read.
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>>;
+
+    /// The stream's records from `start.from_seq` on, as [`Store::rows_from`] reads them: the whole
+    /// stream from the genesis start, else `None` when they cannot be read or the first of them does
+    /// not follow `start`.
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        if start == TrustedStart::GENESIS {
+            return self.rows(stream);
+        }
+        let since: Vec<StoredEvent> = self
+            .rows(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        match since.first() {
+            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
+                None
+            }
+            _ => Some(since),
+        }
+    }
 }
 
 impl<S: Store> Rows for S {
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
         Store::rows(self, stream)
     }
+
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        Store::rows_from(self, stream, start)
+    }
+}
+
+/// The news stream as far as a source has read it (E2-10e): its last row's seq and hash, and each
+/// `NewsItemStored` row's outcome by seq, so a pass reads only the rows after the last and each
+/// record once a process.
+#[derive(Default)]
+struct NewsTail {
+    head: Option<(u64, Digest)>,
+    items: BTreeMap<u64, Held>,
+}
+
+/// One stored item as a source holds it.
+enum Held {
+    Offer(RetrievedObservation),
+    Refused(String, StoredRefusal),
+    /// A row whose record the store could not answer: refused `news_record_unreadable` for the
+    /// pass, and read again on the next.
+    Retry(StoredEvent),
+}
+
+/// Why a stored item is not offered on a pass.
+enum Unoffered {
+    Refused(StoredRefusal),
+    /// The store could not answer; the next pass reads the record again.
+    Unavailable,
 }
 
 /// Why a mandate document's research envelope cannot be read.
@@ -203,6 +256,7 @@ pub struct CellSource {
     rows: Rc<dyn Rows>,
     documents: Box<dyn ArtifactSource>,
     meter: CellMeter,
+    news: RefCell<NewsTail>,
 }
 
 impl CellSource {
@@ -250,6 +304,7 @@ impl CellSource {
             rows,
             documents,
             meter,
+            news: RefCell::new(NewsTail::default()),
         }
     }
 
@@ -345,6 +400,119 @@ impl CellSource {
     }
 }
 
+impl CellSource {
+    /// The workspace's news stream as a pass at `clock` offers it (journal spec §9.37, DEC-2288):
+    /// each `NewsItemStored` whose item is known by `clock`, offered from its row and the record
+    /// its `item_ref` names in the artifact store, and each it cannot offer refused by its row's
+    /// event id, whenever it is known. A stream the store cannot answer gives the pass no context.
+    ///
+    /// Each record is read once a process (E2-10e): a pass reads only the rows after the last it
+    /// read, as the process's tails do (DEC-2852), and keeps each row's outcome, since the journal
+    /// never changes a row. A read past the head the store refuses is read from the first record;
+    /// if that no longer holds the head, everything held is dropped and the stream read afresh. A
+    /// record the store could not answer is read again on the next pass.
+    fn stored_news(&self, clock: RiskClock) -> Result<StoredNews, ContextUnread> {
+        let stream = StreamId::parse(&format!("news:{}", self.who.workspace))
+            .ok_or(ContextUnread::StreamName)?;
+        let mut tail = self.news.borrow_mut();
+        let since = match tail.head {
+            None => self
+                .rows
+                .rows_from(&stream, TrustedStart::GENESIS)
+                .ok_or(ContextUnread::News)?,
+            Some((seq, hash)) => {
+                let past = self.rows.rows_from(
+                    &stream,
+                    TrustedStart {
+                        from_seq: seq.saturating_add(1),
+                        prev_hash: hash,
+                    },
+                );
+                match past {
+                    Some(since) => since,
+                    None => {
+                        let all = self
+                            .rows
+                            .rows_from(&stream, TrustedStart::GENESIS)
+                            .ok_or(ContextUnread::News)?;
+                        if all.iter().any(|row| row.seq == seq && row.hash == hash) {
+                            all.into_iter().filter(|row| row.seq > seq).collect()
+                        } else {
+                            *tail = NewsTail::default();
+                            all
+                        }
+                    }
+                }
+            }
+        };
+        for held in tail.items.values_mut() {
+            if let Held::Retry(row) = held {
+                *held = self.held(row.clone());
+            }
+        }
+        for row in since
+            .iter()
+            .filter(|row| row.event_type == "NewsItemStored")
+        {
+            tail.items.insert(row.seq, self.held(row.clone()));
+        }
+        if let Some(last) = since.last() {
+            tail.head = Some((last.seq, last.hash));
+        }
+        let mut stored = StoredNews::default();
+        for held in tail.items.values() {
+            match held {
+                Held::Offer(offer) if offer.item.knowledge_at.secs() <= clock.secs() => {
+                    stored.offers.push(offer.clone());
+                }
+                Held::Offer(_) => {}
+                Held::Refused(event_id, refusal) => stored.refused.push(RefusedNews {
+                    event_id: event_id.clone(),
+                    refusal: *refusal,
+                }),
+                Held::Retry(row) => stored.refused.push(RefusedNews {
+                    event_id: row.event_id.clone(),
+                    refusal: StoredRefusal::Unreadable,
+                }),
+            }
+        }
+        Ok(stored)
+    }
+
+    /// One stored item read from `row` and its record.
+    fn held(&self, row: StoredEvent) -> Held {
+        match self.offer_of(&row) {
+            Ok(offer) => Held::Offer(offer),
+            Err(Unoffered::Refused(refusal)) => Held::Refused(row.event_id, refusal),
+            Err(Unoffered::Unavailable) => Held::Retry(row),
+        }
+    }
+
+    /// The offer of one stored item: unreadable when its row names no record or the store holds
+    /// none, a mismatch when the store holds bytes that do not hash to the reference, and read
+    /// again when the store could not answer.
+    fn offer_of(&self, row: &StoredEvent) -> Result<RetrievedObservation, Unoffered> {
+        let reference = parse(&row.body)
+            .ok()
+            .and_then(|body| {
+                body.get("payload")?
+                    .get("item_ref")?
+                    .as_str()
+                    .and_then(ArtifactRef::parse)
+            })
+            .ok_or(Unoffered::Refused(StoredRefusal::Unreadable))?;
+        let record = self
+            .documents
+            .read_artifact(&reference)
+            .map_err(|error| match error {
+                ArtifactError::Corrupt => Unoffered::Refused(StoredRefusal::Mismatch),
+                ArtifactError::Missing => Unoffered::Refused(StoredRefusal::Unreadable),
+                ArtifactError::Unavailable => Unoffered::Unavailable,
+            })?;
+        RetrievedObservation::stored(&row.body, &record).map_err(Unoffered::Refused)
+    }
+}
+
 impl ResearchSource for CellSource {
     fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
         let named = |text: String| StreamId::parse(&text).ok_or(ContextUnread::StreamName);
@@ -411,6 +579,14 @@ impl ResearchSource for CellSource {
         } else {
             Vec::new()
         };
+        let reads_news = event_triggers
+            .as_ref()
+            .is_some_and(|triggers| triggers.kinds.contains(&ItemKind::News));
+        let stored = if reads_news {
+            self.stored_news(clock)?
+        } else {
+            StoredNews::default()
+        };
         Ok(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope),
@@ -443,6 +619,7 @@ impl ResearchSource for CellSource {
                 .collect::<BTreeSet<Symbol>>(),
             events,
             event_triggers,
+            stored,
         })
     }
 }
