@@ -383,9 +383,10 @@ fn the_remainder_sells_what_a_cancelled_sell_in_doubt_left() {
     );
 }
 
-/// DEC-2857 item 5: the sell in doubt is found filled, and the certain six fill. Nothing of the
-/// agent's is left, so the remainder is abandoned `flatten_covered`, never sent, and the owner is
-/// not alerted about it.
+/// DEC-2857 item 5: the sell in doubt is found filled while the certain six still rest. The
+/// remainder's cap is zero and nothing in the instrument is `Unknown` any more, so it does not
+/// wait for the six: it ends at once, abandoned `flatten_covered`, never sent, and the owner is not
+/// alerted about it. The six then fill, and the position is flat.
 #[test]
 #[ignore = "pending E7-4"]
 fn a_remainder_left_nothing_is_abandoned_flatten_covered_without_an_alert() {
@@ -403,6 +404,11 @@ fn a_remainder_left_nothing_is_abandoned_flatten_covered_without_an_alert() {
         20,
         (SELL_IN_DOUBT, Side::Sell, "4"),
         ("filled", "4"),
+    );
+    assert_eq!(
+        abandoned(&after),
+        ["flatten_covered"],
+        "a zero cap waits on nothing but an Unknown order"
     );
     after.extend(filled(&mut shell, &ports, &certain, six));
     assert!(sells(&after).is_empty(), "nothing more is sold");
@@ -851,6 +857,20 @@ fn the_oracle_catches_the_whole_sub_ledger_sold_beside_a_sell_in_doubt() {
         Seen::Sold(10),
         Seen::DoubtFilled(0, 4),
         Seen::Resolved(0),
+    ];
+    assert!(judge(&[(Side::Sell, 4)], &seen).is_err());
+}
+
+/// Seeded bug 4: a remainder sent uncapped, the whole ten, beside the certain six still resting,
+/// could sell sixteen of ten: the two parts together must never exceed the position.
+#[test]
+fn the_oracle_catches_a_remainder_sent_uncapped_beside_the_certain_part() {
+    let seen = [
+        Seen::Sent(6),
+        Seen::Resolved(0),
+        Seen::Sent(10),
+        Seen::Sold(6),
+        Seen::Sold(4),
     ];
     assert!(judge(&[(Side::Sell, 4)], &seen).is_err());
 }
