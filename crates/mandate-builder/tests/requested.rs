@@ -104,6 +104,29 @@ fn a_clip_that_leaves_nothing_hands_the_gate_the_requested_quantity() {
     }
 }
 
+/// Under a 120 order cap and a 150 minimum order, twelve (1200) would clip to one share (100),
+/// below the minimum: that clip is not applied either, and the twelve go to the gate unclipped
+/// with no limit named (DEC-2858 item 7).
+#[test]
+fn a_clip_below_the_minimum_order_hands_the_gate_the_requested_quantity() {
+    let mut mandate = two_stock_swing();
+    mandate.limits.max_order_usd = usd("120");
+    let mut market = swing_market();
+    market.min_order_usd = usd("150");
+    let buy = requested_buy(
+        &mandate,
+        &flat_account(),
+        &market,
+        &quiet_risk(),
+        RequestedBy::Owner,
+        qty("12"),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+    .unwrap_or_else(|| panic!("an owner's buy is proposed"));
+    assert_eq!(buy.qty, qty("12"));
+    assert_eq!(buy.cut_by, BTreeSet::new());
+}
+
 /// A client's request carries the client as its requester; the ceiling is §6.2 step 5a's.
 #[test]
 fn a_clients_buy_names_the_client() {
