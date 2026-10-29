@@ -161,7 +161,8 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 /// Each also names the `env:` its step may set, exactly; nothing else, so no `PATH`,
 /// `LD_PRELOAD`, `NODE_OPTIONS` or `BASH_ENV` reaches the secret step. `infra close`'s names
 /// include `TF_VAR_kube_api_allowed_addresses`, and `infra`'s `MANDATE_INFRA_SHA`, which IAC's
-/// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins; `infra`'s also
+/// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins, and `MANDATE_STEP_UP`, the
+/// step-up action's string, which holds no secret (DEC-2087); `infra`'s also
 /// `MANDATE_OPENROUTER_API_KEY`, the model provider's key staging's vault imports (DEC-2630), and
 /// `MANDATE_FOUNDER_OIDC_SUBJECT`, the founder's subject staging's link digests (DEC-2114), and
 /// `MANDATE_ALPACA_OAUTH_CLIENT_SECRET`, the Alpaca OAuth client secret staging's vault imports
@@ -175,6 +176,7 @@ const SECRET_RUNS: &[SecretRun] = &[
             "MANDATE_INFRA_ENVIRONMENT",
             "MANDATE_INFRA_ACTION",
             "MANDATE_INFRA_SHA",
+            "MANDATE_STEP_UP",
             "DIGITALOCEAN_TOKEN",
             "TF_VAR_state_passphrase",
             "TF_VAR_cloudflare_api_token",

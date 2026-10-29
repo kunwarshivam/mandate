@@ -638,6 +638,54 @@ def test_a_run_renders_only_the_process_it_names():
     )
 
 
+def step_up_render(*extra: str) -> list[dict]:
+    """The `control` run's images (with the API's, whose artifact store the run mounts) in staging."""
+    return render(
+        "-f",
+        str(CELL / "values" / "k3d.yaml"),
+        "--set",
+        f"images.mandate={PLACEHOLDER.format('mandate')}",
+        "--set",
+        f"images.api={PLACEHOLDER.format('api')}",
+        "--set",
+        "deploymentTier=staging",
+        *extra,
+    )
+
+
+def test_the_step_up_template_is_the_control_run_suspended():
+    """With `stepUp.template` the chart renders `control-template`, a CronJob that is suspended and
+    never scheduled, whose job template is exactly the `control` run's Job, labels and spec, so the
+    step-up action's Job keeps the control role, its DSN, the artifact store and its egress
+    (DEC-2087). Without it there is none, and outside staging the schema refuses it."""
+    run = ("--set", "run.id=t1", "--set-json", 'run.args=["step-up","confirm-connect"]')
+    on = step_up_render("--set", "stepUp.template=true", *run)
+    crons = [d for d in on if d["kind"] == "CronJob"]
+    assert [c["metadata"]["name"] for c in crons] == ["control-template"]
+    cron = crons[0]
+    assert cron["spec"]["suspend"] is True
+    assert cron["spec"]["schedule"] == "0 0 31 2 *"
+    job = next(d for d in on if d["kind"] == "Job" and d["metadata"]["name"] == "control-t1")
+    assert cron["spec"]["jobTemplate"] == {"metadata": {"labels": job["metadata"]["labels"]}, "spec": job["spec"]}
+    assert cron["metadata"]["labels"]["mandate.dev/process"] == "control"
+    env = {e["name"] for e in cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert {"MANDATE_JOURNAL_DSN", "MANDATE_ARTIFACTS"} <= env
+    assert not [d for d in step_up_render(*run) if d["kind"] == "CronJob"]
+    for tier in ("dev", "ci", "production"):
+        refused = helm(
+            CHART,
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            "--set",
+            f"images.mandate={PLACEHOLDER.format('mandate')}",
+            "--set",
+            f"deploymentTier={tier}",
+            "--set",
+            "stepUp.template=true",
+        )
+        assert refused.returncode != 0, tier
+
+
 def test_the_connect_check_runs_the_executor_on_its_journal_role_alone():
     """The connect check is the executor's image, run with the run's arguments as the executor's
     journal role, with Postgres its one destination and no store: its broker is the in-process

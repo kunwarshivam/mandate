@@ -782,6 +782,19 @@
           "type": "boolean"
         }
       }
+    },
+    "stepUp": {
+      "description": "Staging's step-up confirmation from CI (DEC-2087): with template, the chart renders the suspended CronJob control-template, whose job template is the control run, so infra.yml's step-up action makes one Job from it. Staging alone",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template"
+      ],
+      "properties": {
+        "template": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "allOf": [
@@ -868,6 +881,35 @@
               "dev",
               "ci"
             ]
+          }
+        },
+        "required": [
+          "deploymentTier"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stepUp": {
+            "properties": {
+              "template": {
+                "const": true
+              }
+            },
+            "required": [
+              "template"
+            ]
+          }
+        },
+        "required": [
+          "stepUp"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentTier": {
+            "const": "staging"
           }
         },
         "required": [

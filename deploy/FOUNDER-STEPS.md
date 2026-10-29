@@ -348,59 +348,27 @@ Do these only once you have recorded DEC-2614 as Accepted. Until you set the var
 No other workflow may ask for this runner. `cargo xtask lint` refuses any `runs-on` that is not a
 hosted runner outside `infra.yml`. Keep the runner registered to this repository alone.
 
-## J. Confirming a step-up challenge in staging ([DEC-2106](../docs/project/decisions/DEC-2106.md), [DEC-2125](../docs/project/decisions/DEC-2125.md))
+## J. Confirming a step-up challenge in staging ([DEC-2087](../docs/project/decisions/DEC-2087.md), [DEC-2106](../docs/project/decisions/DEC-2106.md), [DEC-2125](../docs/project/decisions/DEC-2125.md))
 
 In paper, the web app shows a step-up challenge and an `XXXX-XXXX` code before it grants an
-approval or starts an Alpaca connect, and waits for you to confirm it with the `mandate` CLI. In
-staging the CLI runs as the chart's one-off `control` run: a Job in `ws-ws1` under the control
-process's existing database role and ServiceAccount, the same run the kill switch uses
-([RB-03](../docs/runbooks/RB-03-kill-switches.md), *In the cell*). It widens no role, no grant and
-no credential, and the command reads the approval from the journal, never from the browser.
+approval or starts an Alpaca connect, and waits for you to confirm it. In staging you confirm it
+with `infra`'s `step-up` action. It runs `mandate step-up confirm` or `confirm-connect` as one Job
+made from the chart's own `control` run, under its existing role, so it widens no role, grant or
+credential. The code is good for 300 seconds from the challenge, so do the steps straight away.
 
-1. **Reach the cluster from your machine, once.** Staging's cluster API admits only each `infra`
-   run's own runner. To use `kubectl` yourself, add your address to the `infra-staging`
-   environment secret `KUBE_API_ALLOWED_CIDRS` (for example `["203.0.113.7/32"]`, no wider than
-   /24; [deploy/tofu/README.md](tofu/README.md)) and dispatch `infra` with `apply` on `staging`.
-   Then fetch a kubeconfig as yourself: `doctl kubernetes cluster kubeconfig save mandate-staging`.
-   Remove the address again when you no longer need it.
-2. **Take the values staging runs with**, and use the chart from the commit staging was last
-   promoted from:
+1. **Copy the string.** Beside the code, the web app shows one string to copy, either
+   `connect:<challenge>:<code>` or `approve:<challenge>:<code>:<agent>:<approval>`. It is not a
+   secret.
+2. **Dispatch `infra`** from `main`: environment `staging`, action `step-up`, and paste the string
+   into `confirm`. Leave `sha` empty.
+3. **Approve the run** for `infra-staging` straight away. It is your own dispatch.
+4. **Read the log.** It names what it confirms, then the CLI's own line. The run fails if the Job
+   did not succeed, and the log says why.
+5. **Press Approve or Continue again** in the web app. If it says the challenge expired, ask it for
+   a new one and dispatch again; a run for a challenge already confirmed confirms nothing twice.
 
-   ```bash
-   helm get values workspace -n ws-ws1 --all -o yaml > /tmp/staging-values.yaml
-   ```
-
-3. **Confirm an approval's grant.** Copy the principal, agent, approval, challenge and code from
-   the web app; give each run a new `run.id`:
-
-   ```bash
-   helm template workspace deploy/cell/charts/workspace -n ws-ws1 -f /tmp/staging-values.yaml \
-     --show-only templates/run.yaml \
-     --set run.id="stepup1" \
-     --set-json 'run.args=["step-up","confirm","--workspace","01KDEM0000000000000000000W","--principal","<PRINCIPAL>","--agent","<AGENT>","--approval","<APPROVAL>","--challenge","<CHALLENGE>","--code","<CODE>","--journal","$(MANDATE_JOURNAL_DSN)","--store","$(MANDATE_ARTIFACTS)"]' \
-     | kubectl apply -n ws-ws1 -f -
-   kubectl logs -n ws-ws1 job/control-stepup1
-   ```
-
-4. **Confirm a connect's start** the same way, with no agent or approval:
-
-   ```bash
-   helm template workspace deploy/cell/charts/workspace -n ws-ws1 -f /tmp/staging-values.yaml \
-     --show-only templates/run.yaml \
-     --set run.id="connect1" \
-     --set-json 'run.args=["step-up","confirm-connect","--workspace","01KDEM0000000000000000000W","--principal","<PRINCIPAL>","--challenge","<CHALLENGE>","--code","<CODE>","--journal","$(MANDATE_JOURNAL_DSN)","--store","$(MANDATE_ARTIFACTS)"]' \
-     | kubectl apply -n ws-ws1 -f -
-   kubectl logs -n ws-ws1 job/control-connect1
-   ```
-
-`--store` is the workspace's own artifact store, which the run mounts, not the Job's scratch
-directory: a connect's confirmation stores the action it names there, beside the workspace's other
-artifacts, and the Job's scratch directory is gone when the Job is.
-
-The log names the confirmation it appended, or the one it had already appended if you run it
-again. A Job that fails leaves the challenge unconfirmed and adds nothing; the challenge expires on
-its own. The code is short-lived, but it is still not for chat or an
-issue.
+The run waits behind any `infra` run already going on staging, so don't dispatch one while an apply
+is running.
 
 ## K. The OpenRouter key, for research with a real model ([DEC-997](../docs/project/decisions/DEC-997.md), [DEC-2116](../docs/project/decisions/DEC-2116.md), [DEC-2396](../docs/project/decisions/DEC-2396.md))
 

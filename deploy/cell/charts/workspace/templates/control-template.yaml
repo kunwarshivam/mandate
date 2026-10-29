@@ -1,0 +1,21 @@
+{{- /*
+Staging's step-up confirmation from CI (DEC-2087): the `control` run as a CronJob that is suspended
+and never scheduled (31 February), rendered only with `stepUp.template`. Its job template is
+exactly the `control` run's Job (run.yaml's `mandate.run`), so `infra.yml`'s `step-up` action makes
+one Job from it, with the CLI's arguments alone changed, and the pod keeps the control role, its
+journal DSN, the artifact store and its egress. The kill-switch admission policy refuses any control
+Job a CronJob owns, so this CronJob cannot mint one itself; the action's Job has no owner.
+*/ -}}
+{{- if .Values.stepUp.template }}
+{{- $root := . }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "run") | fromJsonArray) }}
+{{- if eq .name "control" }}
+{{- $job := include "mandate.run" (dict "root" $root "p" .) | fromYaml }}
+{{- $labels := $job.metadata.labels }}
+{{- $template := dict "metadata" (dict "labels" $labels) "spec" $job.spec }}
+{{- $cron := dict "apiVersion" "batch/v1" "kind" "CronJob" "metadata" (dict "name" "control-template" "labels" $labels) "spec" (dict "suspend" true "schedule" "0 0 31 2 *" "jobTemplate" $template) }}
+---
+{{ toJson $cron }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -23,13 +23,18 @@ on:
         type: choice
         options: [staging, production]
       action:
-        description: preflight lists what is missing; plan shows the changes; apply plans, shows, and applies that same plan
+        description: preflight lists what is missing; plan shows the changes; apply plans, shows, and applies that same plan; step-up confirms one CLI-confirm challenge on staging
         required: true
         type: choice
         default: preflight
-        options: [preflight, plan, apply]
+        options: [preflight, plan, apply, step-up]
       sha:
         description: The full commit you reviewed. Required for apply, which refuses unless it is the commit main was at when you dispatched; preflight and plan may leave it empty and use main's commit, which they print
+        required: false
+        default: ""
+        type: string
+      confirm:
+        description: For step-up alone, the one string the web app shows beside a CLI-confirm code (connect:<challenge>:<code> or approve:<challenge>:<code>:<agent>:<approval>); no secret
         required: false
         default: ""
         type: string
@@ -84,6 +89,7 @@ jobs:
           MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
           MANDATE_INFRA_ACTION: ${{ inputs.action }}
           MANDATE_INFRA_SHA: ${{ inputs.sha }}
+          MANDATE_STEP_UP: ${{ inputs.confirm }}
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
           TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}

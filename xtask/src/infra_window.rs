@@ -305,6 +305,59 @@ pub(crate) fn close_window(
     )
 }
 
+/// Opens the window on `environment`'s cluster outside a plan, for `infra.yml`'s `step-up` action
+/// (DEC-2087), which runs no OpenTofu: the control plane is set to [`closed_addresses`] and the
+/// runner's `cidr` through DigitalOcean's API, as [`close_window`] sets it back, and read back until
+/// it admits exactly those. Answers the cluster's id, whose credentials the action fetches. A
+/// missing cluster, a refused update, or one never applied is an error, and the action's close
+/// runs however this ends.
+pub(crate) fn open_window_now(
+    http: &dyn Http,
+    token: &str,
+    environment: &str,
+    founder: Option<&str>,
+    cidr: &str,
+) -> Result<String> {
+    let mut addresses = closed_addresses(founder)?;
+    for address in &addresses {
+        mask::add_mask(address);
+    }
+    addresses.push(runner_cidr(cidr.strip_suffix("/32").unwrap_or(cidr))?);
+    let (name, _) = cluster_names(environment);
+    let cluster = find_cluster(http, token, &name)?
+        .with_context(|| format!("DigitalOcean lists no cluster {name}, so no window can open"))?;
+    let id = cluster
+        .get("id")
+        .and_then(Value::as_str)
+        .context("the cluster has no id")?
+        .to_owned();
+    if admits_only(&cluster, &addresses) {
+        return Ok(id);
+    }
+    let url = format!("{DO_API}/kubernetes/clusters/{id}");
+    let answer = http.api("PUT", &url, token, Some(&close_body(&cluster, &addresses)?))?;
+    ensure!(
+        answer.ok(),
+        "DigitalOcean refused to open the control plane's window (status {})",
+        answer.status
+    );
+    for read in 0..CLOSE_READS {
+        if read > 0 {
+            http.pause();
+        }
+        let answer = http.api("GET", &url, token, None)?;
+        let cluster: Option<Value> = answer
+            .ok()
+            .then(|| serde_json::from_str::<Value>(&answer.body).ok())
+            .flatten()
+            .and_then(|body| body.get("kubernetes_cluster").cloned());
+        if cluster.is_some_and(|cluster| admits_only(&cluster, &addresses)) {
+            return Ok(id);
+        }
+    }
+    bail!("DigitalOcean accepted the window, but the control plane never admitted this runner")
+}
+
 /// A kubeconfig on disk, readable by this user alone, deleted when dropped: on success, an error
 /// and a panic alike.
 pub(crate) struct Kubeconfig {
@@ -715,6 +768,56 @@ mod tests {
             "the same addresses in another order are already closed"
         );
         assert!(fake.done(), "nothing was sent");
+        Ok(())
+    }
+
+    /// The step-up action's window: the closed addresses and the runner's `/32`, read back; an
+    /// already open one is left; a missing cluster or an update never applied is an error.
+    #[test]
+    fn the_step_up_window_opens_on_the_runner_and_is_read_back() -> Result<()> {
+        let closed = cluster(true, &["192.0.2.1/32"]);
+        let open = cluster(true, &["192.0.2.1/32", "20.42.7.9/32"]);
+        let fake = Fake::new(vec![
+            ("GET", LIST, 200, listing(std::slice::from_ref(&closed))),
+            ("PUT", ONE, 202, String::new()),
+            ("GET", ONE, 200, one(&closed)),
+            ("GET", ONE, 200, one(&open)),
+        ]);
+        assert_eq!(
+            open_window_now(&fake, "dop_v1_t", "staging", None, "20.42.7.9/32")?,
+            "c0ffee"
+        );
+        assert!(fake.done());
+        let sent: Value = serde_json::from_str(&fake.bodies.borrow()[0])?;
+        assert_eq!(
+            sent["control_plane_firewall"],
+            json!({ "enabled": true, "allowed_addresses": ["192.0.2.1/32", "20.42.7.9/32"] })
+        );
+        let already = Fake::new(vec![(
+            "GET",
+            LIST,
+            200,
+            listing(std::slice::from_ref(&open)),
+        )]);
+        assert_eq!(
+            open_window_now(&already, "dop_v1_t", "staging", None, "20.42.7.9/32")?,
+            "c0ffee"
+        );
+        assert!(already.done(), "nothing was sent");
+        let none = Fake::new(vec![("GET", LIST, 200, listing(&[]))]);
+        assert!(open_window_now(&none, "dop_v1_t", "staging", None, "20.42.7.9/32").is_err());
+        let mut script = vec![
+            ("GET", LIST, 200, listing(std::slice::from_ref(&closed))),
+            ("PUT", ONE, 202, String::new()),
+        ];
+        script.extend((0..CLOSE_READS).map(|_| ("GET", ONE, 200, one(&closed))));
+        let ignored = Fake::new(script);
+        assert!(open_window_now(&ignored, "dop_v1_t", "staging", None, "20.42.7.9/32").is_err());
+        assert!(ignored.done());
+        assert!(
+            open_window_now(&Fake::new(vec![]), "t", "staging", None, "10.0.0.1/32").is_err(),
+            "a private address opens nothing"
+        );
         Ok(())
     }
 

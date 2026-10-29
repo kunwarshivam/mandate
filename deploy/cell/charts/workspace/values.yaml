@@ -211,6 +211,13 @@ verify:
   id: ""
   streams: []
 
+# Staging's step-up confirmation from CI (DEC-2087): with `template`, the chart renders the
+# suspended CronJob `control-template`, never scheduled, whose job template is the `control` run, so
+# `infra.yml`'s `step-up` action makes one Job from it that runs `mandate step-up confirm` or
+# `confirm-connect` against the journal and store, as the founder's CLI would. Staging alone.
+stepUp:
+  template: false
+
 # The workspace's founding grant (DEC-2114): with `enabled`, a post-install and post-upgrade hook
 # runs `workspace found --open` for `member`, the founder's principal ULID, on `api.workspace`.
 # Never the founder's identity-provider subject: the sign-in link is the `subject-links` ConfigMap.

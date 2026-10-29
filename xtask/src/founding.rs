@@ -47,6 +47,17 @@ pub(crate) fn staging_founder(root: &Path) -> Result<Founder> {
     })
 }
 
+/// The hosted workspace (`api.workspace`) of staging's values, whose control stream a step-up
+/// confirmation is appended to (DEC-2087).
+///
+/// # Errors
+/// When the file cannot be read or names no workspace.
+pub(crate) fn staging_workspace(root: &Path) -> Result<String> {
+    let text = fs::read_to_string(root.join(STAGING_VALUES))
+        .with_context(|| format!("reading {STAGING_VALUES}"))?;
+    value_in(&text, "api", "workspace")
+}
+
 /// The scalar `key` of the mapping `block` in `text`: the first line `<indent>key: value` after the
 /// line `<indent>block:` that is indented deeper than it, before any line that is not.
 fn value_in(text: &str, block: &str, key: &str) -> Result<String> {

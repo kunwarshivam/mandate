@@ -1761,6 +1761,9 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+/// The one line through which `infra.yml` hands the dispatch's step-up string to the secret step:
+/// an environment variable, never interpolated into a script (DEC-2087).
+const STEP_UP_ENV_LINE: &str = "          MANDATE_STEP_UP: ${{ inputs.confirm }}";
 /// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
 /// The one command `infra.yml`'s secret-holding step runs: the binary an earlier step built with
@@ -1897,6 +1900,9 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
+    if action == STEP_UP_ACTION {
+        return infra_step_up(&environment, &run);
+    }
     let named = env::var(INFRA_SHA_ENV).unwrap_or_default();
     let sha = run_commit(
         &action,
@@ -1968,6 +1974,199 @@ fn infra() -> Result<()> {
         Err(error) => Err(error),
     };
     settle(outcome, closed, applied, keys)
+}
+
+/// `infra.yml`'s action that confirms one CLI-confirm challenge on staging (DEC-2087).
+const STEP_UP_ACTION: &str = "step-up";
+/// How long the step-up Job may take before the action reports it failed: the `control` run's own
+/// deadline, 120 seconds, and the pod's start.
+const STEP_UP_POLLS: u32 = 75;
+
+/// `infra.yml`'s `step-up` action (DEC-2087): the dispatch's string is read before any cloud
+/// call; then the window opens on this runner through DigitalOcean's API, a kubeconfig that expires
+/// in 900 seconds is fetched, one Job made from the `control-template` CronJob runs `mandate step-up
+/// confirm` or `confirm-connect` as the founder, its output is shown, the Job is deleted, and the
+/// window is closed and read back however the run ended. No OpenTofu runs.
+fn infra_step_up(environment: &str, run: &str) -> Result<()> {
+    ensure!(
+        environment == "staging",
+        "step-up runs on staging alone, whose workspace is paper (DEC-2087)"
+    );
+    let confirm = step_up::parse(&env::var(step_up::CONFIRM_ENV).unwrap_or_default())?;
+    let root = repo_root()?;
+    let principal = founding::staging_founder(&root)?.member;
+    let workspace = founding::staging_workspace(&root)?;
+    let args = step_up::cli_args(&confirm, &workspace, &principal);
+    match &confirm {
+        step_up::Confirm::Connect { challenge, .. } => {
+            eprintln!("==> infra step-up on staging: a connect's start, challenge {challenge}");
+        }
+        step_up::Confirm::Approve {
+            challenge,
+            agent,
+            approval,
+            ..
+        } => eprintln!(
+            "==> infra step-up on staging: approval {approval} of agent {agent}, challenge \
+             {challenge}"
+        ),
+    }
+    let challenge = match &confirm {
+        step_up::Confirm::Connect { challenge, .. }
+        | step_up::Confirm::Approve { challenge, .. } => challenge,
+    };
+    let now_ms = infra_window::Http::now(&infra_window::Curl)
+        .ok()
+        .and_then(|seconds| u64::try_from(seconds).ok())
+        .and_then(|seconds| seconds.checked_mul(1000))
+        .unwrap_or_default();
+    if let Some(age) = step_up::challenge_age_s(challenge, now_ms) {
+        eprintln!(
+            "    the challenge is about {age} s old by the browser's clock; the web app holds one \
+             {} s",
+            step_up::CHALLENGE_TTL_S
+        );
+        if age > step_up::CHALLENGE_TTL_S {
+            eprintln!(
+                "    it has probably expired: if the web app says so, ask it for a new challenge \
+                 and dispatch again"
+            );
+        }
+    }
+    let attempt = env::var("GITHUB_RUN_ATTEMPT").unwrap_or_else(|_| "1".to_owned());
+    ensure!(
+        !attempt.is_empty() && attempt.chars().all(|c| c.is_ascii_digit()),
+        "GITHUB_RUN_ATTEMPT must be the run's attempt, which names its Job"
+    );
+    let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+    let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+    for value in tofu_audit::list_items(founder.as_deref().unwrap_or_default()) {
+        mask::add_mask(&value);
+    }
+    let outcome = step_up_in_window(&token, founder.as_deref(), run, &attempt, &args);
+    let closed = Some(infra_window::close_window(
+        &infra_window::Curl,
+        &token,
+        environment,
+        founder.as_deref(),
+    ));
+    settle(outcome, closed, false, Ok(()))
+}
+
+/// The step-up action's work while its window is open: open it on this runner, fetch the
+/// kubeconfig, and run the Job.
+fn step_up_in_window(
+    token: &str,
+    founder: Option<&str>,
+    run: &str,
+    attempt: &str,
+    args: &[String],
+) -> Result<()> {
+    let cidr = infra_window::open_window(&infra_window::Curl)?;
+    let id = infra_window::open_window_now(&infra_window::Curl, token, "staging", founder, &cidr)?;
+    eprintln!("    the control plane admits this runner (DEC-2028)");
+    let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
+    let (_, context) = infra_window::cluster_names("staging");
+    let kubeconfig = infra_window::fetch_kubeconfig(
+        &infra_window::Curl,
+        token,
+        &id,
+        &context,
+        Path::new(&temp),
+        run,
+    )?;
+    let kubectl = |args: &[&str], stdin: Option<&str>| -> Result<(bool, String)> {
+        let mut child = gitops::tool("kubectl")
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args([
+                "--context",
+                &context,
+                "--namespace",
+                gitops::WORKSPACE_NAMESPACE,
+            ])
+            .args(args)
+            .stdin(if stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .context("starting kubectl")?;
+        if let Some(text) = stdin {
+            child
+                .stdin
+                .take()
+                .context("kubectl's stdin")?
+                .write_all(text.as_bytes())?;
+        }
+        let out = child.wait_with_output().context("waiting for kubectl")?;
+        Ok((
+            out.status.success(),
+            String::from_utf8(out.stdout).context("kubectl printed non-UTF-8")?,
+        ))
+    };
+    let (read, template) = kubectl(&["get", "cronjob", step_up::TEMPLATE, "-o", "json"], None)?;
+    ensure!(
+        read,
+        "reading {} failed: staging's values set stepUp.template, and Flux renders it",
+        step_up::TEMPLATE
+    );
+    let template: serde_json::Value =
+        serde_json::from_str(&template).context("the template is not JSON")?;
+    let name = format!("step-up-{run}-{attempt}");
+    let job = step_up::job_from_template(&template, &name, args)?;
+    let (created, _) = kubectl(&["create", "-f", "-"], Some(&job.to_string()))?;
+    ensure!(created, "creating the Job {name} failed");
+    let outcome = step_up_job(&kubectl, &name);
+    let (deleted, _) = kubectl(&["delete", "job", &name, "--wait=false"], None)?;
+    if !deleted {
+        eprintln!(
+            "    the Job {name} was not deleted; it holds no secret and ends at its deadline"
+        );
+    }
+    outcome
+}
+
+/// Waits for the step-up Job `name`, then shows the CLI's output, which names the confirmation
+/// and holds no secret, and fails the action unless the Job succeeded.
+fn step_up_job(kubectl: vault_init::Kubectl<'_>, name: &str) -> Result<()> {
+    let job = format!("job/{name}");
+    let mut state = String::new();
+    for poll in 0..STEP_UP_POLLS {
+        if poll > 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        let (_, status) = kubectl(
+            &[
+                "get",
+                &job,
+                "-o",
+                "jsonpath={.status.succeeded}/{.status.failed}",
+            ],
+            None,
+        )?;
+        state = status.trim().to_owned();
+        if state.starts_with('1') || state.ends_with('1') {
+            break;
+        }
+    }
+    let (_, logs) = kubectl(&["logs", &job], None)?;
+    for line in logs.lines() {
+        eprintln!("    mandate: {line}");
+    }
+    ensure!(
+        state.starts_with('1'),
+        "the step-up Job {name} did not succeed ({state:?}); its output is above, and a new \
+         challenge may be needed"
+    );
+    eprintln!(
+        "    step-up confirmed; press Approve or Continue again in the web app. If it says the \
+         challenge expired, ask it for a new one and dispatch again"
+    );
+    Ok(())
 }
 
 /// How a run that may have opened a window ends (the review of #1771, B1 and B2): the window's
@@ -2780,7 +2979,7 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
     }
     for wanted in [
         "        options: [staging, production]",
-        "        options: [preflight, plan, apply]",
+        "        options: [preflight, plan, apply, step-up]",
     ] {
         if !has(wanted) {
             fail(&format!(
@@ -2818,10 +3017,23 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
             "          MANDATE_INFRA_SHA: ${{ inputs.sha }}",
             "the secret step must receive the reviewed commit, which it checks against the checkout",
         ),
+        (
+            STEP_UP_ENV_LINE,
+            "the secret step must receive the step-up string in its environment (DEC-2087)",
+        ),
     ] {
         if !has(wanted) {
             fail(why);
         }
+    }
+    if lines
+        .iter()
+        .any(|line| line.contains("inputs.confirm") && line.trim_end() != STEP_UP_ENV_LINE)
+    {
+        fail(
+            "the step-up string may reach the job only as the secret step's environment, never \
+             a script it could run in (DEC-2087)",
+        );
     }
     let steps: Vec<Vec<usize>> = {
         let mut steps: Vec<Vec<usize>> = Vec::new();
@@ -7060,6 +7272,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_ACTION",
     "MANDATE_INFRA_ENVIRONMENT",
     "MANDATE_INFRA_SHA",
+    "MANDATE_STEP_UP",
     "MANDATE_OPENROUTER_API_KEY",
     "MANDATE_FOUNDER_OIDC_SUBJECT",
     "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
@@ -20928,6 +21141,24 @@ mod tests {
             (
                 "no reviewed commit",
                 edited("          MANDATE_INFRA_SHA: ${{ inputs.sha }}\n", ""),
+            ),
+            (
+                "no step-up string",
+                edited("          MANDATE_STEP_UP: ${{ inputs.confirm }}\n", ""),
+            ),
+            (
+                "step-up string in a script",
+                edited(
+                    "      - run: target/debug/xtask infra\n",
+                    "      - run: echo \"${{ inputs.confirm }}\" && target/debug/xtask infra\n",
+                ),
+            ),
+            (
+                "no step-up action",
+                edited(
+                    "        options: [preflight, plan, apply, step-up]\n",
+                    "        options: [preflight, plan, apply]\n",
+                ),
             ),
             (
                 "close not always",
