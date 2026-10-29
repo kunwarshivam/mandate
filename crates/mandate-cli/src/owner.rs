@@ -19,18 +19,35 @@ use clap::Args;
 use mandate_journal::ArtifactSource;
 use mandate_num::{Price, Qty};
 
-use crate::agent::{self, Command, Confirmed, RELEASE_WARNING, Restriction, Status, Subject};
+use crate::agent::{
+    self, Command, Confirmed, Holds, RELEASE_WARNING, Restriction, Status, Subject,
+};
 use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted};
 use crate::inbox::InstantIds;
 use crate::postgres::{JournalArgs, PgControlJournal};
 use crate::register::{OwnerArgs, open};
 use crate::retire;
+use mandate_journal::holds::{Holder, Reason};
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
     /// The agent's id.
     pub agent: String,
     /// The broker account whose stream holds the agent's restrictions.
+    #[arg(long, value_name = "ID")]
+    pub account: String,
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    #[command(flatten)]
+    pub target: JournalArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct HoldsArgs {
+    /// The agent whose holds to list: its own and its account's. Without it, every hold on the
+    /// account.
+    pub agent: Option<String>,
+    /// The broker account whose stream holds them.
     #[arg(long, value_name = "ID")]
     pub account: String,
     #[command(flatten)]
@@ -414,6 +431,75 @@ fn run(
         writeln!(report, "{line}")?;
     }
     Ok(())
+}
+
+/// `mandate agent holds`: [`agent::holds`], printed by [`holds_lines`]. Commits nothing.
+///
+/// # Errors
+/// The owner's refusals before the journal is opened, then the journal's and the fold's.
+pub fn run_holds(args: &HoldsArgs, report: &mut impl Write) -> anyhow::Result<()> {
+    let owner = args.owner.owner()?;
+    let journal = PgControlJournal::open(&args.target)?;
+    let found = agent::holds(&journal, &owner, &args.account, args.agent.as_deref())?;
+    for line in holds_lines(&found) {
+        writeln!(report, "{line}")?;
+    }
+    Ok(())
+}
+
+/// The lines `mandate agent holds` prints: whether an independent user must acknowledge, then each
+/// hold on one line (its `event`, subject, holder, what it holds, its mode, since when, and its
+/// unspent request and who made it), and under it the command that moves it on, to run with the
+/// usual owner and journal flags: the `agent acknowledge` that lifts it, the `agent request-ack`
+/// that asks another user to where one must, the answer to a request that another user runs when
+/// the request is the caller's own (rule 239), or why none lifts it yet.
+#[must_use]
+pub fn holds_lines(found: &Holds) -> Vec<String> {
+    let mut lines = vec![format!(
+        "independent approval required: {}",
+        if found.independent { "yes" } else { "no" }
+    )];
+    if found.holds.is_empty() {
+        lines.push("no holds".to_owned());
+    }
+    for hold in &found.holds {
+        let raised = &hold.raised;
+        let subject = raised.reason.subject();
+        let holder = match &raised.holder {
+            Holder::Agent(agent) => agent.as_str(),
+            Holder::Account => "*",
+        };
+        let held = match &raised.reason {
+            Reason::Limit(code) | Reason::Cause(code) => code.as_str(),
+            Reason::Reconciliation { restriction, .. } => restriction.as_str(),
+        };
+        let request = hold.request.as_ref().map(|r| r.event_id.as_str());
+        let requested_by = hold.request.as_ref().map(|r| r.requested_by.as_str());
+        lines.push(format!(
+            "{} subject={subject} holder={holder} held={held} mode={} since={} request={} requested_by={}",
+            raised.event,
+            raised.mode.unwrap_or("-"),
+            raised.raised_at,
+            request.unwrap_or("-"),
+            requested_by.unwrap_or("-"),
+        ));
+        let named = format!("{} {} --subject {subject}", hold.agent_id, raised.event);
+        lines.push(match (subject, request) {
+            ("restriction", _) => {
+                "  not yet acknowledgeable: the executor lifts no restriction until E7-2y"
+                    .to_owned()
+            }
+            (_, Some(request)) if requested_by == Some(found.user.as_str()) => format!(
+                "  another user answers your request: mandate agent acknowledge {named} --request {request}"
+            ),
+            (_, Some(request)) => {
+                format!("  mandate agent acknowledge {named} --request {request}")
+            }
+            (_, None) if found.independent => format!("  mandate agent request-ack {named}"),
+            (_, None) => format!("  mandate agent acknowledge {named}"),
+        });
+    }
+    lines
 }
 
 /// Runs `agent status` and prints [`status_lines`].

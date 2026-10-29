@@ -695,3 +695,59 @@ fn the_fold_finds_the_cause_by_id_and_refuses_one_it_cannot() {
     let mut lost = mandate_runtime::ResearchState::new();
     assert!(lost.fold(&start(1, "agent:ws1:agent-a-9")).is_err());
 }
+
+const STORED_ROW: &[u8] = include_bytes!("../../../fixtures/news/licensed.row.json");
+const STORED_RECORD: &[u8] = include_bytes!("../../../fixtures/news/licensed.record.json");
+/// The stored item's `knowledge_at`, 2026-10-26T15:00:00Z.
+const STORED_KNOWN: i64 = 1_793_026_800;
+
+/// DEC-2288: a news item the news reader stored, about SPY, on which the agent holds a thesis,
+/// starts one `monitor` run, whose `ObservationRecorded` names the row's `item_ref` as its
+/// `data_ref`, and offered again starts nothing.
+#[test]
+fn a_stored_news_item_starts_one_monitor_run_naming_its_item_ref() {
+    let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let mut world = world();
+    world.active[0].symbol = Symbol::new("SPY").unwrap_or_else(|e| panic!("{e}"));
+    world
+        .facts
+        .allowlist
+        .sources
+        .insert(mandate_research::SourceId::new("alpaca.news").unwrap_or_else(|e| panic!("{e}")));
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let stored = || {
+        RetrievedObservation::stored(STORED_ROW, STORED_RECORD).unwrap_or_else(|e| panic!("{e:?}"))
+    };
+    let step = offer(&mut lp, &ports, &world, STORED_KNOWN + 60, stored());
+    assert!(started(&step), "{step:?}");
+    let [seen, start] =
+        <[FoldedEvent; 2]>::try_from(last_two(&lp)).unwrap_or_else(|_| panic!("two"));
+    assert_eq!(seen.event_type, "ObservationRecorded");
+    assert_eq!(start.event_type, "RunStarted");
+    let p = |e: &FoldedEvent, m: &str| e.payload.get(m).and_then(Value::as_str).map(str::to_owned);
+    assert_eq!(
+        p(&seen, "data_ref").as_deref(),
+        Some("sha256:bbf39bbd6017fb65b0b82df4d4c25ec382d7072bcc2ea2b6f30ed7eb7792f90b"),
+        "the row's item_ref, as it is"
+    );
+    assert_eq!(p(&seen, "instrument_id").as_deref(), Some("SPY"));
+    assert_eq!(p(&seen, "source").as_deref(), Some("alpaca.news"));
+    assert_eq!(p(&start, "kind").as_deref(), Some("monitor"));
+    lp.run(
+        ResearchInput::Poll(RiskClock::from_secs(STORED_KNOWN + 3_600)),
+        &ports,
+        &world,
+    );
+    assert!(
+        !started(&offer(
+            &mut lp,
+            &ports,
+            &world,
+            STORED_KNOWN + 7_200,
+            stored()
+        )),
+        "one stored item starts one run"
+    );
+}

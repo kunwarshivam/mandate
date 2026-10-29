@@ -41,6 +41,9 @@ pub enum AgentCommand {
     Kill(BrakeArgs),
     /// Show one agent's mode, startup hold, pending approvals and restrictions. Commits nothing.
     Status(owner::StatusArgs),
+    /// List the holds an owner can acknowledge on one account, each with the command that lifts
+    /// it. Commits nothing.
+    Holds(owner::HoldsArgs),
     /// Show the code that resumes one agent from the owner's own pause, or resume it with it.
     Resume(owner::ResumeArgs),
     /// Show the code that stops one agent, or stop it with it; `--release` hands its positions to
