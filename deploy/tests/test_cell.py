@@ -1203,6 +1203,76 @@ def test_the_news_reader_renders_in_staging_alone_on_paper_and_with_a_followed_a
     assert "images.news-reader needs images.api" in storeless.stderr, storeless.stderr
 
 
+# The local cell's recorded news reader (DEC-2085): a local build of its image, which carries the
+# recording, and the followed agent k3d's values name.
+NEWS_LOCAL = ("--set", "images.news-reader=mandate.local/news-reader:0123456789ab")
+RECORDED_ARGS = [
+    "run", "--workspace", "{workspace}", "--allowlist", "/etc/mandate/news/allowlist.toml",
+    "--artifacts", "/var/lib/mandate/artifacts", "--recorded",
+    "/usr/local/share/mandate/news/recorded-news.json", "--probe", "/tmp/process.sock",
+    "--user-agent", "Mandate news reader ops@owlhead.ai", "--follow",
+    "demo-research=01KDER0000000000000000000A",
+]
+
+
+def test_the_local_cell_runs_the_news_reader_on_its_recording_alone():
+    """DEC-2085 item 4: in the local cell, with k3d's `news.recorded` and followed agent, the news
+    reader runs on the recording its image carries and the fixture key: `--recorded` and never the
+    vault's flags, no AppRole, no vault directory and no copy step, and egress to Postgres alone,
+    since it reaches neither the vault nor a vendor host. It still writes as `mandate_news_reader`,
+    reads the allowlist from its ConfigMap and stores into the artifact store."""
+    docs = render_all(*NEWS_LOCAL)
+    reader = next(w for w in workloads(docs) if w["metadata"]["name"] == "news-reader")
+    expected = [a.replace("{workspace}", HOSTED) for a in RECORDED_ARGS]
+    assert first_container(reader)["args"] == expected
+    spec = pod_spec(reader)
+    assert not [i for i in spec.get("initContainers", []) if i["name"] == "vault-credentials"]
+    assert not [v for v in spec["volumes"] if v["name"] in ("vault", "vault-sources")]
+    mounts = {m["mountPath"]: m.get("readOnly", False) for m in first_container(reader)["volumeMounts"]}
+    assert "/run/mandate/vault" not in mounts
+    assert mounts["/etc/mandate/news"] is True and mounts["/var/lib/mandate/artifacts"] is False
+    roles = next(v for v in spec["volumes"] if v["name"] == "journal-role")
+    assert roles["secret"]["secretName"] == "journal-role-mandate-news-reader"
+    labels = reader["spec"]["template"]["metadata"]["labels"]
+    assert {k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true"} == {
+        "mandate.dev/egress-postgres",
+    }
+    policy = policies(docs)["egress-news-reader"]["spec"]
+    reached = {
+        port["port"] for rule in policy.get("egress") or [] for port in rule.get("ports", [])
+    }
+    assert reached == {53, 5432}, reached
+
+
+def render_all_result(*extra: str) -> subprocess.CompletedProcess:
+    """`render_all`'s render, its result whether it renders or not."""
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set-json", f'egress.kube-api=["{KUBE_API}"]', *extra,
+    )
+
+
+def test_the_recorded_news_reader_is_the_local_cell_s_alone_and_the_live_one_staging_s_alone():
+    """DEC-2085 items 3 and 4, DEC-2084 item 2: `news.recorded` renders only in the local cell, at
+    dev or ci, and never in a hosted cell, whatever its tier; the live reader, which logs in to the
+    vault for the platform's key, is still refused in the local cell."""
+    local_live = render_all_result(*NEWS_LOCAL, "--set", "news.recorded=false")
+    assert "runs the news reader in staging alone" in local_live.stderr, local_live.stderr
+    for tier in ("dev", "ci"):
+        done = render_all_result(*NEWS_LOCAL, "--set", f"deploymentTier={tier}")
+        assert done.returncode == 0, (tier, done.stderr)
+    for tier in ("ci", "staging", "production"):
+        refused = helm(
+            CHART, "-f", str(CELL / "values" / "k3d.yaml"), "--set", "localImages=false",
+            "--set", f"deploymentTier={tier}", "--set", "api.workspace=01KDEM0000000000000000000W",
+            "--set", f"images.api={PLACEHOLDER.format('api')}",
+            "--set", f"images.news-reader={PLACEHOLDER.format('news-reader')}",
+            "--set", "news.recorded=true",
+        )
+        message = "news.recorded runs the news reader on its recording in the local cell alone"
+        assert message in refused.stderr, (tier, refused.stderr)
+
+
 def test_the_news_reader_s_journal_role_is_made_by_its_exact_name_in_the_application_group():
     """R1 on #2896: migration 0002 refuses the news reader by its role's name alone, so the roles
     file must make `mandate_news_reader` by exactly that name, a member of `mandate_journal_app`
