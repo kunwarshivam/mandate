@@ -7617,8 +7617,10 @@ publication time before the stream's last `knowledge_at`, is still fetched withi
 ([DEC-2290](../project/decisions/DEC-2290.md)). Rule 284's `item_id` dedupe makes the overlap safe:
 an item the stream holds, fetched again, is counted as held and never stored twice. One indexed
 later than the overlap is not fetched. It stores an item the rules would refuse
-nowhere: one with no ticker or more than 32 is skipped and counted, by id only, in the reader's
-metrics, never journaled and never silent. So such an item never starts a run, even when one of its
+nowhere, and counts each in the reader's metrics, never journaled and never silent: one with no
+ticker is skipped and counted by its id, and one with more than 32 is refused by the parser and
+counted by the parser's code, `too_many_tags`, since a refused item has no id the parser vouches
+for. So such an item never starts a run, even when one of its
 tickers carries an active thesis. A refused append is the reader's failure, not a skipped
 item: the reader stops and reports not ready, and the next process folds the stream again.
 
