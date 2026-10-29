@@ -643,7 +643,10 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
   - The sequence records its own agent's prices: its agent's own leg's, from its request or its
     placement record, and the instrument's last protection prices only when no other holder has a
     leg. It never takes another holder's prices.
-  - The sequence waits for confirmation only on its own cancels, and re-places only what it cancelled.
+  - The sequence waits for confirmation only on its own cancels (its re-placement still waits on
+    every working exit in the instrument; see the backlog row on that wait). After the exit, the
+    re-placement tops up each holder's legs to its coverage, so it may place a leg for a shortfall
+    the sequence did not cancel, and it never re-places a leg it kept.
   - A passive exit, and an exit of no agent (`*`), still cancel every leg.
 
 ### 5.5 Kill switch
