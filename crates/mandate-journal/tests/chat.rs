@@ -8,7 +8,11 @@ const HASH: &str = "sha256:55555555555555555555555555555555555555555555555555555
 
 fn envelope(event_type: &str, actor: &str, payload: &str, refs: &[&str]) -> Vec<u8> {
     let refs: Vec<String> = refs.iter().map(|r| format!("\"{r}\"")).collect();
-    let build = if actor == "user" { "null" } else { r#""sha256:0000000000000000000000000000000000000000000000000000000000000000""# };
+    let build = if actor == "user" {
+        "null"
+    } else {
+        r#""sha256:0000000000000000000000000000000000000000000000000000000000000000""#
+    };
     let text = format!(
         r#"{{"envelope_version":1,"environment":"paper","event_id":"01JAA3P4A000000000000000E1","stream_id":"ctl:ws_01J8Z2","event_type":"{event_type}","schema_version":1,"event_time":"2026-10-29T15:00:05.250000000Z","clock_source":"local","causation_id":null,"correlation_id":null,"actor":{{"kind":"{actor}","id":"01JAA2N0A000000000000000P1","version":"1","build":{build}}},"config_refs":{{}},"payload":{payload},"artifact_refs":[{}],"pii_refs":[]}}"#,
         refs.join(",")
@@ -100,32 +104,105 @@ fn a_thread_names_one_agent_or_one_setup() {
         let payload = format!(
             r#"{{"agent_id":{agent},"setup_id":{setup},"member":"m","run_id":"run_1","reason":"answered"}}"#
         );
-        assert!(parses("ChatRunEnded", "system", &payload, &[]).is_err(), "{agent} {setup}");
+        assert!(
+            parses("ChatRunEnded", "system", &payload, &[]).is_err(),
+            "{agent} {setup}"
+        );
     }
 }
 
 #[test]
 fn only_the_owner_writes_the_owners_records_and_only_the_system_the_agents() {
-    assert!(parses("ChatMessagePosted", "system", &owner_message(r#""hi""#, "null", false), &[]).is_err());
-    assert!(parses("ChatMessagePosted", "user", &agent_message(r#""hi""#, "null"), &[]).is_err());
-    assert!(parses("ChatTurnRecorded", "user", &turn("agent", r#""agent_a""#, "null"), &[HASH]).is_err());
+    assert!(
+        parses(
+            "ChatMessagePosted",
+            "system",
+            &owner_message(r#""hi""#, "null", false),
+            &[]
+        )
+        .is_err()
+    );
+    assert!(
+        parses(
+            "ChatMessagePosted",
+            "user",
+            &agent_message(r#""hi""#, "null"),
+            &[]
+        )
+        .is_err()
+    );
+    assert!(
+        parses(
+            "ChatTurnRecorded",
+            "user",
+            &turn("agent", r#""agent_a""#, "null"),
+            &[HASH]
+        )
+        .is_err()
+    );
     let settings = r#"{"agent_id":"agent_a","chat_model":"llm.chat_haiku","daily_cap_usd":"5"}"#;
     assert!(parses("ChatSettingsChanged", "system", settings, &[]).is_err());
 }
 
 #[test]
 fn an_owners_message_is_text_only_and_an_agents_carries_something() {
-    assert!(parses("ChatMessagePosted", "user", &owner_message("null", "null", false), &[]).is_err());
     assert!(
-        parses("ChatMessagePosted", "user", &owner_message(r#""hi""#, r#"{"kind":"order"}"#, false), &[]).is_err(),
+        parses(
+            "ChatMessagePosted",
+            "user",
+            &owner_message("null", "null", false),
+            &[]
+        )
+        .is_err()
+    );
+    assert!(
+        parses(
+            "ChatMessagePosted",
+            "user",
+            &owner_message(r#""hi""#, r#"{"kind":"order"}"#, false),
+            &[]
+        )
+        .is_err(),
         "an owner never posts a card"
     );
-    assert!(parses("ChatMessagePosted", "user", &owner_message(r#""hi""#, "null", true), &[]).is_err());
-    assert!(parses("ChatMessagePosted", "system", &agent_message("null", "null"), &[]).is_err());
+    assert!(
+        parses(
+            "ChatMessagePosted",
+            "user",
+            &owner_message(r#""hi""#, "null", true),
+            &[]
+        )
+        .is_err()
+    );
+    assert!(
+        parses(
+            "ChatMessagePosted",
+            "system",
+            &agent_message("null", "null"),
+            &[]
+        )
+        .is_err()
+    );
 }
 
 #[test]
 fn a_setup_turn_is_the_setup_kind_and_an_agents_is_not() {
-    assert!(parses("ChatTurnRecorded", "system", &turn("setup", r#""agent_a""#, "null"), &[HASH]).is_err());
-    assert!(parses("ChatTurnRecorded", "system", &turn("agent", "null", r#""setup_1""#), &[HASH]).is_err());
+    assert!(
+        parses(
+            "ChatTurnRecorded",
+            "system",
+            &turn("setup", r#""agent_a""#, "null"),
+            &[HASH]
+        )
+        .is_err()
+    );
+    assert!(
+        parses(
+            "ChatTurnRecorded",
+            "system",
+            &turn("agent", "null", r#""setup_1""#),
+            &[HASH]
+        )
+        .is_err()
+    );
 }

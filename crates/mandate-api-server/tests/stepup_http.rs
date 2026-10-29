@@ -108,6 +108,7 @@ fn fixture(environment: &str, challenges: Challenges) -> Fixture {
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

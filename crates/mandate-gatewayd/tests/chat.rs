@@ -18,12 +18,25 @@ fn the_committed_registry_offers_both_chat_models() {
     let ids: Vec<&str> = chats.iter().map(|c| c.entry.model_id.as_str()).collect();
     assert_eq!(ids, ["llm.chat_sonnet", "llm.chat_haiku"]);
     let mut registry = Registry::new();
-    assert!(register_chat(&mut registry, &chats).is_empty(), "every chat entry registers");
+    assert!(
+        register_chat(&mut registry, &chats).is_empty(),
+        "every chat entry registers"
+    );
     for chat in &chats {
         let pin = chat.entry.content().model_ref();
         let entry = registry.entry(&pin).unwrap();
-        assert_eq!(entry.status(), Status::Offered, "{} is offered", pin.model_id);
-        assert_eq!(entry.endpoints().count(), 1, "{} has its endpoint", pin.model_id);
+        assert_eq!(
+            entry.status(),
+            Status::Offered,
+            "{} is offered",
+            pin.model_id
+        );
+        assert_eq!(
+            entry.endpoints().count(),
+            1,
+            "{} has its endpoint",
+            pin.model_id
+        );
     }
     assert_eq!(
         chat_upstreams(&chats).into_iter().collect::<Vec<_>>(),

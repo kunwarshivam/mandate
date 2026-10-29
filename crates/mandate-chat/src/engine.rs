@@ -166,7 +166,11 @@ pub fn run(
                 watch: watch(record.output.as_ref()),
             };
         }
-        let results: Vec<String> = record.tool_calls.iter().map(|call| tools.run(call)).collect();
+        let results: Vec<String> = record
+            .tool_calls
+            .iter()
+            .map(|call| tools.run(call))
+            .collect();
         if host.results(turn, &record.tool_calls, &results).is_err() {
             return End::Halted;
         }

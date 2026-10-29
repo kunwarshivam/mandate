@@ -131,6 +131,7 @@ fn built_with(with_store: bool, bars: Option<std::path::PathBuf>) -> Fixture {
         reduction: Arc::default(),
         folds: Arc::default(),
         bars,
+        chat: Default::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

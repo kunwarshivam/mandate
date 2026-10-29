@@ -16,9 +16,7 @@ use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamType};
 
 /// The control-stream event types §9.43 adds.
-pub(crate) const CONTROL: [&str; 7] = [
-    MESSAGE, TURN, RESULTS, ENDED, STOP, SETTINGS, GOALS,
-];
+pub(crate) const CONTROL: [&str; 7] = [MESSAGE, TURN, RESULTS, ENDED, STOP, SETTINGS, GOALS];
 
 const MESSAGE: &str = "ChatMessagePosted";
 const TURN: &str = "ChatTurnRecorded";
@@ -33,7 +31,13 @@ const KINDS: [&str; 3] = ["agent", "proactive", "setup"];
 
 /// How a run ends.
 const ENDS: [&str; 7] = [
-    "answered", "stopped", "budget", "model_error", "refused", "halted", "ceiling",
+    "answered",
+    "stopped",
+    "budget",
+    "model_error",
+    "refused",
+    "halted",
+    "ceiling",
 ];
 
 /// The §9.43 schema of `event_type` at `schema_version` on `stream`, or `None`.
@@ -61,7 +65,11 @@ pub(crate) fn schema(
 /// - 332: an owner's message carries text and no card, and is never proactive;
 /// - 333: an agent's message carries text, a card, or both;
 /// - 334: a setup's turn is of the `setup` kind and an agent's is not.
-pub(crate) fn rules(event_type: &str, payload: &Value, actor: Option<&Value>) -> Result<(), Invalid> {
+pub(crate) fn rules(
+    event_type: &str,
+    payload: &Value,
+    actor: Option<&Value>,
+) -> Result<(), Invalid> {
     if !CONTROL.contains(&event_type) {
         return Ok(());
     }
@@ -142,7 +150,10 @@ static TURN_RECORDED: Ty = Ty::Record(&[
     ("response_ref", Ty::Nullable(&Ty::DigestRef)),
     (
         "calls",
-        Ty::List(&Ty::Record(&[("name", Ty::Str), ("arguments", Ty::OpenObject)])),
+        Ty::List(&Ty::Record(&[
+            ("name", Ty::Str),
+            ("arguments", Ty::OpenObject),
+        ])),
     ),
 ]);
 

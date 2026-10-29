@@ -180,7 +180,8 @@ struct Journal {
 
 impl Host for Journal {
     fn invoked(&mut self, turn: u32, record: &CallRecord) -> Result<(), Halt> {
-        self.events.push(format!("invoked {turn} {}", record.outcome.code()));
+        self.events
+            .push(format!("invoked {turn} {}", record.outcome.code()));
         Ok(())
     }
     fn results(&mut self, turn: u32, calls: &[ToolCall], results: &[String]) -> Result<(), Halt> {
@@ -210,7 +211,10 @@ fn spec(model: &ModelRef, kind: &str) -> RunSpec {
         kind: kind.to_owned(),
         model: model.clone(),
         inputs: BTreeMap::from([
-            ("context".to_owned(), "Agent: Growth. Mode: active.".to_owned()),
+            (
+                "context".to_owned(),
+                "Agent: Growth. Mode: active.".to_owned(),
+            ),
             ("message".to_owned(), "how am I doing?".to_owned()),
             ("thread".to_owned(), "(empty)".to_owned()),
         ]),
@@ -222,21 +226,49 @@ fn spec(model: &ModelRef, kind: &str) -> RunSpec {
 #[test]
 fn the_entry_registers_and_each_kind_offers_its_own_tools() {
     let content = chat_entry().content();
-    assert!(Registry::new().register(content).is_ok(), "the chat entry is one a registry pins");
+    assert!(
+        Registry::new().register(content).is_ok(),
+        "the chat entry is one a registry pins"
+    );
     let agent = menu(AGENT);
     let proactive = menu(PROACTIVE);
     let setup = menu(SETUP);
-    for owner_only in [name::BUY, name::SELL, name::PAUSE, name::RESUME, name::STOP, name::KILL] {
-        assert!(agent.iter().any(|t| t == owner_only), "{owner_only} is the owner's chat's");
-        assert!(!proactive.iter().any(|t| t == owner_only), "no proactive run can {owner_only}");
-        assert!(!setup.iter().any(|t| t == owner_only), "no setup run can {owner_only}");
+    for owner_only in [
+        name::BUY,
+        name::SELL,
+        name::PAUSE,
+        name::RESUME,
+        name::STOP,
+        name::KILL,
+    ] {
+        assert!(
+            agent.iter().any(|t| t == owner_only),
+            "{owner_only} is the owner's chat's"
+        );
+        assert!(
+            !proactive.iter().any(|t| t == owner_only),
+            "no proactive run can {owner_only}"
+        );
+        assert!(
+            !setup.iter().any(|t| t == owner_only),
+            "no setup run can {owner_only}"
+        );
     }
-    assert!(proactive.iter().any(|t| t == name::PROPOSE), "a proactive run proposes for approval");
+    assert!(
+        proactive.iter().any(|t| t == name::PROPOSE),
+        "a proactive run proposes for approval"
+    );
     assert!(!agent.iter().any(|t| t == name::PROPOSE));
-    assert!(setup.iter().any(|t| t == name::DRAFT), "only setup drafts a mandate");
+    assert!(
+        setup.iter().any(|t| t == name::DRAFT),
+        "only setup drafts a mandate"
+    );
     assert!(!agent.iter().any(|t| t == name::DRAFT));
     for kind in entry::KINDS {
-        assert!(menu(kind).iter().any(|t| t == name::REPLY), "every kind can reply");
+        assert!(
+            menu(kind).iter().any(|t| t == name::REPLY),
+            "every kind can reply"
+        );
     }
 }
 
@@ -255,7 +287,13 @@ fn a_run_journals_each_call_before_its_tools_and_ends_on_the_summary() {
     ]);
     let mut tools = Served::default();
     let mut host = Journal::default();
-    let end = run(&spec(&model, AGENT), 64, &mut Through(&mut gateway), &mut tools, &mut host);
+    let end = run(
+        &spec(&model, AGENT),
+        64,
+        &mut Through(&mut gateway),
+        &mut tools,
+        &mut host,
+    );
     assert_eq!(
         end,
         End::Answered {
@@ -263,21 +301,41 @@ fn a_run_journals_each_call_before_its_tools_and_ends_on_the_summary() {
         }
     );
     assert_eq!(tools.calls, vec![name::POSITIONS, name::REPLY]);
-    assert_eq!(host.events, vec!["invoked 0 ok", "results 0 2", "invoked 1 ok"]);
-    assert_eq!(gateway.transport().sent().len(), 2, "two turns, two provider calls");
+    assert_eq!(
+        host.events,
+        vec!["invoked 0 ok", "results 0 2", "invoked 1 ok"]
+    );
+    assert_eq!(
+        gateway.transport().sent().len(),
+        2,
+        "two turns, two provider calls"
+    );
 }
 
 #[test]
 fn a_tool_the_kind_does_not_offer_is_refused_by_the_gateway_and_never_runs() {
     let (mut gateway, model) = gateway();
-    gateway
-        .transport_mut()
-        .script(vec![turn(&[(name::BUY, r#"{"quantity":"5","symbol":"NVDA"}"#)], None)]);
+    gateway.transport_mut().script(vec![turn(
+        &[(name::BUY, r#"{"quantity":"5","symbol":"NVDA"}"#)],
+        None,
+    )]);
     let mut tools = Served::default();
     let mut host = Journal::default();
-    let end = run(&spec(&model, PROACTIVE), 64, &mut Through(&mut gateway), &mut tools, &mut host);
-    assert!(matches!(end, End::Model(_)), "a proactive buy is not offered: {end:?}");
-    assert!(tools.calls.is_empty(), "the refused call never reached a tool");
+    let end = run(
+        &spec(&model, PROACTIVE),
+        64,
+        &mut Through(&mut gateway),
+        &mut tools,
+        &mut host,
+    );
+    assert!(
+        matches!(end, End::Model(_)),
+        "a proactive buy is not offered: {end:?}"
+    );
+    assert!(
+        tools.calls.is_empty(),
+        "the refused call never reached a tool"
+    );
 }
 
 #[test]
@@ -289,7 +347,13 @@ fn stop_and_the_spending_cap_end_a_run_before_any_call() {
         ..Journal::default()
     };
     assert_eq!(
-        run(&spec(&model, AGENT), 64, &mut Through(&mut gateway), &mut tools, &mut stopped),
+        run(
+            &spec(&model, AGENT),
+            64,
+            &mut Through(&mut gateway),
+            &mut tools,
+            &mut stopped
+        ),
         End::Stopped
     );
     let mut spent = Journal {
@@ -297,10 +361,19 @@ fn stop_and_the_spending_cap_end_a_run_before_any_call() {
         ..Journal::default()
     };
     assert_eq!(
-        run(&spec(&model, AGENT), 64, &mut Through(&mut gateway), &mut tools, &mut spent),
+        run(
+            &spec(&model, AGENT),
+            64,
+            &mut Through(&mut gateway),
+            &mut tools,
+            &mut spent
+        ),
         End::Budget
     );
-    assert!(gateway.transport().sent().is_empty(), "nothing left the deployment");
+    assert!(
+        gateway.transport().sent().is_empty(),
+        "nothing left the deployment"
+    );
 }
 
 #[test]
@@ -327,12 +400,20 @@ fn a_halt_on_journaling_stops_before_any_tool_runs() {
         }
     }
     let (mut gateway, model) = gateway();
-    gateway.transport_mut().script(vec![turn(
-        &[(name::PAUSE, "{}")],
-        None,
-    )]);
+    gateway
+        .transport_mut()
+        .script(vec![turn(&[(name::PAUSE, "{}")], None)]);
     let mut tools = Served::default();
-    let end = run(&spec(&model, AGENT), 64, &mut Through(&mut gateway), &mut tools, &mut Failing);
+    let end = run(
+        &spec(&model, AGENT),
+        64,
+        &mut Through(&mut gateway),
+        &mut tools,
+        &mut Failing,
+    );
     assert_eq!(end, End::Halted);
-    assert!(tools.calls.is_empty(), "journal before acting: the pause never ran");
+    assert!(
+        tools.calls.is_empty(),
+        "journal before acting: the pause never ran"
+    );
 }

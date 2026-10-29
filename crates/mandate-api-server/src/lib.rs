@@ -70,6 +70,8 @@ pub mod backtests;
 pub mod cache;
 pub mod catalogue;
 pub mod challenges;
+pub mod chat;
+pub mod chat_run;
 pub mod clock;
 pub mod commands;
 pub mod config;

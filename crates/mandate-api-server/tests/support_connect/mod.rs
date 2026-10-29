@@ -295,6 +295,7 @@ fn fixture_bound(
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     journal
         .streams

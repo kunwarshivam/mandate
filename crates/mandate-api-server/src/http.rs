@@ -102,6 +102,9 @@ pub struct App {
     /// The stored bars root the price read reads (`MANDATE_BARS`, DEC-2152); `None` when the
     /// deployment names none, and the read answers `no_store`.
     pub bars: Option<std::path::PathBuf>,
+    /// The chat (DEC-2293): the gateway service's address, the chat models, and the runs in
+    /// flight; [`crate::chat::Chat::default`] serves no model and every run says so.
+    pub chat: Arc<crate::chat::Chat>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -160,6 +163,42 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/mandate-versions",
             get(mandate_versions::agent_mandate_versions).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/messages",
+            get(crate::chat::get_messages)
+                .post(crate::chat::post_message)
+                .fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/runs/{run}/stop",
+            post(crate::chat::stop_run).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/goals",
+            get(crate::chat::goals).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/settings",
+            get(crate::chat::get_settings)
+                .put(crate::chat::put_settings)
+                .fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/setup/messages",
+            post(crate::chat::post_setup).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/setup/{setup}/messages",
+            get(crate::chat::get_setup).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/models",
+            get(crate::chat::models).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/home",
+            get(crate::chat::home).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/orders",

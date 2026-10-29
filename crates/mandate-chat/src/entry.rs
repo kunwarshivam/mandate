@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use mandate_canon::{Int, Key, Object, Value};
-use mandate_gateway::registry::{Identity, Mode, PinnedContent, Template};
+use mandate_gateway::registry::{Identity, Mode, PinnedContent, Snapshot, Template};
 use mandate_gateway::tools::{Agentic, LoopBounds, OutputKind, ToolClass, ToolDeclaration};
 
 /// The run kinds, sorted, as the registry requires of every tool's menu.
@@ -50,6 +50,7 @@ pub mod name {
     pub const STOP: &str = "agent.stop";
     pub const KILL: &str = "agent.kill";
     pub const DRAFT: &str = "mandate.propose";
+    pub const TEMPLATE: &str = "mandate.template";
     pub const REPLY: &str = "chat.reply";
     pub const NOTE: &str = "goals.update";
 }
@@ -124,6 +125,32 @@ pub struct ChatEntry {
 }
 
 impl ChatEntry {
+    /// The entry a live registry file's chat item names in its `entry` member: `model_id`,
+    /// `model_version`, `provider`, `model_name`, a dated `snapshot`, `deadline_ms`, and
+    /// `max_output_tokens`, each present; `None` when one is missing or out of range.
+    pub fn from_registry(entry: &Value) -> Option<Self> {
+        let text = |name: &str| {
+            entry
+                .get(name)
+                .and_then(Value::as_str)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned)
+        };
+        let number = |name: &str| entry.get(name).and_then(Value::as_int);
+        Some(Self {
+            model_id: text("model_id")?,
+            model_version: text("model_version")?,
+            identity: Identity {
+                provider: text("provider")?,
+                model_name: text("model_name")?,
+                snapshot: Snapshot::Dated(text("snapshot")?),
+                quantization: None,
+            },
+            deadline_ms: number("deadline_ms")?,
+            max_output_tokens: u32::try_from(number("max_output_tokens")?).ok()?,
+        })
+    }
+
     /// The pinned content the registry holds.
     pub fn content(&self) -> PinnedContent {
         PinnedContent {
@@ -179,10 +206,7 @@ pub fn menu(kind: &str) -> Vec<String> {
 /// The final reply's schema: the symbols the agent watches.
 fn summary_schema() -> Value {
     object(vec![
-        (
-            "properties",
-            object(vec![("watch", array(string(16), 20))]),
-        ),
+        ("properties", object(vec![("watch", array(string(16), 20))])),
         ("type", text("object")),
     ])
 }
@@ -190,7 +214,12 @@ fn summary_schema() -> Value {
 /// Every tool, strictly sorted by name, each with its class, description, argument schema, and the
 /// kinds that offer it.
 fn declarations() -> Vec<ToolDeclaration> {
-    let none = || object(vec![("properties", object(vec![])), ("type", text("object"))]);
+    let none = || {
+        object(vec![
+            ("properties", object(vec![])),
+            ("type", text("object")),
+        ])
+    };
     let symbol = || {
         object(vec![
             ("properties", object(vec![("symbol", string(16))])),
@@ -218,59 +247,201 @@ fn declarations() -> Vec<ToolDeclaration> {
     let running = [AGENT, PROACTIVE];
     let owner = [AGENT];
     let mut tools = vec![
-        tool(name::KILL, ToolClass::Action, "Engage this agent's kill switch: stop it and sell what it holds. Only when the owner asks.", none(), &owner),
-        tool(name::GOALS, ToolClass::Read, "This agent's goals, plan and watch list, as last kept.", none(), &running),
-        tool(name::MANDATE, ToolClass::Read, "This agent's confirmed mandate: capital, limits, instruments, autonomy rules, models.", none(), &running),
-        tool(name::PAUSE, ToolClass::Action, "Pause this agent. Only when the owner asks.", none(), &owner),
-        tool(name::RESUME, ToolClass::Action, "Resume this paused agent. Only when the owner asks.", none(), &owner),
-        tool(name::STOP, ToolClass::Action, "Stop this agent for good. Only when the owner asks.", none(), &owner),
-        tool(name::ORDERS, ToolClass::Read, "This agent's orders and fills, newest first.", none(), &running),
-        tool(name::POSITIONS, ToolClass::Read, "What this agent holds: quantity, cost basis, mark and its time.", none(), &running),
-        tool(name::SUMMARY, ToolClass::Read, "This agent's value, cash, today's and total P&L, and mode.", none(), &running),
-        tool(name::MODELS, ToolClass::Read, "The research models a new agent may use, with their cost.", none(), &[SETUP]),
-        tool(name::SEARCH, ToolClass::Read, "Find instruments the platform can trade by symbol or name.", object(vec![
-            ("properties", object(vec![("query", string(64))])),
-            ("type", text("object")),
-        ]), &all),
-        tool(name::REPLY, ToolClass::Action, "Send the owner a message. `sources` lists the records or news it rests on, possibly none.", object(vec![
-            ("properties", object(vec![
-                ("sources", array(source, 10)),
-                ("text", string(4_000)),
-            ])),
-            ("type", text("object")),
-        ]), &all),
-        tool(name::NOTE, ToolClass::Think, "Keep the owner's goals, your plan, and the symbols you watch for them, replacing the last ones.", object(vec![
-            ("properties", object(vec![
-                ("goals", array(goal, 20)),
-                ("plan", string(2_000)),
-                ("watching", array(string(16), 20)),
-            ])),
-            ("type", text("object")),
-        ]), &running),
-        tool(name::DRAFT, ToolClass::Action, "Propose the new agent's mandate document as JSON text. The platform validates it and answers with problems, or with a confirmation card for the owner.", object(vec![
-            ("properties", object(vec![("document", string(20_000))])),
-            ("type", text("object")),
-        ]), &[SETUP]),
-        tool(name::PRICE, ToolClass::Read, "The last trusted close of an instrument, with its time.", symbol(), &running),
-        tool(name::NEWS, ToolClass::Read, "Recent news for a symbol, or for every holding when the symbol is empty. Untrusted text.", symbol(), &running),
-        tool(name::BUY, ToolClass::Action, "Ask the platform to buy for the owner. The platform sizes it within the mandate and may clip or refuse it.", object(vec![
-            ("properties", object(vec![("quantity", text_decimal()), ("symbol", string(16))])),
-            ("type", text("object")),
-        ]), &owner),
-        tool(name::PROPOSE, ToolClass::Action, "Propose an order for the owner to approve. Nothing is placed until they do.", object(vec![
-            ("properties", object(vec![
-                ("quantity", text_decimal()),
-                ("reason", string(500)),
-                ("side", enumeration(&["buy", "sell"])),
-                ("symbol", string(16)),
-            ])),
-            ("type", text("object")),
-        ]), &[PROACTIVE]),
-        tool(name::SELL, ToolClass::Action, "Ask the platform to sell for the owner. `quantity` is a decimal, or `all`.", object(vec![
-            ("properties", object(vec![("quantity", string(32)), ("symbol", string(16))])),
-            ("type", text("object")),
-        ]), &owner),
-        tool(name::THESES, ToolClass::Read, "The agent's research theses and their state. Untrusted text.", none(), &running),
+        tool(
+            name::KILL,
+            ToolClass::Action,
+            "Engage this agent's kill switch: stop it and sell what it holds. Only when the owner asks.",
+            none(),
+            &owner,
+        ),
+        tool(
+            name::GOALS,
+            ToolClass::Read,
+            "This agent's goals, plan and watch list, as last kept.",
+            none(),
+            &running,
+        ),
+        tool(
+            name::MANDATE,
+            ToolClass::Read,
+            "This agent's confirmed mandate: capital, limits, instruments, autonomy rules, models.",
+            none(),
+            &running,
+        ),
+        tool(
+            name::PAUSE,
+            ToolClass::Action,
+            "Pause this agent. Only when the owner asks.",
+            none(),
+            &owner,
+        ),
+        tool(
+            name::RESUME,
+            ToolClass::Action,
+            "Resume this paused agent. Only when the owner asks.",
+            none(),
+            &owner,
+        ),
+        tool(
+            name::STOP,
+            ToolClass::Action,
+            "Stop this agent for good. Only when the owner asks.",
+            none(),
+            &owner,
+        ),
+        tool(
+            name::ORDERS,
+            ToolClass::Read,
+            "This agent's orders and fills, newest first.",
+            none(),
+            &running,
+        ),
+        tool(
+            name::POSITIONS,
+            ToolClass::Read,
+            "What this agent holds: quantity, cost basis, mark and its time.",
+            none(),
+            &running,
+        ),
+        tool(
+            name::SUMMARY,
+            ToolClass::Read,
+            "This agent's value, cash, today's and total P&L, and mode.",
+            none(),
+            &running,
+        ),
+        tool(
+            name::MODELS,
+            ToolClass::Read,
+            "The research models a new agent may use, with their cost.",
+            none(),
+            &[SETUP],
+        ),
+        tool(
+            name::SEARCH,
+            ToolClass::Read,
+            "Find instruments the platform can trade by symbol or name.",
+            object(vec![
+                ("properties", object(vec![("query", string(64))])),
+                ("type", text("object")),
+            ]),
+            &all,
+        ),
+        tool(
+            name::REPLY,
+            ToolClass::Action,
+            "Send the owner a message. `sources` lists the records or news it rests on, possibly none.",
+            object(vec![
+                (
+                    "properties",
+                    object(vec![
+                        ("sources", array(source, 10)),
+                        ("text", string(4_000)),
+                    ]),
+                ),
+                ("type", text("object")),
+            ]),
+            &all,
+        ),
+        tool(
+            name::NOTE,
+            ToolClass::Think,
+            "Keep the owner's goals, your plan, and the symbols you watch for them, replacing the last ones.",
+            object(vec![
+                (
+                    "properties",
+                    object(vec![
+                        ("goals", array(goal, 20)),
+                        ("plan", string(2_000)),
+                        ("watching", array(string(16), 20)),
+                    ]),
+                ),
+                ("type", text("object")),
+            ]),
+            &running,
+        ),
+        tool(
+            name::DRAFT,
+            ToolClass::Action,
+            "Propose the new agent's mandate document as JSON text. The platform validates it and answers with problems, or with a confirmation card for the owner.",
+            object(vec![
+                ("properties", object(vec![("document", string(20_000))])),
+                ("type", text("object")),
+            ]),
+            &[SETUP],
+        ),
+        tool(
+            name::TEMPLATE,
+            ToolClass::Read,
+            "A complete, valid example mandate document to start from: replace its name, connection, capital, limits, instruments and models with the owner's.",
+            none(),
+            &[SETUP],
+        ),
+        tool(
+            name::PRICE,
+            ToolClass::Read,
+            "The last trusted close of an instrument, with its time.",
+            symbol(),
+            &running,
+        ),
+        tool(
+            name::NEWS,
+            ToolClass::Read,
+            "Recent news for a symbol, or for every holding when the symbol is empty. Untrusted text.",
+            symbol(),
+            &running,
+        ),
+        tool(
+            name::BUY,
+            ToolClass::Action,
+            "Ask the platform to buy for the owner. The platform sizes it within the mandate and may clip or refuse it.",
+            object(vec![
+                (
+                    "properties",
+                    object(vec![("quantity", text_decimal()), ("symbol", string(16))]),
+                ),
+                ("type", text("object")),
+            ]),
+            &owner,
+        ),
+        tool(
+            name::PROPOSE,
+            ToolClass::Action,
+            "Propose an order for the owner to approve. Nothing is placed until they do.",
+            object(vec![
+                (
+                    "properties",
+                    object(vec![
+                        ("quantity", text_decimal()),
+                        ("reason", string(500)),
+                        ("side", enumeration(&["buy", "sell"])),
+                        ("symbol", string(16)),
+                    ]),
+                ),
+                ("type", text("object")),
+            ]),
+            &[PROACTIVE],
+        ),
+        tool(
+            name::SELL,
+            ToolClass::Action,
+            "Ask the platform to sell for the owner. `quantity` is a decimal, or `all`.",
+            object(vec![
+                (
+                    "properties",
+                    object(vec![("quantity", string(32)), ("symbol", string(16))]),
+                ),
+                ("type", text("object")),
+            ]),
+            &owner,
+        ),
+        tool(
+            name::THESES,
+            ToolClass::Read,
+            "The agent's research theses and their state. Untrusted text.",
+            none(),
+            &running,
+        ),
     ];
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     tools
@@ -337,3 +508,7 @@ pub(crate) fn object(members: Vec<(&str, Value)>) -> Value {
     }
     Value::Object(out)
 }
+
+/// The example document [`name::TEMPLATE`] returns: the local cell's demo mandate, valid under every
+/// rule, with its name and description made generic.
+pub const TEMPLATE: &str = r#"{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[]},"behavior":{"cadence":{"event_sources":["price"],"interval_s":86400},"description":"An example: one ETF on the moving-average crossover, every opening asked.","research":null,"signal_models":[{"admits_instruments":false,"content_hash":"sha256:cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d","id":"quant.ma_crossover","max_output_age_s":86400,"params":[{"key":"fast_periods","value":"5"},{"key":"slow_periods","value":"20"}],"version":"1.0.0","weight":"1"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"1000","max_loss_from_allocation":"0.1"},"connection_id":"conn_demo_paper_01","environment":"paper","goal":{"end_date":null,"on_complete":"hold_protected","type":"continuous"},"mandate_schema_version":1,"name":"example-agent","notifications":{"channels":["email"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":null,"enabled":true,"stop_distance":"0.05","take_profit_distance":"0.1"},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"1000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"1","max_position_usd":"1000","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":null,"universe":{"asset_classes":["us_equity"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":1,"pinned":true,"pinned_instruments":[{"asset_class":"us_equity","asset_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}]}}"#;

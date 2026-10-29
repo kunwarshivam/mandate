@@ -14,9 +14,7 @@ use mandate_chat::ChatEntry;
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, SecretSource, Transport};
-use mandate_gateway::registry::{
-    Endpoint, Identity, Locality, Registry, RegistryError, Reported, Snapshot, Status,
-};
+use mandate_gateway::registry::{Endpoint, Locality, Registry, RegistryError, Reported, Status};
 use mandate_gateway::{RateCaps, Settings};
 use mandate_research_run::live::{LiveEntry, Refused, live_registry, read_live};
 use mandate_research_run::recorded::hosted_endpoint;
@@ -185,32 +183,10 @@ pub fn chat_entries(file: &Value) -> Option<Vec<ChatLive>> {
         .as_array()?
         .iter()
         .map(|item| {
-            let entry = item.get("entry")?;
-            let text = |name: &str| {
-                entry
-                    .get(name)
-                    .and_then(Value::as_str)
-                    .filter(|t| !t.is_empty())
-                    .map(str::to_owned)
-            };
-            let number = |name: &str| entry.get(name).and_then(Value::as_int);
-            let model_name = text("model_name")?;
-            let (endpoint, _) = hosted_endpoint(item.get("endpoint")?, &model_name).ok()?;
-            Some(ChatLive {
-                entry: ChatEntry {
-                    model_id: text("model_id")?,
-                    model_version: text("model_version")?,
-                    identity: Identity {
-                        provider: text("provider")?,
-                        model_name,
-                        snapshot: Snapshot::Dated(text("snapshot")?),
-                        quantization: None,
-                    },
-                    deadline_ms: number("deadline_ms")?,
-                    max_output_tokens: u32::try_from(number("max_output_tokens")?).ok()?,
-                },
-                endpoint,
-            })
+            let entry = ChatEntry::from_registry(item.get("entry")?)?;
+            let (endpoint, _) =
+                hosted_endpoint(item.get("endpoint")?, &entry.identity.model_name).ok()?;
+            Some(ChatLive { entry, endpoint })
         })
         .collect()
 }

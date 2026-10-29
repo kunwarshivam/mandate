@@ -190,7 +190,7 @@ fn listed_instruments(control: &[StoredEvent], store: &dyn ArtifactSource) -> Op
 
 /// The pinnable snapshots [`listed_instruments`] serves, in its order; `None` when the create's
 /// fold cannot read the control stream or any snapshot.
-fn pinnable_snapshots(
+pub(crate) fn pinnable_snapshots(
     control: &[StoredEvent],
     store: &dyn ArtifactSource,
 ) -> Option<Vec<Snapshot>> {
@@ -246,7 +246,10 @@ fn instrument_value(snapshot: &Snapshot) -> Value {
 /// read the control stream. A model whose registration the read model's schema cannot state (a
 /// version off the mandate schema's pattern, or a parameter name off its pattern or more than 32 of
 /// them) is omitted, as an unpinnable instrument is: no mandate document can name it.
-fn listed_models(control: &[StoredEvent], store: &dyn ArtifactSource) -> Option<Vec<Value>> {
+pub(crate) fn listed_models(
+    control: &[StoredEvent],
+    store: &dyn ArtifactSource,
+) -> Option<Vec<Value>> {
     let facts = control_facts(control, store).ok()?;
     let mut registered_at: BTreeMap<String, &str> = BTreeMap::new();
     for row in control {
