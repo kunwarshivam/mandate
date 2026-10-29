@@ -373,6 +373,32 @@ fn a_denied_owners_request_records_the_gates_reason_and_tells_the_owner() {
     assert_eq!(ran.notifications, vec!["decision_skipped"]);
 }
 
+/// A request the mandate's autonomy rules deny is recorded as its decision and goes no further: no
+/// intent, no ask, and no skipped decision's alert, because the dry run allowed it; the owner sees
+/// the rule that denied it in the decision's `decided_by`.
+#[test]
+#[ignore = "pending E10-30"]
+fn a_request_the_mandate_denies_is_recorded_and_raises_no_alert() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        OwnerPlan::classified(Autonomy::Deny),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&ports);
+    let request = Request::owner_buy(1);
+    let ran = tail(&mut shell, &request.event(), &ports);
+    assert_eq!(ran.draft_types(), vec!["DecisionMade"]);
+    let decision = only(&ran, "DecisionMade");
+    assert_owner_decision(decision, &request.id(), "owner");
+    assert_eq!(member(decision, "dry_run"), &text("allow"));
+    assert_eq!(member(decision, "autonomy"), &text("deny"));
+    assert_eq!(member(decision, "decided_by"), &text("rule:owner-deny"));
+    assert!(ran.handed.is_empty());
+    assert!(ran.notifications.is_empty(), "{:?}", ran.notifications);
+}
+
 #[test]
 #[ignore = "pending E10-30"]
 fn a_mode_that_admits_no_opening_denies_the_owners_request_by_name() {
@@ -458,8 +484,9 @@ fn a_request_the_api_would_have_refused_is_inert() {
             ..Request::owner_buy(1)
         },
     ];
-    for request in refused {
-        let mut shell = started(&ports);
+    let mut shell = started(&ports);
+    for (seq, request) in (1_u64..).zip(refused) {
+        let request = Request { seq, ..request };
         let ran = tail(&mut shell, &request.event(), &ports);
         assert!(
             ran.is_empty(),
@@ -472,6 +499,12 @@ fn a_request_the_api_would_have_refused_is_inert() {
         );
     }
     assert!(plan.asked.borrow().is_empty(), "none reaches the plan");
+    let valid = tail(&mut shell, &Request::owner_buy(5).event(), &ports);
+    assert_eq!(
+        valid.draft_types(),
+        vec!["DecisionMade", "IntentProposed"],
+        "the same runtime still decides a request it can act on"
+    );
 }
 
 #[test]
@@ -535,8 +568,8 @@ fn cases() -> impl Strategy<Value = Case> {
 /// - each request is decided at most once, however often it is tailed or the process restarts,
 ///   and its decision names it as `causation_id` with its own `requested_by`;
 /// - no owner request's decision is ever `requested_by` `agent`, nor carries a score;
-/// - a client's opening is never `auto`, and an intent follows only an `auto` allowed decision,
-///   caused by it.
+/// - a client's opening is never `auto`, and an intent follows exactly the `auto` allowed decisions,
+///   one each, caused by it, at the plan's quantity.
 fn one_run(case: &Case) -> Result<(), String> {
     let (ids, view) = (TestIds, universe(&["AAPL"]));
     let plan = OwnerPlan::classified(case.autonomy);
@@ -598,6 +631,28 @@ fn one_run(case: &Case) -> Result<(), String> {
         }
         if *client && decision.payload.get("autonomy") == Some(&text("auto")) {
             return Err("a client's opening ran AUTO".to_owned());
+        }
+        if decision.payload.get("qty") != Some(&text(plan.qty)) {
+            return Err(format!(
+                "qty {:?}, not the plan's",
+                decision.payload.get("qty")
+            ));
+        }
+        let auto = decision.payload.get("autonomy") == Some(&text("auto"));
+        let allowed = decision.payload.get("dry_run") == Some(&text("allow"));
+        let intents = shell
+            .agent_journal
+            .iter()
+            .filter(|e| {
+                e.event_type == "IntentProposed"
+                    && e.causation_id.as_ref() == Some(&decision.event_id)
+            })
+            .count();
+        let expected = usize::from(auto && allowed);
+        if intents != expected {
+            return Err(format!(
+                "{intents} intents after an auto {auto}, allowed {allowed} decision"
+            ));
         }
     }
     let decisions: BTreeMap<&EventId, &FoldedEvent> = shell
