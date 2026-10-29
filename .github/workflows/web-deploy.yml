@@ -62,6 +62,10 @@ jobs:
           # The public site and the one app origin that serves sign-in and every app screen (DEC-2405).
           NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN: "https://owlhead.ai"
           NEXT_PUBLIC_OWLHEAD_APP_ORIGIN: "https://app.owlhead.ai"
+          # The staging demo's cool-off waiver in the browser: until this instant the browser tries a
+          # passkey still cooling off and the staging server judges it (DEC-2150). No later than the
+          # ceiling in src/lib/cool-off-build.ts, which the build refuses past; E9-4's row removes it.
+          NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL: "2026-11-05T00:00:00Z"
       - run: node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
       - run: node scripts/workers.mjs size .wrangler/dry-run
       - run: node_modules/.bin/wrangler deploy
