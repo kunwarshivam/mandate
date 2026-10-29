@@ -6,7 +6,7 @@
   `ExecutorState::holds_lots`, `fold::leg_agent` (DEC-160's single holder) and protection's
   `single_holder` and `protectable` still sum an agent's fills their own way. Also: a crypto asset
   fee (`FeesCharged` with `family: crypto_asset`) names no order, so the fold takes it from the
-  owner's residual R rather than from the buying agent's lots ([DEC-2850](../decisions/DEC-2850.md),
+  owner's residual R rather than from the buying agent's lots ([DEC-2850](../decisions/trading-core.md#dec-2850),
   Proposed). With a deficit that tightens, but with an owner's positive residual it lets the buyer's
   Sᵢ and Pᵢ exceed DEC-2849's by up to the fee. The journal admits only
   `family: equities` today, and the change that admits `crypto_asset` must take the fee off the buy. A replaced

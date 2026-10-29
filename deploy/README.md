@@ -31,7 +31,7 @@ The founder runs everything here; agents never get host access. The order of the
 
 - **Vault key, two files.** DEC-822 item 4 lists three values outside the vault: "the vault key",
   the session signing key, and the tunnel token. The vault key is one kind of secret held as two
-  files, one per purpose ([DEC-692](../docs/project/decisions/DEC-692.md) item 2:
+  files, one per purpose ([DEC-692](../docs/project/decisions/earlier-600-899.md#dec-692) item 2:
   `vault-pending-key` and `vault-token-key`, "together DEC-822's single vault key"). That adds no
   kind of secret outside the vault, so the count of kinds is still three. The reading was recorded
   there under DEC-176 and was not repeated.

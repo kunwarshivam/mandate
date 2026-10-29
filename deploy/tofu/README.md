@@ -1,7 +1,7 @@
 # `deploy/tofu/`: the hosted environments as code (E21-56)
 
 OpenTofu makes the hosted staging and production environments on DigitalOcean and Cloudflare
-([DEC-2011](../../docs/project/decisions/DEC-2011.md),
+([DEC-2011](../../docs/project/decisions/infrastructure.md#dec-2011),
 [ADR-0006](../../docs/adr/0006-hosted-infrastructure-as-code.md)). It stops at a reachable, empty
 cluster with its buckets, DNS and Access. Lane GO's GitOps installs everything inside the cluster.
 
@@ -16,19 +16,19 @@ cluster with its buckets, DNS and Access. Lane GO's GitOps installs everything i
 | `environments/staging`, `environments/production` | A root each: backend, encrypted state, values |
 | `modules/cluster`, `modules/ingress`, `modules/archive`, `modules/monitoring`, `modules/costing` | Customer production's HA cluster and tainted pools, per-workspace hosts and Access, locked backup buckets, out-of-cell alerts, and the estimate ([DEC-2064](../../docs/project/decisions/DEC-2064.md), Proposed) |
 | `environments/production-cell1` | Customer production, cell 1: proposed and never applied. `infra.yml` cannot dispatch it, and it refuses every plan until the founder approves its monthly spend ([design and cost](../../docs/design/production-cell.md)) |
-| `modules/ci-runners` | Self-hosted, ephemeral GitHub Actions runners for CI's cell jobs: droplets, their firewall and tag, the boot script, and the budget at 150 USD ([DEC-2065](../../docs/project/decisions/DEC-2065.md)) |
+| `modules/ci-runners` | Self-hosted, ephemeral GitHub Actions runners for CI's cell jobs: droplets, their firewall and tag, the boot script, and the budget at 150 USD ([DEC-2065](../../docs/project/decisions/infrastructure.md#dec-2065)) |
 | `environments/ci-runners` | The runners' root, applied by the founder from his own machine with local encrypted state, not by `infra.yml`; its runbook is [docs/runbooks/ci-runners.md](../../docs/runbooks/ci-runners.md) |
 
 **Who runs what.** Pull requests run only checks that need no credential (`cargo xtask ci tofu`,
-[DEC-2013](../../docs/project/decisions/DEC-2013.md)). `plan` and `apply` run only in
+[DEC-2013](../../docs/project/decisions/infrastructure.md#dec-2013)). `plan` and `apply` run only in
 `.github/workflows/infra.yml`, from `main`, when the founder dispatches it and approves the job
-([DEC-2014](../../docs/project/decisions/DEC-2014.md)). Agents never run either, never see a token,
+([DEC-2014](../../docs/project/decisions/infrastructure.md#dec-2014)). Agents never run either, never see a token,
 and never dispatch the workflow (AGENTS.md rules 7 and 8).
 
 ## Runbook: what the founder creates
 
 All of it is two tokens, one passphrase, three console steps and an approval per run
-([DEC-2030](../../docs/project/decisions/DEC-2030.md), [DEC-2044](../../docs/project/decisions/DEC-2044.md)). Nothing below goes in the repository, a
+([DEC-2030](../../docs/project/decisions/infrastructure.md#dec-2030), [DEC-2044](../../docs/project/decisions/infrastructure.md#dec-2044)). Nothing below goes in the repository, a
 chat or an issue. Each value goes straight into the GitHub environment as a secret. Do it once per
 environment; production can wait until staging is up. **Actions → infra → Run workflow** with
 action `preflight` checks all of it and prints a checklist of what is still missing, by name,
@@ -123,7 +123,7 @@ needs:
 - **Environment secret, staging only:** `FOUNDER_OIDC_SUBJECT`, your user id in staging's
   Supabase project (Authentication → Users, the `id` of your user), which staging's apply links to
   the founder's principal so you can sign in to staging's web app
-  ([DEC-2114](../../docs/project/decisions/DEC-2114.md)). It never leaves the apply step: only its
+  ([DEC-2114](../../docs/project/decisions/workspace.md#dec-2114)). It never leaves the apply step: only its
   digest reaches the cluster. Without it, the apply links no one and changes nothing.
 - **Environment secret, production only:** `ACCESS_ALLOWED_EMAILS`, for example
   `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full

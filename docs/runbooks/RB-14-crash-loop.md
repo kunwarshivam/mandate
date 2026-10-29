@@ -9,7 +9,7 @@ runbook, and nothing else (no agent, account, instrument or mandate content).
 | `crash_loop` | SEV-2 | A runtime or executor restarted five times within ten minutes (design §3.4, Proposed bound). The manager journaled `ProcessCrashLooped` and left it down |
 | `kill_switch_unapplied` | SEV-1 | An executor no agent of its account wants any more was started for a kill switch that covers it, and crash-looped before it ended: the switch is not applied ([DEC-2344](../project/decisions/DEC-2344.md) item 1). Raised in place of `crash_loop` |
 | `deployment_unread` | SEV-3 | A version-1 `AgentDeployed` of an agent not stopped. It names no connection, so the manager starts nothing for it ([DEC-1173](../project/decisions/DEC-1173.md) item 3) |
-| `deployment_unconnected` | SEV-3 | A version-2 `AgentDeployed` that journal spec §9.24 rule 201 refuses, of an agent not stopped: its connection was not established on the control stream before it, or was revoked since. The manager starts nothing for it ([DEC-2038](../project/decisions/DEC-2038.md)) |
+| `deployment_unconnected` | SEV-3 | A version-2 `AgentDeployed` that journal spec §9.24 rule 201 refuses, of an agent not stopped: its connection was not established on the control stream before it, or was revoked since. The manager starts nothing for it ([DEC-2038](../project/decisions/infrastructure.md#dec-2038)) |
 
 Each is raised once per manager process: a restarted manager reads the control stream again and
 raises it again while the condition holds. None of them stops, drains or replaces a running

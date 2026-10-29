@@ -11,7 +11,7 @@
      requires independence. Until E9-6's effective-policy fold lands, the CLI prints the
      independence line as advisory.
   2. **Could:** `requests()` reads a version-1 request that carries `subject` as that subject;
-     journal spec §9.28 and [DEC-2838](../decisions/DEC-2838.md) read every version-1 request as
+     journal spec §9.28 and [DEC-2838](../decisions/trading-core.md#dec-2838) read every version-1 request as
      `limit`. No writer emits that shape today.
   3. **Should**, **done** (the differential test now draws restrictions and their lifts,
      requests named by acknowledgments, and policy records, and fails on a seeded bug in each):

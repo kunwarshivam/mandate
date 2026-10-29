@@ -7,7 +7,7 @@ names. This file is founder-owned (CODEOWNERS): adding a row is the approval.
 
 A cargo row's "Used by" cell is always `` `cargo xtask deps --used-by` ``, which lists every cargo
 dependency with the crates that use it, derived from `cargo metadata`; the check refuses any other
-text there, and a name with two rows in one ecosystem ([DEC-2600](project/decisions/DEC-2600.md)
+text there, and a name with two rows in one ecosystem ([DEC-2600](project/decisions/process.md#dec-2600)
 item 4). So a PR that adds a crate edits no existing row's list, and two PRs that add two rows
 never touch the same line. Say what a crate uses a dependency for in its Purpose cell only when the
 use is new.

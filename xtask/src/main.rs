@@ -21209,7 +21209,7 @@ mod tests {
         for paths in [
             &["deploy/cell/values/k3d.yaml"][..],
             &["deploy/tofu/README.md"],
-            &["docs/project/decisions/DEC-2013.md"],
+            &["docs/project/decisions/infrastructure.md"],
             &["crates/mandate-num/src/lib.rs"],
         ] {
             assert!(!tofu(Some(paths)), "{paths:?} leaves the tofu checks off");
@@ -28556,6 +28556,83 @@ jq -r "$filter" "$src"
                     "# DEC-2602: misnumbered\n",
                 )],
                 &["DEC-2601.md", "DEC-2602"],
+            ),
+        ];
+        for (name, files, named) in cases {
+            let root = decision_repository(name, files)?;
+            let refused = decision_numbers(&root)
+                .map_err(|err| format!("{err:#}"))
+                .err();
+            fs::remove_dir_all(&root).ok();
+            let refused = refused.unwrap_or_default();
+            for needle in named {
+                assert!(
+                    refused.contains(needle),
+                    "{name} names `{needle}`: {refused:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// A category file under docs/project/decisions/ holds the settled decisions folded out of
+    /// their own files as `## DEC-<n>:` sections, each opened by the matching `<a id="dec-<n>">`
+    /// anchor, and its section numbers are taken once like a per-decision file's (DEC-2650).
+    #[test]
+    fn category_sections_take_their_numbers_once_and_need_anchors() -> Result<()> {
+        let section =
+            |n: u32| format!("<a id=\"dec-{n}\"></a>\n\n## DEC-{n}: a decision\n\nbody\n");
+        let clean = decision_repository(
+            "decisions-folded-clean",
+            &[
+                ("docs/project/decisions/DEC-2600.md", "# DEC-2600: one\n"),
+                (
+                    "docs/project/decisions/process.md",
+                    &format!("# process\n\n{}{}", section(2601), section(2602)),
+                ),
+            ],
+        )?;
+        let passed = decision_numbers(&clean).map_err(|err| format!("{err:#}"));
+        fs::remove_dir_all(&clean).ok();
+        assert_eq!(
+            passed,
+            Ok(()),
+            "a per-decision file beside distinct folded sections passes"
+        );
+        type Case<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a [&'a str]);
+        let cases: [Case; 3] = [
+            (
+                "decisions-folded-beside-file",
+                &[
+                    ("docs/project/decisions/DEC-2601.md", "# DEC-2601: one\n"),
+                    (
+                        "docs/project/decisions/process.md",
+                        &format!("# process\n\n{}", section(2601)),
+                    ),
+                ],
+                &[
+                    "DEC-2601 is taken by both docs/project/decisions/DEC-2601.md",
+                    "the DEC-2601 section of docs/project/decisions/process.md",
+                ],
+            ),
+            (
+                "decisions-folded-twice",
+                &[(
+                    "docs/project/decisions/process.md",
+                    &format!("# process\n\n{}{}", section(2601), section(2601)),
+                )],
+                &["DEC-2601 is taken by both"],
+            ),
+            (
+                "decisions-folded-no-anchor",
+                &[(
+                    "docs/project/decisions/process.md",
+                    "# process\n\n## DEC-2601: a decision\n\nbody\n",
+                )],
+                &[
+                    "docs/project/decisions/process.md heads DEC-2601",
+                    "no matching anchor dec-2601",
+                ],
             ),
         ];
         for (name, files, named) in cases {

@@ -10,7 +10,7 @@ requirements. Priority uses MoSCoW: **Must**, **Should**, **Could**, **Won't (v1
 Stories follow "As a … I want … so that …" with acceptance criteria.
 
 New rows, stories and debt alike, are one file each under [backlog/](backlog/README.md) until they
-are folded in here ([DEC-2373](decisions/DEC-2373.md)); add none to this file.
+are folded in here ([DEC-2373](decisions/trading-core.md#dec-2373)); add none to this file.
 
 ## Epic overview
 
@@ -92,7 +92,7 @@ are folded in here ([DEC-2373](decisions/DEC-2373.md)); add none to this file.
   *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
   fails when its fix is reverted.
 - **E1-6 (Should)** As an engineer, I want the reference-case harness cheaper to run, so that
-  [DEC-498](decisions/DEC-498.md) item 3's 180-second per-mutant cap can come down and the matrix
+  [DEC-498](decisions/earlier-303-599.md#dec-498) item 3's 180-second per-mutant cap can come down and the matrix
   with it. DEC-497 runs the whole of `mandate-refcases` for any mutation of a crate it is built
   on, which is what puts a core crate's mutant test phase at the 83 seconds DEC-498 measured; the
   cap is sized on that, and the shard count on the cap. On a shard whose own mutants are in
@@ -118,7 +118,7 @@ are folded in here ([DEC-2373](decisions/DEC-2373.md)); add none to this file.
   in a follow-up story, so the job starts green.
 - **E1-8 (Should)** As an engineer, I want parallel PRs not to collide on DEC numbers or on shared
   lists, so that about twenty lanes can land at once without a merge conflict or an extra CI cycle
-  each ([DEC-2600](decisions/DEC-2600.md), claim #1494).
+  each ([DEC-2600](decisions/process.md#dec-2600), claim #1494).
   *Accepted when:* DEC numbers come from per-category ranges of 100 from DEC-2000; a check run by
   both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
   are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
@@ -261,7 +261,7 @@ the spec invariants (DP-n) its tests cover.
   *Accepted when:* identical inputs produce identical outputs.
 - **E4-3 (Must)** As a researcher, I want the fill model to refuse a bar labelled with a session its
   instrument's asset class never trades, so that no backtest fills on input spec §4.3 says cannot
-  exist (the gap DEC-114 item 2 discloses; [DEC-377](decisions/DEC-377.md)).
+  exist (the gap DEC-114 item 2 discloses; [DEC-377](decisions/earlier-303-599.md#dec-377)).
   *Accepted when:* crypto bars carry only the continuous session and US-equity bars only the four
   New York sessions; any other bar is refused with `session_off_asset_class` naming the first such
   bar's index; an empty bar sequence is accepted; `simulate` runs the check after the order-policy
@@ -269,7 +269,7 @@ the spec invariants (DP-n) its tests cover.
   fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437)
   (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
   stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
-  assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
+  assertion each on the reason code and the message ([DEC-386](decisions/earlier-303-599.md#dec-386)).
 - **E4-4 (Must, M5; SC)** As an owner, I want to backtest my mandate version through the same
   decision path my agent runs, so that the report shows what this version would have done, not
   what a baseline strategy did ([DEC-1000](decisions/DEC-1000.md); PRD FR-4.1, FR-4.2, FR-4.5).
@@ -302,7 +302,7 @@ the spec invariants (DP-n) its tests cover.
   run's append landed* ([DEC-1144](decisions/DEC-1144.md)): `mandate-backtest-runner run` runs a
   version over JSON inputs and stores the report, its input objects and the payload as artifacts,
   and `mandate backtest record` re-checks them and journals the record as the `backtest_runner`
-  system. *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves `GET
+  system. *Route ([DEC-1143](decisions/earlier-900-1999.md#dec-1143)):* `mandate-api-server` serves `GET
   /backtests/{id}` from the control stream's one `BacktestRunRecorded` naming the id, under the view
   row; a completed run's report comes from the store, digest-checked, and one the store lacks or
   that fails its check is `journal_unavailable`, as is a duplicate id; `running` is not served until
@@ -528,7 +528,7 @@ the spec invariants (DP-n) its tests cover.
   `python/mandate_tools/tests/test_journal_agent_vectors.py`, which runs it in `fast`).
   ~~Also owed (#444, DEC-353; E6-13's code half, tests first)~~ Done ([#516](https://github.com/kunwarshivam/mandate/pull/516),
   [#523](https://github.com/kunwarshivam/mandate/pull/523), [#527](https://github.com/kunwarshivam/mandate/pull/527);
-  [DEC-420](decisions/DEC-420.md)). Owed from #523's review: ~~the next stream H tests PR pins that the delegations row
+  [DEC-420](decisions/earlier-303-599.md#dec-420)). Owed from #523's review: ~~the next stream H tests PR pins that the delegations row
   matches by `id`, not position (`[d1, d2]` to `[d2]` is reducing)~~ (pinned with V-047's tests PR, DEC-428); and `reference/mandate/ref.py` gets three fixes,
   none of which the Rust shares: `T()` drops fractional seconds and raises on a calendar-less instant where V-041 should
   refuse; V-042's withheld previous document (identity only) is not modelled, where DEC-420 item 4 refuses every
@@ -592,26 +592,26 @@ the spec invariants (DP-n) its tests cover.
     daily loss (`resolved_at_rollover`, `new_day_breach`), the lifetime floor, crypto, and the
     owner's acknowledgments and allocation changes.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
-    which are R0 files. The founder started it on 2026-10-19 ([DEC-2605](decisions/DEC-2605.md)
-    row 17); [DEC-2307](decisions/DEC-2307.md) limits the R0 edits to thin hooks in those three
+    which are R0 files. The founder started it on 2026-10-19 ([DEC-2605](decisions/process.md#dec-2605)
+    row 17); [DEC-2307](decisions/trading-core.md#dec-2307) limits the R0 edits to thin hooks in those three
     files, binds C only after B2b to B4, and adds the account stream's own `ClockAdvanced`. The first
     live order waits for C and the R0 re-pass (row 21).
   - **Gap (reference cases):** no mandate reference case steps an equity's after-hours or overnight
     mark; MC-R13 covers pre-market only. Add one when the mandate cases next change.
-  - **Follow-up ([DEC-2308](decisions/DEC-2308.md) item 5):** `mandate_spec::risk::RiskState` holds
+  - **Follow-up ([DEC-2308](decisions/trading-core.md#dec-2308) item 5):** `mandate_spec::risk::RiskState` holds
     one position, so the account risk fold binds to one instrument and makes the view unreadable on a
     second. A multi-instrument risk state (per-instrument positions, marks, and staleness under one
     account E and H) is a mandate spec change with its own reference cases. Until it lands, paper
     agents run with `universe.max_instruments` 1.
-  - **Follow-up ([DEC-2308](decisions/DEC-2308.md) items 6 and 7):** the executor's mark writer
+  - **Follow-up ([DEC-2308](decisions/trading-core.md#dec-2308) items 6 and 7):** the executor's mark writer
     journals the New York midnight tick before any post-midnight mark (writer-side test), and once
     MC-R13 gains its tick step the fold fails closed on a post-midnight mark with no tick. And
     `Input::Mark { bid: Option<Price> }` replaces the fold's placeholder bid for a not-sane mark.
-  - **Follow-up ([DEC-2310](decisions/DEC-2310.md) items 3 and 4, the #2007 review):** slice C
+  - **Follow-up ([DEC-2310](decisions/trading-core.md#dec-2310) items 3 and 4, the #2007 review):** slice C
     refuses at deploy a mandate whose `universe.max_instruments` exceeds 1 until the multi-instrument
     risk state lands, and B2b-2 adds the held-position version of the not-sane-bid test, which a flat
     position cannot exercise.
-  - **Follow-up ([DEC-2313](decisions/DEC-2313.md) items 2 and 3):** the mark and fill writers (slice C,
+  - **Follow-up ([DEC-2313](decisions/trading-core.md#dec-2313) items 2 and 3):** the mark and fill writers (slice C,
     E7) journal canonical asset ids in `instrument_id`, with a writer-side test, and B2b-2b's tests
     cover a flat opening bound by a mark to a non-canonical id and then held through a fill.
   - **Follow-up (slice C, the #2120 review):** slice C's caller treats an `Err` from
@@ -790,7 +790,7 @@ after U-A1 to U-A5 are recorded.
 - **E7-19 (Must, M6; SC)** As an owner, I want paper deployments to run through a production cycle
   API over my confirmed mandate and effective configuration, so that an instrument, model or
   deployment can change without a release and paper proves the path the product uses
-  ([DEC-475](decisions/DEC-475.md)).
+  ([DEC-475](decisions/earlier-303-599.md#dec-475)).
   *Accepted when:* the production cycle takes a validated deployment, authoritative account and
   market snapshots, and a registered `ModelOutput`; no production shell assembly selects an
   instrument, model, deployment identity, gate configuration or executor configuration; every
@@ -822,7 +822,7 @@ after U-A1 to U-A5 are recorded.
   need it.
 - **E7-20 (Must, M7)** As the founder, I want CodeQL to flag a credential written to a log by
   its type rather than its name, so that excluding the name-keyed `rust/cleartext-logging` query
-  ([DEC-500](decisions/DEC-500.md)) leaves no gap. *Accepted when:* a query under
+  ([DEC-500](decisions/earlier-303-599.md#dec-500)) leaves no gap. *Accepted when:* a query under
   `.github/codeql/queries/`, read by `.github/codeql/codeql-config.yml`, reports any value returned
   by `expose_secret()` (directly, through a reference, or inside a format argument) reaching one of
   CodeQL's logging or print sinks; a seeded bug that prints an exposed `SecretString` is caught and
@@ -887,12 +887,12 @@ after U-A1 to U-A5 are recorded.
   default build contains no Robinhood host (LT-1); the runner built from the
   paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
   (LT-4); and a restart after a run sends no second order (LT-6).
-  *Follow-up ([DEC-851](decisions/DEC-851.md) item 5, #976's review):* X1's word scan does not
+  *Follow-up ([DEC-851](decisions/earlier-600-899.md#dec-851) item 5, #976's review):* X1's word scan does not
   read through `time -p`, the wrappers `setsid`, `flock`, `ionice`, `taskset`, `unbuffer`,
   `doas`, `su -c` and `runuser`, `env -S`, or a dynamic `printf -v "$N"`. They are disclosed
   residuals; the build-file and live-feature checks and review stand behind them. Close them with
   a tests correction that pins each form as refused, then the implementation that refuses it.
-  *Follow-up ([DEC-851](decisions/DEC-851.md) item 6, #979's review):* the live-feature scan's
+  *Follow-up ([DEC-851](decisions/earlier-600-899.md#dec-851) item 6, #979's review):* the live-feature scan's
   shell reading still has limits: a here-doc body fed to a command other than a shell is read as
   commands, `case` arm patterns and `[[ =~ ]]` regex parentheses split a command, and a
   single-quoted string outside the here-doc and text reading is not joined. None hides a refusal
@@ -914,7 +914,7 @@ after U-A1 to U-A5 are recorded.
 - **E7-28 (Should, M6, after E7-26; tooling)** As the founder, I want X1's shell reading to
   parse `case` arm patterns, `[[ … ]]` tests (their `|` and parentheses), single-quoted strings
   that span lines, and `${…}` holding a space, so that the live-feature check's interim exact-line
-  list ([DEC-851](decisions/DEC-851.md) item 6) can be emptied. *Accepted when:* a tests
+  list ([DEC-851](decisions/earlier-600-899.md#dec-851) item 6) can be emptied. *Accepted when:* a tests
   correction pins each form on real-line shapes, the tokenizer reads them, the exact-line list in
   `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
   Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
@@ -924,7 +924,7 @@ after U-A1 to U-A5 are recorded.
   floor I did not confirm. Today the core takes only limit orders from a handoff, so the executor
   process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
   confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
-  or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
+  or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/infrastructure.md#dec-2033) item 4
   records. [DEC-2037](decisions/DEC-2037.md) designs it: a handoff with no limit for an exit, sent
   at the market where §5.1 allows and by the §5.6 ladder elsewhere. *Accepted when:*
   `IntentBody::Order` carries an order type; the core receives, gates
@@ -1364,12 +1364,12 @@ after U-A1 to U-A5 are recorded.
   egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
   subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
   passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
-  *The dispatcher's user* ([DEC-2120](decisions/DEC-2120.md) item 1): the dispatcher's unit runs
+  *The dispatcher's user* ([DEC-2120](decisions/workspace.md#dec-2120) item 1): the dispatcher's unit runs
   as `owlhead_notify`, in no other service's group, loads only `vault-address-key` (and
   `vault-address-key-previous` during a rotation) with `LoadCredential=`, and the host setup
   creates `addresses/` as `owlhead_api:owlhead_notify` `2710`; owed by the change that deploys the
   dispatcher on the demo host.
-  *Address-key re-seal* ([DEC-2120](decisions/DEC-2120.md) item 6): an offline tool, run as
+  *Address-key re-seal* ([DEC-2120](decisions/workspace.md#dec-2120) item 6): an offline tool, run as
   `owlhead_api`, the one user that can write entries. For each entry under the previous key it
   takes the workspace's lock, opens the body, re-seals it under the current key with its
   `endpoint_hash` recomputed under the current key's subkey, and replaces the entry only while its
@@ -1389,7 +1389,7 @@ after U-A1 to U-A5 are recorded.
   ids only. Such an entry counts as remaining under its key, so it blocks the previous key's
   retirement and the next rotation until an operator erases it by `address_ref` (the writer's
   `erase`). One corrupt entry therefore blocks rotation loudly, never silently.
-  *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
+  *`key_id` in §5.7* ([DEC-2120](decisions/workspace.md#dec-2120) item 5): workspace API §5.7's "The vault's
   part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
   it, with the note that it is the workspace's current key id and so outside the step-up digest.
   *Active addresses and the fold-error case in the specs* (a spec-only PR, ES-22, DEC-2123,
@@ -1528,7 +1528,7 @@ story buys a service, and none uses a real identity-provider account in tests (s
   append `Member*` records directly. It is `mandate_identity::write_membership`, pure, over the
   `ControlStream` compare-and-append port the workspace store implements on the journal
   ([DEC-646](decisions/DEC-646.md)).
-  *Push addresses on deactivation* ([DEC-2120](decisions/DEC-2120.md) item 9, from E8-14): when a
+  *Push addresses on deactivation* ([DEC-2120](decisions/workspace.md#dec-2120) item 9, from E8-14): when a
   deactivation or removal ends a membership, the writer appends a `removed`
   `NotificationAddressChanged` for each of the member's active addresses in the workspace inside
   its own commit, with the deactivation's actor, `null` step-up, and no `OwnerAlertSent`
@@ -1647,7 +1647,7 @@ story buys a service, and none uses a real identity-provider account in tests (s
   against the [mandate spec](../specs/mandate.md) (schema, V-rules, policy hierarchy; reference
   cases MC-S, MC-V, and MC-P pass); proposed envelope values are marked as proposed and no envelope
   field activates unconfirmed ([DEC-97](04-decision-log.md#decisions)).
-  Merged (claim #124, stream H4; [DEC-428](decisions/DEC-428.md), tests #536 then implementation #580):
+  Merged (claim #124, stream H4; [DEC-428](decisions/earlier-303-599.md#dec-428), tests #536 then implementation #580):
   `mandate-spec`'s `ValidationContext` carries the effective `independent_approval_required`, V-047 refuses it in a
   workspace of fewer than two users at validation, and the harness reads the cases' context member, so MC-V69 to
   MC-V71 pass. V-047 also refuses again when a version is applied, as V-002 does (`validate::recheck_at_application`
@@ -1816,7 +1816,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 - **E10-19 (Should, Phase 3 unless pulled into Phase 2, after the first paper trade; SC)** As an
   owner, I want an agent that only monitors (it watches the instruments and conditions I confirm and
   alerts me, and never opens a position), so that I can follow an instrument before I let an agent
-  trade it ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-11.1; product experience brief D16).
+  trade it ([DEC-528](decisions/earlier-303-599.md#dec-528) item 4; PRD FR-11.1; product experience brief D16).
   *Depends on:*
   - a mandate spec change, which is not written yet and touches a protected path. It must say how a
     monitor agent is expressed (an envelope with no allocation, or autonomy that denies `open` and
@@ -1842,7 +1842,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 - **E10-21 (Must, M8, before an Alpaca OAuth connect on staging; SC)** As the owner, I want a
   closed connect request to leave no authorization code or token in the vault, so that a code the
   callback wrote just before a revoke or the deadline teardown is never exchanged, and a token an
-  exchange wrote just before the close is never used ([DEC-2626](decisions/DEC-2626.md) item 3,
+  exchange wrote just before the close is never used ([DEC-2626](decisions/process.md#dec-2626) item 3,
   the residual window). *Accepted when:* the revoke of a pending connection and the deadline
   teardown each delete the connection's code entry and any token entry after journaling the
   close; where Alpaca offers token revocation, the token is revoked at Alpaca before it is
@@ -1859,7 +1859,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
   code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
   cell jobs, plain and seeded; and the founder's staging connect waits on it. *The drill*
-  ([DEC-2063](decisions/DEC-2063.md)): `cargo xtask cell drill exchange` and the CI job
+  ([DEC-2063](decisions/infrastructure.md#dec-2063)): `cargo xtask cell drill exchange` and the CI job
   `cell-exchange` run the whole paper connect (stub sign-in, the `connection` challenge,
   `mandate step-up confirm-connect` in a Job, the start, the fixture's authorize page, the callback)
   and hold on the exchange pod's success, the taken code and the token entry; the seeded run skips
@@ -1867,7 +1867,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   API's contract test for DEC-2125.
 - **E10-23 (Should, M8, after E10-22; SC)** As the owner, I want the cell to establish a connection
   end to end, so that the executor's connect check after an exchange is proven before staging
-  ([DEC-2063](decisions/DEC-2063.md) item 6). *Accepted when:* the cell's executor reads the
+  ([DEC-2063](decisions/infrastructure.md#dec-2063) item 6). *Accepted when:* the cell's executor reads the
   account from the `oauth-fixture` pod (`GET /v2/account`) through an account reader swapped in at
   `Start.account`, built only with debug assertions and refused outside the dev and ci tiers, with
   a test that a release build cannot select it, never through a paper-host override; the fixture
@@ -1876,8 +1876,8 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 
 - **E10-24 (Should, M8, before the founder's staging connect; SC)** As an engineer, I want a test
   that forces the OpenBao code take to lose its check-and-set, so that the take-once of
-  [DEC-2628](decisions/DEC-2628.md) item 2 is pinned on the backend staging runs, not only on the
-  local vault ([DEC-2363](decisions/DEC-2363.md) item 4). *Accepted when:* a test in
+  [DEC-2628](decisions/process.md#dec-2628) item 2 is pinned on the backend staging runs, not only on the
+  local vault ([DEC-2363](decisions/trading-core.md#dec-2363) item 4). *Accepted when:* a test in
   `mandate-vault`'s OpenBao suite reads the code, has another writer overwrite it before the
   tombstone's `cas` write, and asserts the take answers `None` (or `Denied` when the session lacks
   the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
@@ -1886,7 +1886,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 - **E10-25 (Must, M8, before the founder's staging connect; SC)** As the founder, I want every image
   that holds `mandate-token-exchange` to carry a CA bundle, so that the exchange's token client can
   be built and a connect does not end `endpoint_failed` before it sends anything
-  ([DEC-2063](decisions/DEC-2063.md) item 8: on an empty base reqwest's platform verifier finds no
+  ([DEC-2063](decisions/infrastructure.md#dec-2063) item 8: on an empty base reqwest's platform verifier finds no
   roots and the client build fails). *Accepted when:* any image that holds
   `mandate-token-exchange` (cell or release) carries a CA bundle, and a release check fails the
   build when the image has no roots, for example by starting the binary in the built image far
@@ -1937,7 +1937,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   at their own route (FR-8.4); each fixture type of `web/src/fixtures/types.ts` has its source route.
 - **E11-10 (Should, M9, after the first paper trade and E11-9)** As an owner, I want Home
   (signed-in, D1) to show my connected accounts, their holdings and "no agents deployed", so that I
-  start from what I have ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-8.5; product experience brief J-H, D1,
+  start from what I have ([DEC-528](decisions/earlier-303-599.md#dec-528) item 4; PRD FR-8.5; product experience brief J-H, D1,
   H1).
   *Depends on:*
   - E11-9's journal-served read models;
@@ -1954,7 +1954,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - no buy or sell control appears on the view.
 - **E11-11 (Should, M9, after the first paper trade and E11-9)** As an owner, I want to search
   instruments by name or ticker and keep my own watchlists, so that I can find an instrument and ask
-  an agent about it or set one up ([DEC-528](decisions/DEC-528.md) item 2; PRD FR-8.6; product
+  an agent about it or set one up ([DEC-528](decisions/earlier-303-599.md#dec-528) item 2; PRD FR-8.6; product
   experience brief I1 to I3).
   *Depends on:*
   - an instrument directory read: data-plane and workspace API spec changes, protected and not
@@ -2017,7 +2017,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   lower-`seq` filter, `OrderRequestRecorded`, `payload.approval`, `payload.outputs_used[]`, the
   approval's `outputs[]`, `payload.thesis_id`, `OrderSubmitted` version 1, the quoted members of
   `ThesisProposed` and `ModelInvocationRecorded`, a missing singular `IntentReceived`, and
-  [DEC-772](decisions/DEC-772.md) items 8 and 9.
+  [DEC-772](decisions/earlier-600-899.md#dec-772) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
   *Follow-ups ([#772](https://github.com/kunwarshivam/mandate/pull/772) review, journal spec):* rule 81
@@ -2028,7 +2028,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   clause of rules 109 and 110 is unreachable, since rule 83 refuses a client first.
   *Parked (Could; coordinator, 2026-10-09):* derive `mandate journal verify` and `verify-cold`'s
   trusted start from a control-stream export (`--start-manifest` or `--start-anchor` with
-  `--control`) through `mandate_journal::resolve_start_from_rows` ([DEC-784](decisions/DEC-784.md)).
+  `--control`) through `mandate_journal::resolve_start_from_rows` ([DEC-784](decisions/earlier-600-899.md#dec-784)).
   Journal spec §11 takes the raw `(from_seq, trusted_prev_hash)` the CLI already accepts
   ([DEC-115](04-decision-log.md#decisions) item 5, [DEC-490](decisions/DEC-490.md)); the
   derivation the spec requires is the workspace API's `POST /verifications` (§4.8.1,
@@ -2038,7 +2038,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   and run logic in `mandate-audit`) goes first; its route waits for `mandate-api-server`, which the
   first route's story creates ([DEC-680](decisions/DEC-680.md) item 1, claim
   [#750](https://github.com/kunwarshivam/mandate/issues/750)).
-  *Follow-up (Should; [DEC-890](decisions/DEC-890.md)):* multi-stream export verification. `verify`
+  *Follow-up (Should; [DEC-890](decisions/earlier-600-899.md#dec-890)):* multi-stream export verification. `verify`
   and `verify-cold` take a control stream and its account streams together, so they can run
   journal spec §11's `connection_cause_mismatch`, which no single-stream export can (DEC-885 item
   6). Its report then drops DEC-890's `not run: connection_cause_mismatch` line for the exports it
@@ -2063,7 +2063,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `ExportCreated` before it is served, its canonical form passes the journal verifier, and derived
   JSON and CSV name their manifest hash (API-16); a viewer can read none of it and an auditor can act
   on nothing (API-2).
-  *Follow-up (#797 review; [DEC-770](decisions/DEC-770.md) item 5):* journal spec §2 defines the
+  *Follow-up (#797 review; [DEC-770](decisions/earlier-600-899.md#dec-770) item 5):* journal spec §2 defines the
   notice stream `ntf:{workspace_id}`, but `mandate_journal::StreamId::parse` does not parse `ntf:`,
   so `mandate-audit`'s `StreamType::Notice` is unreachable and an `ntf:` id reads as absent. Owed:
   `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
@@ -2320,7 +2320,7 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
     `admission: deny`.
 
-  *Registration ([DEC-414](decisions/DEC-414.md)):* the tests PR merged in
+  *Registration ([DEC-414](decisions/earlier-303-599.md#dec-414)):* the tests PR merged in
   [#510](https://github.com/kunwarshivam/mandate/pull/510); the implementation PR, on
   `agent/j3-thesis-registration-impl`, registers the shared schema (`instrument_id` as
   `Ty::AssetId`) and rules 34 to 38 in `mandate-journal`, implements
@@ -2352,7 +2352,7 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     that the three read, or an xtask check that they agree. The same change should also give check
     numbers one form: `control.rs` compares a 0-based index with `CORROBORATION_CHECK` (15), where
     `context.rs` uses the 1-based check number.
-    *Under way* ([DEC-415](decisions/DEC-415.md)): the type is `mandate_domain::ThesisRefusal`, live
+    *Under way* ([DEC-415](decisions/earlier-303-599.md#dec-415)): the type is `mandate_domain::ThesisRefusal`, live
     with its tests on `agent/j3-refusal-home-tests`; the implementation PR moves the three readers onto
     it, names every check by its number from 1, and changes no test file.
   - Minor 5: `control::horizon_agrees` fails closed (check 2 fails) on an instant or horizon it
@@ -2462,7 +2462,7 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Registration landed* (lane I4): `mandate-journal` registers `EvaluationRunRecorded` with rule
   145, `rule` required, written by a `user` or `system` actor only
   ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors.
-  *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves it only with
+  *Route ([DEC-1143](decisions/earlier-900-1999.md#dec-1143)):* `mandate-api-server` serves it only with
   `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
   is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
   remains.
@@ -2595,7 +2595,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
 - **E19-12 (Should, after the research agent's DEC-99 evaluation passes and E19-3; SC)** As an
   owner, I want a market event (news, a filing, a price move, an earnings date or call transcript)
   to bring my agent's next research run forward, so that its theses respond to what happened rather
-  than waiting for the interval ([DEC-528](decisions/DEC-528.md) item 4; PRD FR-11.2).
+  than waiting for the interval ([DEC-528](decisions/earlier-303-599.md#dec-528) item 4; PRD FR-11.2).
   *Depends on:*
   - agent harness spec §5.3's change (protected; not written yet): an event edge from `Idle` to
     `Due` with its debounce, and an amendment of invariant HI-8 (no run starts before
@@ -3028,7 +3028,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   overview.
 
 Rows E21-28 to E21-50 come from the [managed-cells plan](tasks/managed-cells.md)
-([DEC-967](decisions/DEC-967.md), Accepted by the founder). Each names its lane. None buys
+([DEC-967](decisions/earlier-900-1999.md#dec-967), Accepted by the founder). Each names its lane. None buys
 hosting (the founder orders it at the local-cell gate, item 16), and none edits
 `crates/mandate-paper/src/lib.rs` or `crates/mandate-shell/src/control.rs`, `adapters.rs` or
 `paper/` before R0 closes (item 2). Every environment they build is paper or a venue demo, except
@@ -3072,7 +3072,7 @@ enables `live` (ES-23, OPS-5).
   workspace kill-switch scopes, so a kill switch reaches the executor from the control stream
   without the runtime (design §3.6, `AGENTS.md` rule 13). Until then it reaches the executor only
   through the runtime's copy. The account scope waits on the close-position re-ask row from
-  [DEC-2364](decisions/DEC-2364.md).
+  [DEC-2364](decisions/trading-core.md#dec-2364).
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
@@ -3095,18 +3095,18 @@ enables `live` (ES-23, OPS-5).
   executor's exactly its own connection; a vault outage stops no running executor before its lease
   expires (E21-9); no secret is ever an environment variable; the OpenBao dev-server mode is
   refused outside tests; and a canary-secret scan of logs, metrics and the journal finds nothing
-  (OPS-1). Builds on E10-13's V1 (DEC-692) being complete. *Slice 1* ([DEC-977](decisions/DEC-977.md),
+  (OPS-1). Builds on E10-13's V1 (DEC-692) being complete. *Slice 1* ([DEC-977](decisions/earlier-900-1999.md#dec-977),
   #1458): the crate, both backends, one conformance suite, the policies, leases and grants.
-  *Slice 2* ([DEC-2019](decisions/DEC-2019.md)): the cell's OpenBao chart, in server mode on raft
+  *Slice 2* ([DEC-2019](decisions/infrastructure.md#dec-2019)): the cell's OpenBao chart, in server mode on raft
   over TLS 1.3, reached only by the processes whose egress names it, initialized and unsealed by
-  `cargo xtask cell up`. *Slice 3a* ([DEC-2021](decisions/DEC-2021.md)): staging unseals itself
+  `cargo xtask cell up`. *Slice 3a* ([DEC-2021](decisions/infrastructure.md#dec-2021)): staging unseals itself
   with the static seal from a mounted, bootstrap-created key (DEC-2605 row 10); the cell and
   production stay unsealed by hand. *Left:* the chart's `previous_key` for one restart, which
   staging's seal-key rotation needs (deploy/cell/README.md, "The vault"); provisioning the policies
   and roles in the cell, each process's secret id as a mounted file, and the egress drill's vault
   probe; the audit device; the metrics and journal parts of the canary scan once either carries a
   vault operation.
-  *Address path* ([DEC-2120](decisions/DEC-2120.md) item 10, from E8-14): `SecretPath::Address`, an
+  *Address path* ([DEC-2120](decisions/workspace.md#dec-2120) item 10, from E8-14): `SecretPath::Address`, an
   OpenBao backend for the web-push address store behind `mandate-vault-addresses`'
   `AddressWriter` and read-only `AddressReader`, keeping DEC-2120's per-workspace namespace, the
   member bound to each entry, and the dispatcher's read-only access in the backend's policy. Until
@@ -3124,7 +3124,7 @@ enables `live` (ES-23, OPS-5).
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
   and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
   crate's fold, driver, fake and Kubernetes adapter, with the property test. *Slice 2*
-  ([DEC-1172](decisions/DEC-1172.md)): the process crate `mandate-deployd` (loop, exec probes,
+  ([DEC-1172](decisions/earlier-900-1999.md#dec-1172)): the process crate `mandate-deployd` (loop, exec probes,
   drain, the Postgres journal port) and the cell's `deploy-manager` process: its image, its
   ServiceAccount and a Role over pods alone, bounded by a ValidatingAdmissionPolicy to pods shaped
   like its templates, its `kube-api` egress and an egress gate that probes a denied destination, the
@@ -3141,7 +3141,7 @@ enables `live` (ES-23, OPS-5).
   alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
   exited pods; the demo's runtime, which needs a version-2 deployment and so `connection record`
   for the demo's paper connection, waiting on the executor's connect check (E21-30, lane X). From
-  #1737's review, two minors were left under the freeze rule. *Slice 4* ([DEC-2038](decisions/DEC-2038.md))
+  #1737's review, two minors were left under the freeze rule. *Slice 4* ([DEC-2038](decisions/infrastructure.md#dec-2038))
   closes both: a version-2 deployment that rule 201 refuses raises `deployment_unconnected` once per
   process, and RB-14 has its page. Also *left*: nothing journals `AgentStopped` yet, so a deployment
   that never ran, or a crash-looped runtime, is never stopped, and its alert repeats on each manager
@@ -3177,7 +3177,7 @@ enables `live` (ES-23, OPS-5).
   - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
     `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
     namespace check, as DEC-1177 item 6 has the token exchange do.
-  - Done ([DEC-2365](decisions/DEC-2365.md)): a paper executor, the one that reaches the vault,
+  - Done ([DEC-2365](decisions/trading-core.md#dec-2365)): a paper executor, the one that reaches the vault,
     runs only as the pod the manager starts as its connection's `<hex>` account, and the chart
     refuses to render it without the manager. The fixture broker's Deployment executor stays on
     `default`, with no connection and no credential.
@@ -3635,7 +3635,7 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      through the eligibility floor, the autonomy rules and the risk gate like the platform's own ideas. It
      never sizes or places an order (rule 4).
 
-- **Agents over holdings the owner already has (adoption)** ([DEC-528](decisions/DEC-528.md) item 3;
+- **Agents over holdings the owner already has (adoption)** ([DEC-528](decisions/earlier-303-599.md#dec-528) item 3;
   PRD FR-11.3). Deferred: [DEC-46](04-decision-log.md#decisions) stands, and an agent's sub-ledger
   holds only what it bought. Prerequisites, each its own story when it is written:
   1. Importing lots and their cost basis from the broker, with each lot's source recorded.
@@ -3647,14 +3647,14 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      `exits_only`) and [connections spec](../specs/connections.md) CN-7 (never adopted as ours).
      Both are protected spec changes.
 
-- **Rotating Barman's minted R2 token** ([DEC-2029](decisions/DEC-2029.md); E21-56's review).
+- **Rotating Barman's minted R2 token** ([DEC-2029](decisions/infrastructure.md#dec-2029); E21-56's review).
   The `cloudflare` module mints the journal archive's bucket-scoped token with no `expires_on`, so
   it lives until the token resource is replaced. Wanted: an expiry, a rotation that mints the next
   token before the old one lapses and hands it to the cluster through lane GO's bootstrap, and a
   check that alerts before the expiry. Until then the founder can rotate it by tainting
   `module.cloudflare.cloudflare_account_token.journal_archive` in a reviewed apply.
 
-- **`infra.yml` hardening left from E21-56's review of #1711** ([DEC-2030](decisions/DEC-2030.md)
+- **`infra.yml` hardening left from E21-56's review of #1711** ([DEC-2030](decisions/infrastructure.md#dec-2030)
   item 6). Each tightens what already holds:
   1. `terraform_data.applied_commit` depends on every module, so a partial apply never records its
      commit, and it changes only on an apply, not on every plan.
@@ -3849,7 +3849,7 @@ From E10-1's slice-V implementation (DEC-161):
     whole-second timestamp, not integer seconds (DEC-302; `payload::clock` writes integers on every
     account-stream event). **Done: the writer landed in #456, and `AccountSnapshotRecorded` registered
     with rule 24 together with `fees` journaling that writer, tests first (#467), then implemented
-    ([DEC-402](decisions/DEC-402.md)).** DEC-261 item 7's ordering held throughout: the fee step pauses
+    ([DEC-402](decisions/earlier-303-599.md#dec-402)).** DEC-261 item 7's ordering held throughout: the fee step pauses
     every agent and alerts the owner, and refusing its snapshot at `append` never stops it (rules 3 and
     13). `an_account_snapshot_is_closed_and_checked_by_rule_24` turns on, in Rust, all 15 snapshot
     drafts' own `expect` (2 valid and 13 invalid), `account_snapshot_recorded_refuses_an_unlisted_member`
@@ -4268,13 +4268,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
   outside the regular session an owner exit sells equities through the ladder only on the
   confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
-- **E7-4's tests correction (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md) item 7):**
+- **E7-4's tests correction (stream K), from slice 2 ([DEC-346](decisions/earlier-303-599.md#dec-346) item 7):**
   `properties::every_unprotected_interval_has_a_journaled_start_and_end` asserts that no interval
   is open when a script ends. A script that ends while the protected lead's partly filled entry is
   still inside its interval (no completing fill, no timeout reached and confirmed) fails it on any
   implementation. Judge an interval that is still open against what could have closed it, then
   delete its `BEHAVIOUR_ONLY_TESTS` row.
-- **E7-4 (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md), left open):** (1) a re-placement
+- **E7-4 (stream K), from slice 2 ([DEC-346](decisions/earlier-303-599.md#dec-346), left open):** (1) a re-placement
   after an exit covers every tranche at the prices of the latest `placed`, because the fold keeps
   one price pair per instrument; decide this for tranches at different prices (coordinator). (2)
   Bracket legs and the partial-fill OCO record no `created_on`, so slice 5's trading-day part must
@@ -4287,7 +4287,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   protection again, and §5.4's bound alerts once per interval. The position then stays unprotected
   indefinitely, with that one owner alert as its only signal. Re-place (or escalate) when an
   awaited order is refused, and keep alerting while the interval stays open.
-  The same holds for a re-placement before expiry ([DEC-367](decisions/DEC-367.md)), where the
+  The same holds for a re-placement before expiry ([DEC-367](decisions/earlier-303-599.md#dec-367)), where the
   executor itself chose to open the interval: a refused re-placement is alerted once at the bound
   and never retried (#468 round 1, minor 5).
 - **E7-4 (stream K), from #463 round 1 (minor 1):** a protective order the broker replaced
@@ -4330,14 +4330,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
     and skipped just before it (DEC-367 item 4 (a′)). Make the unreachable branch
     unrepresentable. Minor (4) went with `exit_working`, which the founder's decision on #468
     removed.
-- **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
+- **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/earlier-303-599.md#dec-348)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end
   after a `submit_protective` also has the step's own acknowledgment end it, and the matcher finds
   that later record either way. Add a harness test that feeds an awaiting end with no
   acknowledgment and asserts the step does not match `journal: unprotected_window_end`.
 - **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
-  2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
+  2, [DEC-349](decisions/earlier-303-599.md#dec-349)):** a crypto stop-limit is sized net of the taker fee, the
   larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
   covers `gross × (taker − maker)` less than the holding, and nothing bounds that remainder.
   Carry `liquidity` on `BrokerFill` (the connector reads it from Alpaca's fill activity), or
@@ -4352,7 +4352,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   [#445](https://github.com/kunwarshivam/mandate/pull/445), 2026-10-02):
   `rule_13_holds_over_random_scripts` refused a risk exit held `session_closed` at 2018-01-01
   00:00 ET (the New Year holiday's overnight) in a script from the eve of 2018.~~ **Fixed on
-  `agent/k-rule13-holiday-risk-exit` ([DEC-392](decisions/DEC-392.md)).** The executor's hold is
+  `agent/k-rule13-holiday-risk-exit` ([DEC-392](decisions/earlier-303-599.md#dec-392)).** The executor's hold is
   DEC-260 (13)'s. The oracle fixed the calendar's coverage at the script's start, so it now reads
   coverage at each instant, and it knows the trading days of 2018-01-02 to 05. CI's minimal input
   is the named test `rule_13_holds_for_a_risk_exit_on_the_new_year_holiday_overnight`.
@@ -4417,13 +4417,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   here:** lane D1's [DEC-2344](decisions/DEC-2344.md) starts the executor for a kill switch that
   covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
   covering switch it read is applied, with nothing in flight and no `Unknown` order in scope. The
-  executor's half, a tighter exit, is [DEC-2347](decisions/DEC-2347.md)'s.
-- **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
+  executor's half, a tighter exit, is [DEC-2347](decisions/trading-core.md#dec-2347)'s.
+- **E7-4 (executor process), from [DEC-2347](decisions/trading-core.md#dec-2347) item 6, with DEC-2333's slice
   A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
   lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
-  test. Taken by [DEC-2364](decisions/DEC-2364.md)'s pair: an instrument the switch closes that the
+  test. Taken by [DEC-2364](decisions/trading-core.md#dec-2364)'s pair: an instrument the switch closes that the
   fold still reads held keeps it running.
-- **E7-4 (executor, account kill switch), from [DEC-2364](decisions/DEC-2364.md) Not covered
+- **E7-4 (executor, account kill switch), from [DEC-2364](decisions/trading-core.md#dec-2364) Not covered
   here:** a close-position the broker accepts and then drops at once (rejected, or expired before
   the next read) is asked again on the read that confirms its own answer, whose answer asks another
   read, within one pass, until the chain bound fails the cycle. Ask a close again only on the
@@ -4431,13 +4431,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   Latent: only the core's account-scope switch sends a close-position, and no process hands the
   core that scope today. **Blocks** handing the account scope to `mandate-executord` or the shell
   (E21-30's *Left*, DEC-2003 item 6): neither ships without the other (the coordinator's ruling).
-- **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
+- **E7-4 (kill switch sizing), from [DEC-2347](decisions/trading-core.md#dec-2347) item 9, rule 13:** a buy
   the broker reports filled whose fill named no order (Alpaca's fill activity names only the
   broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
   `sub_ledger`, so the agent's kill switch sells none of those shares. Attribute such a fill to the
   order through the broker's order id (DEC-955 item 3), with a test that the switch then sells the
   agent's whole position.
-- **E6-4 (executor fold), from [DEC-2347](decisions/DEC-2347.md) item 8:** when the executor's fold
+- **E6-4 (executor fold), from [DEC-2347](decisions/trading-core.md#dec-2347) item 8:** when the executor's fold
   interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
   `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
   none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
@@ -4447,8 +4447,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   folded by its executor, so a kill switch on that account cannot be applied by the executor
   (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
   ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
-  staging. Done by [DEC-2354](decisions/DEC-2354.md)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
-- **E6-4 (executor kill switch), from the review of [DEC-2354](decisions/DEC-2354.md):** a release
+  staging. Done by [DEC-2354](decisions/trading-core.md#dec-2354)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
+- **E6-4 (executor kill switch), from the review of [DEC-2354](decisions/trading-core.md#dec-2354):** a release
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
@@ -4457,32 +4457,32 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
   protection the executor places again (the sequence end's `re_place`, `re_cover`, `new_day`) is
   sized at the long position, so after a release it covers the owner's released shares with the
-  agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
+  agent's protective order. [DEC-2362](decisions/trading-core.md#dec-2362) sizes it at the long position less
   the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
-- **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
+- **E7-4 (executor kill switch), from [DEC-2361](decisions/trading-core.md#dec-2361):** a switch's close that
   no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
   `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
   tests are in `hand.rs`, pending E7-4.
-- **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
+- **E21-30 (executor process), from [DEC-2358](decisions/trading-core.md#dec-2358):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
   `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
   with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
   verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
-  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/DEC-2359.md)'s
+  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/trading-core.md#dec-2359)'s
   pair (claim #2354): a REST poll behind a `QuoteFeed` port, with the connection's own credential,
   handing only sane, fresh quotes, until E21-44's pushed channel replaces it.
-- **E7-4 (executor, lane LV), from [DEC-2359](decisions/DEC-2359.md) item 7:** the quote feed reads
+- **E7-4 (executor, lane LV), from [DEC-2359](decisions/trading-core.md#dec-2359) item 7:** the quote feed reads
   no instrument whose only exit is protection resting at the broker, so a resting stop or
   take-profit is never repriced or re-protected from a quote. Decide whether one should be (a gap or
   a stale stop), and if so add the instrument to `ExecutorState::quote_wanted` with its own DEC-77
   pair.
-- **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
+- **E7-4 (executor process), from the review of [DEC-2357](decisions/trading-core.md#dec-2357):** while a
   connection record does not read, `agents_of` follows every agent with a version-2 deployment,
   those deployed only on another account's connection included: journal noise, no risk. Skip an
   agent whose every deployment names a connection a readable establishment shows is another
   account's.
-- **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
+- **E7-4 (executor), from the review of [DEC-2358](decisions/trading-core.md#dec-2358):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
   Done: `hand.rs`'s `a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishes`
@@ -4495,7 +4495,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   bound itself intervenes, with a model exact enough to keep it from false failures. The hand
   tests `a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop` and
   `a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop` pin the two cases meanwhile.
-- **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
+- **E7-4 (executor), from the review of [DEC-2356](decisions/trading-core.md#dec-2356) item 8:** `closes_due`
   holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
   submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
   beside it. Hold the close on any sell of ours journaled after the read's `taken_at`, whatever its
@@ -4552,7 +4552,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   without E5 whenever another agent's bracket is working, and `re_cover` → `re_place`. The
   re-placement alone oversells by f1 once the bracket completes, with no second entry: it covers
   B + f1, and the bracket's legs then sell Q1 against a position of B + Q1. E1's tests
-  ([DEC-532](decisions/DEC-532.md)) pin all four paths as pending hand cases under
+  ([DEC-532](decisions/earlier-303-599.md#dec-532)) pin all four paths as pending hand cases under
   `BEHAVIOUR_ONLY_TESTS` rows, each with the protected 10 and a bracket holding 4 of 10:
   `an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs` (8, not 12),
   `a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs` (10, not 14),
@@ -4687,7 +4687,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
 - **Blocks running the executor across a session boundary:** fold `RiskDayStarted` in
   `mandate-executor`. `TradingDayStarted` is folded since E7-4 slice 5's trading-day part
-  ([DEC-367](decisions/DEC-367.md)). `RiskDayStarted` still answers the later slice's
+  ([DEC-367](decisions/earlier-303-599.md#dec-367)). `RiskDayStarted` still answers the later slice's
   `Unimplemented` stub, so the first risk-day rollover stops the executor, failing closed. Interpret
   it, move it back into `properties::INTERPRETED` with a live test that fails when its arm is
   stubbed, and land that before the executor runs across a session boundary (#194 review, round 2).
@@ -5227,7 +5227,7 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   catches it today, but nothing registers it (the review's plants).
   *Done (`agent/g8-530-minors`):* (1) §11 says 433, and `check_cases.py` now fails when §11's
   count differs from the file; (2) the spec's DEC-399 entry names both grids; (3)
-  [DEC-426](decisions/DEC-426.md) records the two in-place edits as departures and keeps rule 4,
+  [DEC-426](decisions/earlier-303-599.md#dec-426) records the two in-place edits as departures and keeps rule 4,
   and DEC-399's status line points to it; (4) stays with the "real quantity grid" row; (5)
   `mutants.py` registers "a trim at the minimum is withheld", which MC-B33 catches.
 - **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
@@ -5915,7 +5915,7 @@ From the round-2 review of the workspace services API spec ([#560](https://githu
 - **Offer the kill switch alone on the revoke-on-compromise screen** (workspace API spec §5.6), as
   the alternative that keeps the connection so protection can be re-placed and exits re-driven.
 
-From the round-6 review of the flatten adapter's implementation PR ([#596](https://github.com/kunwarshivam/mandate/pull/596), minors; [DEC-449](decisions/DEC-449.md), [DEC-451](decisions/DEC-451.md)):
+From the round-6 review of the flatten adapter's implementation PR ([#596](https://github.com/kunwarshivam/mandate/pull/596), minors; [DEC-449](decisions/DEC-449.md), [DEC-451](decisions/earlier-303-599.md#dec-451)):
 
 - **Expose the journal's unsealing rule from `mandate-journal`** — `stored_draft` (or a
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
@@ -5948,7 +5948,7 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   [#1112](https://github.com/kunwarshivam/mandate/pull/1112), tests, #1112 for a map's last entry
   and the RFC 6901 escaping of a member's name;
   [#1117](https://github.com/kunwarshivam/mandate/pull/1117), the fix, through
-  `serde_path_to_error`, [DEC-880](decisions/DEC-880.md)).
+  `serde_path_to_error`, [DEC-880](decisions/earlier-600-899.md#dec-880)).
 - ~~**Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
   `type` at the member. It is still refused either way.~~ Done
   ([#1104](https://github.com/kunwarshivam/mandate/pull/1104), tests;
@@ -5958,14 +5958,14 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   and the problem's tagged violation, which the schema refuses. Leniency only: the array form
   decodes to the same value the object form does. Fix with a strict object-only deserializer;
   tests first.~~ Done ([#1124](https://github.com/kunwarshivam/mandate/pull/1124), tests,
-  [DEC-881](decisions/DEC-881.md); [#1143](https://github.com/kunwarshivam/mandate/pull/1143), the fix, `wire::object_only!`).
+  [DEC-881](decisions/earlier-600-899.md#dec-881); [#1143](https://github.com/kunwarshivam/mandate/pull/1143), the fix, `wire::object_only!`).
 - ~~**Refuse a plain object written as a JSON array** (the review of the tests for the tagged form,
-  [DEC-881](decisions/DEC-881.md) item 3). serde's derived structs also read a JSON array, their
+  [DEC-881](decisions/earlier-600-899.md#dec-881) item 3). serde's derived structs also read a JSON array, their
   members in order, so `decode` accepts a whole `KillSwitchRequest` written as
   `[{"kind": "agent", "id": "a"}]` and a `record` written as an array, which the schemas refuse.
   Leniency only, like the tagged form. Tests first, then its own decision and fix.~~ Done
   ([#1132](https://github.com/kunwarshivam/mandate/pull/1132), tests,
-  [DEC-882](decisions/DEC-882.md); [#1143](https://github.com/kunwarshivam/mandate/pull/1143), the fix, the same macro on every derived struct).
+  [DEC-882](decisions/earlier-600-899.md#dec-882); [#1143](https://github.com/kunwarshivam/mandate/pull/1143), the fix, the same macro on every derived struct).
 
 From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors; [#1143](https://github.com/kunwarshivam/mandate/pull/1143), [#1155](https://github.com/kunwarshivam/mandate/pull/1155), [#1175](https://github.com/kunwarshivam/mandate/pull/1175), [#1178](https://github.com/kunwarshivam/mandate/pull/1178), [#1151](https://github.com/kunwarshivam/mandate/pull/1151)):
 
@@ -5984,7 +5984,7 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
   - API-4's test asserts `dropped` in body order with members whose body order is also
     alphabetical, so it cannot tell the two apart; the server-case test pins body order. Give the
     API-4 bodies a non-alphabetical order.
-  - [DEC-886](decisions/DEC-886.md) item 10 says the server's cases cover non-JSON refusal for
+  - [DEC-886](decisions/earlier-600-899.md#dec-886) item 10 says the server's cases cover non-JSON refusal for
     ending a delegation and for Skip; `api7.json` covers only the kill switch and an owner exit,
     and the other two come from `check_lenient.py`'s `UNPARSABLE_OK` and the spec. The tests cover
     all four. Correct the citation where the reading is next restated (DEC-886 is Accepted).
@@ -6009,7 +6009,7 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
   - §9.16: a replacement successor's own record carries `replaced_by_broker_order_id` as its
     `broker_order_id`, or `null` (DEC-870, pending in [#1182](https://github.com/kunwarshivam/mandate/pull/1182)).
 
-From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
+From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/earlier-303-599.md#dec-538); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 
 - **The mutation plan's tests** (#768).
   - `the_planned_shards_test_the_gates_mutants_and_no_more_per_shard` seeds a diff whose mutants
@@ -6040,9 +6040,9 @@ From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is l
   the scope check cannot disagree on a name.
 
 - **E7-24: require `iss` when the server sets `authorization_response_iss_parameter_supported`**
-  (RFC 9207 §3, [DEC-855](decisions/DEC-855.md) item 4): a callback without `iss` is then refused.
+  (RFC 9207 §3, [DEC-855](decisions/earlier-600-899.md#dec-855) item 4): a callback without `iss` is then refused.
 
-From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
+From E7-23 B2a's implementation ([DEC-838](decisions/earlier-600-899.md#dec-838) item 5, [DEC-841](decisions/earlier-600-899.md#dec-841)):
 
 - **Delete the transitional Alpaca profile** (`mandate-executor`'s `shape::transitional_alpaca`,
   which `ExecutorState::new` starts with, and the default body of the shell's
@@ -6060,8 +6060,8 @@ From E7-23 B3's protection slice ([DEC-966](decisions/DEC-966.md) items 3 and 4,
   is reached. Until then a Robinhood position rests on its stop alone, and the take-profit price
   the intent carries is unused.
 
-From E2's first paper fill ([DEC-938](decisions/DEC-938.md), #1355), and its follow-ups
-([DEC-948](decisions/DEC-948.md), #1369's review). DEC-948 closed the paper environment, the
+From E2's first paper fill ([DEC-938](decisions/earlier-900-1999.md#dec-938), #1355), and its follow-ups
+([DEC-948](decisions/earlier-900-1999.md#dec-948), #1369's review). DEC-948 closed the paper environment, the
 simulated fee's schema and the paper risk clock that DEC-938 left here. Still open:
 
 - **A settlement calendar of its own.** A fill's `set` reference names the registered trading

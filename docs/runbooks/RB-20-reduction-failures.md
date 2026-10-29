@@ -9,7 +9,7 @@ alert alone tells you that someone failed many times, never who.
 
 | Code | Severity | What it means |
 |---|---|---|
-| `reduction_failures_over_limit` | SEV-3 | One client of route 2's opening route (`POST /v1/reduction-sessions`, [workspace API spec](../specs/workspace-api.md) §4.10 route 2 item 3) reached its failure limit: 10 failed presentations from one device, or 100 from one address, within 300 s ([DEC-653](../project/decisions/DEC-653.md) item 3, [DEC-2119](../project/decisions/DEC-2119.md)) |
+| `reduction_failures_over_limit` | SEV-3 | One client of route 2's opening route (`POST /v1/reduction-sessions`, [workspace API spec](../specs/workspace-api.md) §4.10 route 2 item 3) reached its failure limit: 10 failed presentations from one device, or 100 from one address, within 300 s ([DEC-653](../project/decisions/earlier-600-899.md#dec-653) item 3, [DEC-2119](../project/decisions/DEC-2119.md)) |
 
 ## What it does and does not do
 

@@ -1,16 +1,38 @@
-# Decisions, one file each
+# Decisions
 
-From DEC-344 on, every decision is its own file here, `DEC-<n>.md` ([DEC-344](DEC-344.md)).
-DEC-01 to DEC-302 stay where they were written, as rows of the
-[decision log](../04-decision-log.md), which takes no new decision rows. Both are binding in the
-same way (`AGENTS.md` rule 9).
+A decision starts as its own file here, `DEC-<n>.md`, reserving its number
+([DEC-344](earlier-303-599.md#dec-344)). Once it is settled and nothing under `crates/`, `web/`,
+`docs/specs/`, `deploy/cell/charts/`, `deploy/cell/model-gateway/`, `schemas/` or `fixtures/`
+cites it, it folds into its category's file as a `## DEC-<n>:` section under a stable
+`<a id="dec-<n>">` anchor, and its own file is deleted ([DEC-2650](DEC-2650.md)). DEC-01 to
+DEC-302 stay where they were written, as rows of the
+[decision log](../04-decision-log.md), which takes no new decision rows. All of it is binding in
+the same way (`AGENTS.md` rule 9).
 
-## Why files
+| Range | Category file |
+|---|---|
+| DEC-2000 to DEC-2099 | [infrastructure.md](infrastructure.md) |
+| DEC-2100 to DEC-2199 | [workspace.md](workspace.md) |
+| DEC-2200 to DEC-2299 | [intelligence.md](intelligence.md) |
+| DEC-2300 to DEC-2399, DEC-2800 to DEC-2899 | [trading-core.md](trading-core.md) |
+| DEC-2400 to DEC-2499 | [web.md](web.md) |
+| DEC-2500 to DEC-2599 | [notifications.md](notifications.md) |
+| DEC-2600 to DEC-2699 | [process.md](process.md) |
+| DEC-2700 to DEC-2799 | control-plane.md (empty so far) |
+| DEC-303 to DEC-599 | [earlier-303-599.md](earlier-303-599.md) |
+| DEC-600 to DEC-899 | [earlier-600-899.md](earlier-600-899.md) |
+| DEC-900 to DEC-1999 | [earlier-900-1999.md](earlier-900-1999.md) |
 
-Every PR used to append its row to the same two tables of one file, so every merge left every
-other open PR conflicting. Two PRs that add two different files never conflict. Two PRs that take
-the same number add the same path, which git refuses to merge, so a collision is loud rather than
-silent.
+Each category file opens with a one-page summary of the rules still in force, then holds its
+decisions verbatim. A decision that stays a file — reserved or proposed, Released, or cited from
+a forbidden path — keeps its own `DEC-<n>.md` until that changes.
+
+## Why files for the living decisions
+
+A number is reserved by adding the file that takes it: two PRs that take the same number add the
+same path, which git refuses to merge, so a collision is loud rather than silent. The settled
+decisions then live one category file each, so reading a category does not open a hundred files,
+and a link to a decision is a link to its category file's `#dec-<n>` anchor.
 
 ## When to write one
 
@@ -21,15 +43,17 @@ plans cited any more were removed on 2026-10-29; git history keeps them.
 ## Writing a decision
 
 1. **Take a number** from your category's range ([Numbers by category](#numbers-by-category)):
-   fetch `main` and take the next integer in that range after the highest decision file in it.
+   fetch `main` and take the next integer in that range after the highest decision the category
+   holds — its own file, or a section of its category file.
 2. **Reserve it in your first commit** by adding `DEC-<n>.md` with the status `Reserved`, who holds
    it, and one line on what it is for. The file is what protects the number: citing a number in a
    PR description or a commit message reserves nothing. Reserve only what you will use.
 3. **Fill it in** in the PR that makes the decision, and set the status.
 4. **Change nothing else here.** A PR edits only its own decision files. To change an accepted
    decision, write a new one that supersedes it, and edit only the old decision's status: the
-   status line of its file, or for DEC-01 to DEC-302 the Status cell of its row in the decision
-   log, which is the one edit that table still takes.
+   status line of its file, the Status cell of its section in its category file, or for DEC-01 to
+   DEC-302 the Status cell of its row in the decision log, which is the one edit that table still
+   takes.
 
 A number that reached `main` is never reused: a reservation abandoned after it merged keeps its
 file, with the status `Released`. A reservation in a PR that is closed without merging leaves
@@ -37,7 +61,7 @@ nothing on `main`, so the number is free and the next lane takes it.
 
 ## Numbers by category
 
-From [DEC-2600](DEC-2600.md) on, each category of work has its own range of 100 numbers, so lanes
+From [DEC-2600](process.md#dec-2600) on, each category of work has its own range of 100 numbers, so lanes
 in different categories never race for the same next number. Within its category, a lane takes the
 next free number and reserves it with its file, as above; a lane that needs several reserves each
 with its own file. Two lanes of one category that take the same number add the same path, which git

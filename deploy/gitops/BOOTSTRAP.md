@@ -1,6 +1,6 @@
 # Bootstrapping a hosted cluster (the founder's runbook)
 
-E21-58, [DEC-2018](../../docs/project/decisions/DEC-2018.md). Do this once per cluster: staging
+E21-58, [DEC-2018](../../docs/project/decisions/infrastructure.md#dec-2018). Do this once per cluster: staging
 first, production when you decide. After it, the cluster takes every change from `main` through
 Flux, and nobody applies anything to it by hand. Agents never run any step here (DEC-2015 item 5),
 and the command refuses to run in CI or without a terminal.
@@ -91,8 +91,8 @@ cargo xtask gitops bootstrap staging
 ## Staging's vault
 
 Staging runs the workspace vault; production does not until you decide how it unseals
-([DEC-2051](../../docs/project/decisions/DEC-2051.md), DEC-2021 item 6). You chose to keep its
-recovery keys in the cluster ([DEC-2052](../../docs/project/decisions/DEC-2052.md)), so staging's
+([DEC-2051](../../docs/project/decisions/infrastructure.md#dec-2051), DEC-2021 item 6). You chose to keep its
+recovery keys in the cluster ([DEC-2052](../../docs/project/decisions/infrastructure.md#dec-2052)), so staging's
 apply sets it up with no step of yours: after the bootstrap it makes the seal key if there is none,
 waits for the vault's pod, and initializes it once, storing the init answer's three recovery keys
 in the Secret `vault-recovery/vault-init`, which no workload can read, and revoking the root token
@@ -122,7 +122,7 @@ leaves them there at your umask. It refuses a terminal on either end.
 
 Staging's web app signs you in only once your identity-provider subject is linked to the founder's
 principal, and lets you act only once that principal is the workspace's founder
-([DEC-2114](../../docs/project/decisions/DEC-2114.md)). None of it is a step of yours on the
+([DEC-2114](../../docs/project/decisions/workspace.md#dec-2114)). None of it is a step of yours on the
 cluster. The link is the apply's; the mount and the grant are two edits you make yourself, in this
 order, because granting the founder's membership is your own act, not an agent's:
 

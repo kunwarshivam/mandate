@@ -7,7 +7,7 @@ value below (AGENTS.md rules 7 and 8). Nothing here goes in the repository, a ch
 **What it is.** Three DigitalOcean droplets (`s-4vcpu-8gb`, `sfo2`), each running one CI job at a
 time. Every job gets a fresh container built from a baked image (the repository's pinned toolchain,
 Docker, the GitHub runner) and the container is deleted when the job ends. They cost **144 USD a
-month** against your cap of **150 USD** ([DEC-2065](../project/decisions/DEC-2065.md)), separate
+month** against your cap of **150 USD** ([DEC-2065](../project/decisions/infrastructure.md#dec-2065)), separate
 from the hosting budget of DEC-2011. ci.yml's eleven cell jobs and the `fast` and `full` aggregates move to them (DEC-2072,
 DEC-2075, DEC-2076), and only for pushes and dispatches on `main` and pull requests from this
 repository's own branches. `select`, lint, tests, mutants and the other checks stay on GitHub's runners.

@@ -1,6 +1,6 @@
 # The grant's marks and fresh quote: the run journals its IEX marks, and the binding gate judges a fresh quote at the grant (E7-26)
 
-- **Spec:** `docs/project/decisions/DEC-943.md` (closing DEC-940 item 6's gaps 1 and 3); mandate
+- **Spec:** `docs/project/decisions/earlier-900-1999.md#dec-943` (closing DEC-940 item 6's gaps 1 and 3); mandate
   spec §5.2 (`MarkUpdated` as a risk input) and §6.4 (the request's `reference_mark`, check 12's
   drift band, MI-22); journal spec §9's registered `MarkUpdated` version 1 (`instrument_id`,
   `price`, `source`, `feed`, `risk_clock`); trading-domain spec §8.2 (the bid as a long's risk

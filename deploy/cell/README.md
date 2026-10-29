@@ -2,7 +2,7 @@
 
 One workspace deployment, packaged once (E21-36), and a cell on a developer machine or a CI
 runner that proves it (E21-37), with no cloud account, no broker credential and no broker host
-([DEC-967](../../docs/project/decisions/DEC-967.md) item 3). The choices are recorded in
+([DEC-967](../../docs/project/decisions/earlier-900-1999.md#dec-967) item 3). The choices are recorded in
 [DEC-993](../../docs/project/decisions/DEC-993.md); the plan is the
 [managed-cells brief](../../docs/project/tasks/managed-cells.md), lanes K and C.
 
@@ -10,9 +10,9 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 |---|---|
 | `charts/workspace/processes.json` | **The process list** (infrastructure §3.1): every process type with its kind, image, database role, egress column, placement and resources. The chart and the Compose file are both rendered from it |
 | `charts/workspace/` | The Helm chart `mandate-workspace`: one Deployment or Job per process type whose image is named, the migration hook, and the network policies |
-| `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator: a primary and a synchronous standby, its roles (`files/roles.sql`), one credential Secret per process type, and the WAL archive and base backups through the Barman Cloud plugin (E21-41, [DEC-1050](../../docs/project/decisions/DEC-1050.md)). Installed before the workspace chart |
+| `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator: a primary and a synchronous standby, its roles (`files/roles.sql`), one credential Secret per process type, and the WAL archive and base backups through the Barman Cloud plugin (E21-41, [DEC-1050](../../docs/project/decisions/earlier-900-1999.md#dec-1050)). Installed before the workspace chart |
 | `charts/backup-plugin-tls/` | The two certificates the Barman Cloud plugin and the operator authenticate each other with, made in the cluster in place of cert-manager (DEC-1050 item 3) |
-| `charts/vault/` | The workspace vault: OpenBao, pinned by digest, in server mode on raft storage over TLS 1.3, reached only by the processes whose egress names it, unsealed by hand ([DEC-2019](../../docs/project/decisions/DEC-2019.md)). Installed before the workspace chart |
+| `charts/vault/` | The workspace vault: OpenBao, pinned by digest, in server mode on raft storage over TLS 1.3, reached only by the processes whose egress names it, unsealed by hand ([DEC-2019](../../docs/project/decisions/infrastructure.md#dec-2019)). Installed before the workspace chart |
 | `charts/archive-store/` | The local cell's stand-in for the S1 endpoint the journal archives to: the pinned test store, in its own namespace, reachable only by the journal's archive clients (DEC-1050 item 5). Never in cell #1 |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
 | `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
@@ -263,7 +263,7 @@ stub issuer's `demo-owner` subject is linked to; before the gestures, the scenar
 and the deployment manager at it (`helm upgrade --reuse-values --set api.workspace=…`), and the
 second deployment manager and the model gateway at its research workspace, the same ULID with `r`
 (`deployManager.researchWorkspace`, `modelGateway.workspace`;
-[DEC-2070](../../docs/project/decisions/DEC-2070.md)), and waits for each to roll out, so every
+[DEC-2070](../../docs/project/decisions/infrastructure.md#dec-2070)), and waits for each to roll out, so every
 step, through the CLI, the API or `web/`, acts on one workspace (DEC-2010). Step 2 registers,
 before any version, the reviewed configuration every agent trades under
 (`deploy/cell/demo/rule-set.json`, `fee-config.json` and `trading-calendar.json`, the
@@ -274,7 +274,7 @@ demo inputs and records the payload it stores, which binds that rule set, in the
 the scenario runs the executor's connect check on its fixture broker for a fresh account
 (`01KDEA<run id>000000000A`), as the `executor` drill does; step 2 records that connection, so the
 deployment is version 2 and the manager starts the account's executor and the agent's runtime
-([DEC-2379](../../docs/project/decisions/DEC-2379.md)). It runs a second for the research
+([DEC-2379](../../docs/project/decisions/trading-core.md#dec-2379)). It runs a second for the research
 workspace's own connection, `conn_demo_research_paper_01`, which the research agent's mandate names,
 on an account of its own (`01KDER<run id>000000000A`), and step 3 records it there (DEC-2070 item
 2).
@@ -343,8 +343,8 @@ that one workspace.
 | `journal` | The CLI opens a control stream in the cell's journal, and a Job exports it and verifies it by journal spec §11 | One byte of the segment changed before it is verified |
 | `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream and commits each scope's kill switch and an agent pause through `docker compose run control agent …` (E21-34), and its export verifies and holds every one | The first event's hash changed before it is verified |
 | `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`): it proves the drill sees a lost stream, not a loss the restart itself caused |
-| `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the drill deploys an agent for the runtime and executor to start ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
-| `admission` | The hosted clusters' kill-switch admission policies (`deploy/gitops/base/kill-switch-admission.yaml`), applied as they are with a signature webhook that is down and fails closed: the founder's kill-switch Job is admitted and its pod made; an unlabelled pod, a person's or a service account's `control` pod, a service account's control Job, the control label a service account gives its suspended Job, a service account's change to a person's control Job, a labelled Deployment's pod, a CronJob's control Job (another API group's included), the label added to a pod later, and a changed image or an ephemeral container in the kill switch's pod are each refused; a second workspace's namespace is covered by its label; and a finished kill-switch Job is removed by foreground deletion ([DEC-2045](../../docs/project/decisions/DEC-2045.md), [DEC-2046](../../docs/project/decisions/DEC-2046.md)) | The Job policy firing on update only for a newly control label: the check must name `admitted a service account's change to a person's control Job` |
+| `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the drill deploys an agent for the runtime and executor to start ([DEC-2000](../../docs/project/decisions/infrastructure.md#dec-2000) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
+| `admission` | The hosted clusters' kill-switch admission policies (`deploy/gitops/base/kill-switch-admission.yaml`), applied as they are with a signature webhook that is down and fails closed: the founder's kill-switch Job is admitted and its pod made; an unlabelled pod, a person's or a service account's `control` pod, a service account's control Job, the control label a service account gives its suspended Job, a service account's change to a person's control Job, a labelled Deployment's pod, a CronJob's control Job (another API group's included), the label added to a pod later, and a changed image or an ephemeral container in the kill switch's pod are each refused; a second workspace's namespace is covered by its label; and a finished kill-switch Job is removed by foreground deletion ([DEC-2045](../../docs/project/decisions/infrastructure.md#dec-2045), [DEC-2046](../../docs/project/decisions/infrastructure.md#dec-2046)) | The Job policy firing on update only for a newly control label: the check must name `admitted a service account's change to a person's control Job` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
 | `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`, but for the role provisioner's two role paths ("The vault" below). It runs in its own job, `cell-vault` (DEC-2616) | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
@@ -352,7 +352,7 @@ that one workspace.
 | `exchange-late` | The same connect with the owner authorizing only once the manager's exchange pod runs, as at Alpaca, so the exchange waits for its code until the request's deadline (DEC-2363) | As `exchange`'s: `step_up_missing` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 | `ticks` | The chart pointed at a fresh workspace restarts the scheduler on it, and its `clock:` stream, exported twice by one-off Jobs three seconds apart, has grown (E21-29) | The scheduler scaled to zero once a first export shows it ticking, so its stream stops: `the scheduler is not ticking`; it is scaled back before the verdict |
-| `executor` | The scheduler ticking the run's workspace: its `clock:` stream, exported twice by one-off Jobs three seconds apart, has grown (E21-29); and the data process's daily bars, `mandate inspect`ed in the artifact store with no problem and at least 30 sessions. Then an agent deployed on a recorded paper connection, and the deployment manager starting that account's executor until its pod runs and its process answers `livez` (E21-30, [DEC-2035](../../docs/project/decisions/DEC-2035.md)). Three more one-off Jobs: the executor's connect check on its in-process fixture broker, which prints the passing `ConnectionChecked`; the workspace opened and founded and the record's code shown; then the record committed and the demo's mandate registered, created, confirmed and deployed, so `AgentDeployed` is version 2 (journal spec §9.24 rule 201). No credential, no broker host | The connect check skipped, so the connection is never recorded and the agent deploys at version 1: `no executor pod` |
+| `executor` | The scheduler ticking the run's workspace: its `clock:` stream, exported twice by one-off Jobs three seconds apart, has grown (E21-29); and the data process's daily bars, `mandate inspect`ed in the artifact store with no problem and at least 30 sessions. Then an agent deployed on a recorded paper connection, and the deployment manager starting that account's executor until its pod runs and its process answers `livez` (E21-30, [DEC-2035](../../docs/project/decisions/infrastructure.md#dec-2035)). Three more one-off Jobs: the executor's connect check on its in-process fixture broker, which prints the passing `ConnectionChecked`; the workspace opened and founded and the record's code shown; then the record committed and the demo's mandate registered, created, confirmed and deployed, so `AgentDeployed` is version 2 (journal spec §9.24 rule 201). No credential, no broker host | The connect check skipped, so the connection is never recorded and the agent deploys at version 1: `no executor pod` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
 (`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, the
@@ -378,7 +378,7 @@ store is plain HTTP inside the cluster.
 
 ## The vault
 
-`charts/vault/` runs the workspace's OpenBao (E21-32, [DEC-2019](../../docs/project/decisions/DEC-2019.md)).
+`charts/vault/` runs the workspace's OpenBao (E21-32, [DEC-2019](../../docs/project/decisions/infrastructure.md#dec-2019)).
 In `deploy/tests/test_vault.py`:
 
 - server mode on raft storage alone, from a command the template fixes: no value adds an argument
@@ -432,7 +432,7 @@ kubectl exec -it -n ws-ws1 vault-0 -- bao operator unseal    # twice, two differ
 The shares and the root token are kept offline, never in the repository, CI, a file the cluster can
 read, or an environment variable. After every restart of `vault-0`, it is unsealed again.
 
-Staging (paper only) unseals itself (DEC-2605 row 10, [DEC-2021](../../docs/project/decisions/DEC-2021.md)):
+Staging (paper only) unseals itself (DEC-2605 row 10, [DEC-2021](../../docs/project/decisions/infrastructure.md#dec-2021)):
 the founder's local `cargo xtask gitops bootstrap staging` creates the Secret `vault-seal-key` (its
 `key` entry, typed or pasted at the founder's terminal and piped to kubectl's stdin; no CI job can
 reach staging's API, DEC-2015 item 4) before the chart's first install, and the chart mounts it as

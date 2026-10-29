@@ -1,7 +1,7 @@
 - **E21-30 X1b-3 (Must, M8, before the founder's demo; SC)** As the founder, I want a paper opening
   the runtime proposes in the cell to be placed by the executor, filled on the fixture broker, its
   protective stop placed and the fill booked by reconciliation, so that the end-to-end trade loop
-  runs in the local cell with only the broker a fixture ([DEC-2380](../decisions/DEC-2380.md)).
+  runs in the local cell with only the broker a fixture ([DEC-2380](../decisions/trading-core.md#dec-2380)).
   *Accepted when:* `MarkUpdated` version 2 is registered and the executor journals it; the
   executor's mandate view, instrument snapshot (with fill references), binding-gate source,
   protections and quotes are read from the journal, the deployment's mandate document and

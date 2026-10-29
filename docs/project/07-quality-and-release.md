@@ -37,14 +37,14 @@ flowchart LR
    missed mutants and an adversarial review. A change merged without waiting for CI (DEC-2605
    row 14) also needs a clean merge with `main` and `cargo xtask land-check` to pass:
    spec-guard, lint and the diff's tests on the head merged with `main`
-   ([DEC-2642](decisions/DEC-2642.md)). The founder reviews after the fact and can revert;
+   ([DEC-2642](decisions/process.md#dec-2642)). The founder reviews after the fact and can revert;
    the decisions DEC-79 reserves still wait for the founder.
    **Two lanes** ([DEC-516](decisions/DEC-516.md), proposed): that is the safety lane. A change
    that touches no safety-critical path, spec, gate or safety surface runs on the light lane: one
    item per PR, green CI, the author's checks and the screen's pictures in the body, then merge,
    with the review reading the diff after the merge and the founder judging from the pictures.
 5. **No live secrets for agents.** Agents use paper and demo credentials and fixtures only.
-6. **CI runs on ready pull requests, not drafts** ([DEC-610](decisions/DEC-610.md)). A builder
+6. **CI runs on ready pull requests, not drafts** ([DEC-610](decisions/earlier-600-899.md#dec-610)). A builder
    proves a change locally with `cargo xtask check` and keeps its pull request a draft, where `ci`
    runs no job. It marks the pull request ready once its independent review passes, or earlier
    when the change needs CI's runners (the Postgres tests, the mutation shards). Marking it ready

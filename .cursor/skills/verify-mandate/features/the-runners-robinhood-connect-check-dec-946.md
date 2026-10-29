@@ -2,7 +2,7 @@
 
 - **Spec:** `docs/specs/connections.md` §5.2 (the executor runs the broker-facing checks) and
   §8.1 checks 1, 2, 3 and 7; `docs/specs/journal.md` §9.8 (`ConnectionChecked`, rules 57, 58,
-  62 and 68); `docs/project/tasks/r0-rehearsal.md` blocker R1; `docs/project/decisions/DEC-875.md`
+  62 and 68); `docs/project/tasks/r0-rehearsal.md` blocker R1; `docs/project/decisions/earlier-600-899.md#dec-875`
   item 1 (the account check); `docs/project/decisions/DEC-946.md` (this row's choices).
 - **Code:** `mandate-paper`, `crates/mandate-paper/` (layer 9, safety-critical):
   `src/connect_check.rs` — `parse_check`, `connect_check` (the refusals before any login, core

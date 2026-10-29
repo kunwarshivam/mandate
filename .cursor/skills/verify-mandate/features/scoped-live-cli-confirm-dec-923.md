@@ -1,7 +1,7 @@
 # Scoped live cli_confirm (DEC-923)
 
-- **Spec:** [DEC-923](../../../../docs/project/decisions/DEC-923.md) items 1 to 4, read by
-  [DEC-927](../../../../docs/project/decisions/DEC-927.md); DEC-529 item 3; DEC-155 item 4. Until
+- **Spec:** [DEC-923](../../../../docs/project/decisions/earlier-900-1999.md#dec-923) items 1 to 4, read by
+  [DEC-927](../../../../docs/project/decisions/earlier-900-1999.md#dec-927); DEC-529 item 3; DEC-155 item 4. Until
   E9-4's step-up lands, a `live` grant with `cli_confirm` counts only on a Robinhood deployment
   whose confirmed mandate caps `max_order_usd` at 100 USD and pins one instrument, for a bound US
   equity order of at most 100 USD on it, from the workspace owner.

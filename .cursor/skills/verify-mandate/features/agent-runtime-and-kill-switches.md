@@ -38,7 +38,7 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   a failed or day-old check of the deployment's connection refuses an opening and a grant as
   `account_restricted` and never an exit, malformed checks refuse, a replay folds the same state,
   and a property over check sequences against an oracle that reads the generated sequence;
-  [DEC-969](../../../../docs/project/decisions/DEC-969.md)),
+  [DEC-969](../../../../docs/project/decisions/earlier-900-1999.md#dec-969)),
   `crates/mandate-runtime/tests/deferred_to_binding.rs` (`DecisionMade` version 3, journal spec
   v0.85: a deferring allow names its deferrals in byte order with its figures or the two liquidity
   checks, an `auto` opening with a deferral is asked under `policy_overlay` and never proposed, an
@@ -50,12 +50,12 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   [DEC-2515](../../../../docs/project/decisions/DEC-2515.md)),
   `crates/mandate-runtime/tests/unaskable.rs` (an ask the runtime cannot build is the dry run's
   deny with its reason, `ask_unbound`, `plan_mismatch` or `content_unhashable`, notified once, and
-  a well-built one is asked; [DEC-2814](../../../../docs/project/decisions/DEC-2814.md)),
+  a well-built one is asked; [DEC-2814](../../../../docs/project/decisions/trading-core.md#dec-2814)),
   `crates/mandate-runtime/tests/account_wide_mode.rs` (the executor's `AgentModeApplied` naming
   every agent, `*`, and this agent's own, each keyed by restriction as the executor keys them: it
   holds this agent, is copied and cancels approvals, survives a restart and re-hands no opening,
   each cause lifts only itself, and a property whose oracle is the executor's keyed map over the
-  generated records; [DEC-2806](../../../../docs/project/decisions/DEC-2806.md)),
+  generated records; [DEC-2806](../../../../docs/project/decisions/trading-core.md#dec-2806)),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
   fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
   committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.

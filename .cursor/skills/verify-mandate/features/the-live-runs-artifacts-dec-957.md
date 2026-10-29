@@ -1,6 +1,6 @@
 # The live run's artifacts: only the live workspace's own registrations (E7-26, DEC-957)
 
-- **Spec:** `docs/project/decisions/DEC-957.md` (the R0 rehearsal's R9); DEC-952 item 1 (paper
+- **Spec:** `docs/project/decisions/earlier-900-1999.md#dec-957` (the R0 rehearsal's R9); DEC-952 item 1 (paper
   and live never share a stream); DEC-924 items 1 and 2 (a live version only on all four
   conditions); DEC-526 item 4 (the paper-only fee schedule refuses a live one).
 - **Code:** `crates/mandate-gate-inputs/src/control.rs` — `Origin` (`Origin::of`), carried by

@@ -3,7 +3,7 @@
 - **Spec:** `docs/specs/data-plane.md` §4 (sources, ingestion, tagging, de-duplication, storage,
   the research query interface), §5.2 (knowledge time), DP-1, DP-2, DP-8, DP-9;
   `docs/specs/agent-harness.md` §6.3 (the `news` and `filings` reads and their caps) and §10.2;
-  decision `docs/project/decisions/DEC-1130.md`.
+  decision `docs/project/decisions/earlier-900-1999.md#dec-1130`.
 - **Configuration:** `config/sources/allowlist-v<N>.toml`, the vetted-source allowlist (E17-7 holds
   its contents, E2-19), one file a version, never edited once merged. Version 3 is in use: Alpaca
   news is in effect on the founder's approval (DEC-2394), recorded as his with `approved_by` and

@@ -36,7 +36,7 @@ all-or-nothing, and decisions cannot be explained or audited. See
 - User-supplied code (WebAssembly plug-ins).
 - Strategy marketplace or copy trading.
 - An order ticket, or any buy that does not go through an agent: the owner buys by asking an agent
-  or setting one up ([DEC-528](../project/decisions/DEC-528.md) item 1).
+  or setting one up ([DEC-528](../project/decisions/earlier-303-599.md#dec-528) item 1).
 - Platform-ranked, scored, "trending" or suggested instrument lists; search is display-only and
   watchlists are the owner's (DEC-528 item 2).
 - Shared data plane.
@@ -191,7 +191,7 @@ instrument, size, price, or thesis.
 | FR-8.2 | Pause, resume, stop per agent; kill switch per workspace and per connection | P0 |
 | FR-8.3 | Alerts: risk rung reached, reconciliation mismatch, data feed stale, agent paused | P0 |
 | FR-8.4 | Per-signal-model scorecards (hit rate, calibration measurement) from the user's own results only, for the user's review; never aggregated across users, shown in the model picker, or used in marketing; they never change weights. Delivered in Phase 1 for the research agent's forward-paper evaluation ([DEC-99](../project/04-decision-log.md#decisions)) | P0 |
-| FR-8.5 | Home (signed-in, D1) and holdings: Home shows the owner's connected accounts, each connection's own holdings read-only with their age, and "no agents deployed" when there are none. A holding no agent bought is the owner's and is never shown as an agent's (connections CN-7). For Robinhood, only the agentic account (CN-8). [DEC-528](../project/decisions/DEC-528.md); E11-10 | P1 (v1, Phase 2, after the first paper trade) |
+| FR-8.5 | Home (signed-in, D1) and holdings: Home shows the owner's connected accounts, each connection's own holdings read-only with their age, and "no agents deployed" when there are none. A holding no agent bought is the owner's and is never shown as an agent's (connections CN-7). For Robinhood, only the agentic account (CN-8). [DEC-528](../project/decisions/earlier-303-599.md#dec-528); E11-10 | P1 (v1, Phase 2, after the first paper trade) |
 | FR-8.6 | Instrument search by name or ticker, display-only (ordered by match to the query and then alphabetically, as DEC-528 proposes); owner-curated watchlists, which steer no agent's universe and are never read by an agent. No ranking, scoring, flagging or platform-authored suggestion ([data-plane spec §1.4](../specs/data-plane.md#14-non-goals)). An instrument page offers "ask an agent" and "set up an agent", never "buy". DEC-528; E11-11 | P1 (v1, Phase 2, after the first paper trade) |
 
 ### 6.9 Deployment
@@ -210,7 +210,7 @@ instrument, size, price, or thesis.
 | FR-10.2 | Usage metering (agent-hours, model usage) from counts only | P1 |
 | FR-10.3 | Hybrid license key tied to the organization | P0 |
 
-### 6.11 After v1 ([DEC-528](../project/decisions/DEC-528.md))
+### 6.11 After v1 ([DEC-528](../project/decisions/earlier-303-599.md#dec-528))
 
 The founder's 2026-10-08 product flow added three requirements placed after v1. Each
 needs a spec change, or evidence, that is not scheduled. These are placed after v1 because whether

@@ -1,7 +1,7 @@
 # The release signing key: set it up once, then sign a release
 
 For the founder. The route is the one you decided (DEC-2605 rows 8 and 9); the design is
-[DEC-2024](../project/decisions/DEC-2024.md). There is no hardware key. One cosign key pair signs
+[DEC-2024](../project/decisions/infrastructure.md#dec-2024). There is no hardware key. One cosign key pair signs
 every release. Its private half lives only in the GitHub environment `release-signing`, and CI
 uses it only when you approve a run from `main`. Its public half is in `RELEASE_KEYS`
 (`crates/mandate-release/release-keys/cosign.pub`, #1689), so a binary starts at tier `staging` or

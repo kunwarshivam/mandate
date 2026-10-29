@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Accepted ([DEC-2011](../project/decisions/DEC-2011.md), the founder's; [DEC-2012](../project/decisions/DEC-2012.md), lane IAC's engineering choices) |
+| **Status** | Accepted ([DEC-2011](../project/decisions/infrastructure.md#dec-2011), the founder's; [DEC-2012](../project/decisions/infrastructure.md#dec-2012), lane IAC's engineering choices) |
 | **Date** | 2026-10-18 |
 | **Deciders** | The founder (platform, environments, cap); an agent (Claude Code, lane IAC) under DEC-79 for the layout inside it |
 
 Every ADR has a decision behind it. This one's are
-[DEC-2011](../project/decisions/DEC-2011.md) and [DEC-2012](../project/decisions/DEC-2012.md).
+[DEC-2011](../project/decisions/infrastructure.md#dec-2011) and [DEC-2012](../project/decisions/infrastructure.md#dec-2012).
 
 ## Context
 
