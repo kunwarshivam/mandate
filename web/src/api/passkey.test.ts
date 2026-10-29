@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { confirmStepUpDigest } from "./confirm";
-import { ASSERTION_TIMEOUT_MS, type Authenticator, type Passkey, assertPasskey, deployStepUpDigest, fromBase64url, passkeysRead, toBase64url } from "./passkey";
+import { ASSERTION_TIMEOUT_MS, type Authenticator, type Passkey, assertPasskey, deployStepUpDigest, fromBase64url, passkeysRead, toBase64url, usablePasskeys } from "./passkey";
 import type { StepUpChallenge } from "./step-up";
+import { coolOffWaivedFrom, refuseWaiverOutsideDev } from "@/lib/cool-off-build";
 
 /** 32 bytes 0..31 as unpadded base64url: what a served `webauthn_challenge` looks like. */
 const CHALLENGE_BYTES = Uint8Array.from({ length: 32 }, (_, i) => i);
@@ -116,6 +117,29 @@ describe("the passkey ceremony (DEC-2108 item 7, DEC-2128)", () => {
     expect(get).toHaveBeenCalledTimes(1);
     const offered = (get.mock.calls[0][0].publicKey as PublicKeyCredentialRequestOptions).allowCredentials ?? [];
     expect(offered.map((c) => new Uint8Array(c.id as ArrayBuffer))).toEqual([pastId]);
+  });
+
+  it("tries a passkey in its cool-off only in a build that waives it, and changes no other refusal (DEC-2411)", () => {
+    const get = vi.fn<Authenticator>(async () => credential());
+    const cooling = { ...PASSKEY, cool_off_ends: "2026-10-27T09:00:00.000000000Z" };
+    expect(usablePasskeys([cooling], get, NOW, false)).toEqual({ ok: false, reason: "passkey_cooling_off" });
+    expect(usablePasskeys([cooling], get, NOW)).toEqual({ ok: false, reason: "passkey_cooling_off" });
+    expect(usablePasskeys([cooling], get, NOW, true)).toEqual({ ok: true, value: [cooling] });
+    expect(usablePasskeys([cooling], null, NOW, true)).toEqual({ ok: false, reason: "passkey_unavailable" });
+    expect(usablePasskeys([], get, NOW, true)).toEqual({ ok: false, reason: "no_passkey" });
+    expect(usablePasskeys([PASSKEY], get, NOW, false)).toEqual(usablePasskeys([PASSKEY], get, NOW, true));
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("reads the waiver only from the exact value 1", () => {
+    expect(coolOffWaivedFrom("1")).toBe(true);
+    for (const value of [undefined, "", "0", "true", " 1", "1 ", "yes"]) expect(coolOffWaivedFrom(value)).toBe(false);
+  });
+
+  it("refuses any build but next dev that would turn the waiver on, and only that (DEC-2411 item 2)", () => {
+    for (const env of ["production", "test", "staging", "", undefined]) expect(() => refuseWaiverOutsideDev(env, "1"), String(env)).toThrow(/DEC-2411/);
+    for (const value of [undefined, "", "0", "true"]) expect(() => refuseWaiverOutsideDev("production", value)).not.toThrow();
+    expect(() => refuseWaiverOutsideDev("development", "1")).not.toThrow();
   });
 
   it("reports a dismissed or timed-out authenticator as canceled, and sends nothing", async () => {
