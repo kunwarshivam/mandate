@@ -1091,7 +1091,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | List, read agents | `GET /agents`, `GET /agents/{id}` | — | Read model (§4.7) |
-| An agent's mandate versions | `GET /agents/{id}/mandate-versions` | — | (planned: E10-27) Read-only: the version history, each version's classification and journaled times, and the version in effect, `read-models/agent-mandate-versions` (§4.7, [DEC-2147](../project/decisions/DEC-2147.md)) |
+| An agent's mandate versions | `GET /agents/{id}/mandate-versions` | — | Read-only: the version history, each version's classification and journaled times, and the version in effect, `read-models/agent-mandate-versions` (§4.7, [DEC-2147](../project/decisions/DEC-2147.md)) |
 | Run a backtest | `POST /backtests` | `BacktestRunRecorded` when done | Version and data snapshot (B1); report at `GET /backtests/{id}` |
 | Deploy to paper | `POST /agents` | `AgentDeployed` or `DeploymentRejected` | Confirmed version, backtest id shown, rendered go-live record, step-up. V-032, V-006, V-002 rejections in words (B3) |
 | Go live | `POST /agents/{id}/go-live` | `RealMoneyRefused` while the real-money gate is off | Always `live_unavailable` until counsel signs off (B5, DEC-98); the gate journals the refusal first (DEC-2134). The route exists so the refusal is tested |
@@ -1386,8 +1386,8 @@ read. Limit usage (the ladder's rung, the day-trade count, headroom) is not
 journaled yet and is not served; it joins with E6-4's risk records. The rest of D2 (restrictions,
 the floor, the universe) is planned as optional members.
 
-`GET /agents/{id}/mandate-versions` returns `read-models/agent-mandate-versions` ([DEC-2147](../project/decisions/DEC-2147.md))
-**(planned: E10-27)**: the agent's mandate versions, oldest first, and the one in effect. It
+`GET /agents/{id}/mandate-versions` returns `read-models/agent-mandate-versions` ([DEC-2147](../project/decisions/DEC-2147.md),
+[DEC-2148](../project/decisions/DEC-2148.md)): the agent's mandate versions, oldest first, and the one in effect. It
 writes nothing, takes the "View agents, positions, decisions" row, users only until client tokens
 land (E10-14), and is served in a `live` workspace too, since a read adds no risk.
 
@@ -1413,13 +1413,27 @@ land (E10-14), and is served in a `live` workspace too, since a read adds no ris
   confirmation screen showed it as `risk_increasing`, §3.11 item 11).
 - **In effect.** The executor's application, not the confirmation, puts a version in force (§5.1).
   `in_effect` is the deployed version, replaced by the `new_version` of each `MandateVersionApplied`
-  with `result` `applied` for the agent, in `seq` order, on the account stream of the connection
-  the deployed document names (read as the agent read finds it). A version confirmed and not yet
-  applied, or rejected, is not in effect. `in_effect` is `null` when that account stream is not
+  with `result` `applied` for the agent whose `causation_id` is a listed confirmation, in `seq`
+  order, on the account stream of the connection the deployed document names (read as the agent
+  read finds it). So `in_effect` is always a version `versions` lists, or `null`: an application
+  no listed confirmation caused moves nothing. A version confirmed and not yet applied, or
+  rejected, is not in effect. That account stream is this workspace's own (`acct:{workspace_id}:…`,
+  under the path's workspace): another workspace's stream is never read, and an agent of the same
+  id there changes nothing here. `in_effect` is `null` when that account stream is not
   found (`account_ref` `null`), since nothing then tells whether a later version was applied, and
   once an `AgentStopped` names the agent (`stopped_at`, its `recorded_at`). A later version's
   `application` is the first `MandateVersionApplied` for the agent whose `causation_id` is its
   `confirmation_id`, with its `result`, `reason`, and `recorded_at`, or `null` while there is none.
+- **Each entry agrees with itself.** The deployment is `first_version`, with no `base_version`
+  and no `application`; a later version has a `base_version`, no `deployed_at`, and an
+  `application` that is `applied` with no `reason`, `rejected` with one, or `null`. The server
+  enforces more than the schema can state: an application must name the entry's version over its
+  base, tell the classification the server computed (when it computes one; when it cannot, any
+  recorded classification is accepted and the entry's is `null`), give a `reason`
+  exactly when `rejected` (journal spec §9.3 rule 30), and be the only one answering its
+  confirmation. Rule 33 (a reason only an increase meets is `risk_increasing`) is the journal's
+  check at append; the read does not check it again yet (E10-28). One that is not fails the read `journal_unavailable`
+  ([DEC-2148](../project/decisions/DEC-2148.md)), never an entry that contradicts its record.
 - **Failures.** A control stream that cannot be read fails the membership read first, so the answer
   is `membership_unavailable`, as for every read (§3.11 item 8). An account stream the store fails,
   and any row of the kinds folded here (`MandateVersionCreated`, `MandateConfirmed`,
@@ -2657,7 +2671,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned, and so is an agent's mandate versions (§4.7, [DEC-2147](../project/decisions/DEC-2147.md); E10-27) |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned, and an agent's mandate versions are served (§4.7, [DEC-2147](../project/decisions/DEC-2147.md), [DEC-2148](../project/decisions/DEC-2148.md); E10-27) |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |

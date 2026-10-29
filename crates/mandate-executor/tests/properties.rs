@@ -3440,3 +3440,53 @@ fn a_resting_protective_order_is_not_one_the_kill_switch_must_cancel() {
         "the agent's own working buy is still one the switch must cancel"
     );
 }
+
+/// §5.4 under a kill switch beside a protected entry still in flight (DEC-2857; the mutation job's
+/// shrunk case on #2938): the agent holds one share, another agent's protected entry fills, and
+/// the agent's own protected entry is still unacknowledged when its switch fires. When that entry
+/// fills, its legs are placed for what it bought, and the switch's sells must not outrun them.
+/// Whatever sells the agent's lots, the protection resting never exceeds the position.
+#[test]
+fn a_switch_beside_its_protected_entry_in_flight_never_protects_more_than_is_held() {
+    let script = [
+        Step::Intent {
+            which: 0,
+            exiting: false,
+            other: false,
+            protected: false,
+        },
+        Step::Acknowledge,
+        Step::Fill,
+        Step::Intent {
+            which: 1,
+            exiting: false,
+            other: true,
+            protected: true,
+        },
+        Step::Acknowledge,
+        Step::Fill,
+        Step::Fill,
+        Step::Intent {
+            which: 2,
+            exiting: false,
+            other: false,
+            protected: true,
+        },
+        Step::KillSwitch,
+        Step::External,
+        Step::Fill,
+        Step::Fill,
+        Step::Fill,
+        Step::Fill,
+    ];
+    let run = play(&script);
+    let accountant = ProtectionAccountant::of(&run.drafts);
+    let ledger = ShadowLedger::of(&run.drafts);
+    for (name, covered) in &accountant.covered {
+        let held = ledger.positions.get(name).copied().unwrap_or(0);
+        assert!(
+            *covered <= held.max(0),
+            "{name} is protected for {covered} against a position of {held}"
+        );
+    }
+}

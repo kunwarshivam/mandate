@@ -35,7 +35,7 @@
   `mandate-runtime`'s `RetrievedObservation::stored` (the offer from a row and its record, `data_ref`
   the row's `item_ref` as it is, no text; `news_record_unreadable`, `news_record_mismatch`), and
   `mandate-daemon`'s `CellSource` (the news stream read under news triggers, items known by the risk
-  clock) and `merge_offers` (feed and stream once each, in arrival order), whose pass alerts each
+  clock, each record read once a process, DEC-2291) and `merge_offers` (feed and stream once each, in arrival order), whose pass alerts each
   mismatch once and unreadable records once. `fixtures/news/` holds the reader's stored bytes both
   sides read.
 - **Tests:** `crates/mandate-news-reader/tests/key.rs` (the vault's answer decides the key or why
@@ -58,7 +58,8 @@
   records); `mandate-runtime`'s `tests/stored_news.rs` (the offer, each mismatch and unreadable case,
   no text) and `tests/event_trigger.rs` (a stored item starts one `monitor` run naming its
   `item_ref`); `mandate-daemon`'s `tests/source.rs` (the stream read under news triggers alone, an
-  unreadable stream, an item known later, refusals by event id), `tests/news_offers.rs` (the merge
+  unreadable stream, an item known later, refusals by event id, each record read once a process and an unavailable one
+  read again), `tests/news_offers.rs` (the merge
   against its own oracle, fuzzed) and `tests/research.rs` (one run per stored item, and the
   refusals' alerts); `mandate-sources`' `tests/ingest.rs` (the vendor's tickers kept
   as parsed); `deploy/tests/test_cell.py`: the reader's staging launch, role, AppRole, allowlist,
