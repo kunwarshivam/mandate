@@ -2558,14 +2558,26 @@ fn re_place(
     if batch.view.closing_all.contains(instrument) {
         return Ok(());
     }
-    let plan = leg_plan(batch, instrument, sequence)?;
-    if plan.is_empty() {
+    let unpriced: BTreeSet<AgentId> = holders::leg_gaps(&batch.view, instrument)?
+        .into_keys()
+        .chain(std::iter::once(sequence.agent.clone()))
+        .filter(|agent| {
+            leg_basis(&batch.view, instrument, agent, sequence)
+                .prices
+                .is_none()
+        })
+        .collect();
+    let (plan, uncovered) = leg_plan(batch, instrument, sequence, &unpriced)?;
+    let mut short = uncovered
+        || holders::leg_gaps(&batch.view, instrument)?
+            .keys()
+            .any(|agent| unpriced.contains(agent));
+    if plan.is_empty() && !short {
         changed(batch, instrument, "unprotected_end", Vec::new())?;
         return Ok(());
     }
     let class = protected_class(batch, instrument);
     let mut sent = Vec::new();
-    let mut short = false;
     for (agent, qty) in plan {
         let basis = leg_basis(&batch.view, instrument, &agent, sequence);
         let offset = batch.ports.mandates.crypto_stop_limit_offset(&agent);
@@ -2616,14 +2628,27 @@ fn uncovered_end() -> Vec<(&'static str, Value)> {
 /// order (largest lots first, ties by agent id), and the owner's residual takes the rest. So no
 /// agent's leg covers another agent's lots, the owner's released shares stay uncovered (DEC-2362),
 /// and the owner's other shares stay covered as §5.4 covers them today (DEC-2849 I9).
+///
+/// A holder in `unpriced` has no prices of its own to be placed at ([`leg_basis`]): it takes no
+/// share of the room before the holders that can be protected, and [`re_place`] journals and
+/// alerts its shortfall. Its gap is still kept out of the owner's residual, so its shares never
+/// ride on another agent's leg. Nor does the owner's residual ride on an unpriced
+/// sequence's agent: it is left uncovered, and the `bool` says so, for `re_place` to alert.
 fn leg_plan(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
     sequence: &Replacement,
-) -> Result<Vec<(AgentId, Qty)>, ExecutorError> {
+    unpriced: &BTreeSet<AgentId>,
+) -> Result<(Vec<(AgentId, Qty)>, bool), ExecutorError> {
     let lots = holders::holders(&batch.view, instrument)?.lots;
-    let mut gaps: Vec<(AgentId, Qty)> = holders::leg_gaps(&batch.view, instrument)?
+    let all = holders::leg_gaps(&batch.view, instrument)?;
+    let unplaced = all
+        .iter()
+        .filter(|(agent, _)| unpriced.contains(*agent))
+        .try_fold(Qty::ZERO, |sum, (_, gap)| sum.checked_add(*gap))?;
+    let mut gaps: Vec<(AgentId, Qty)> = all
         .into_iter()
+        .filter(|(agent, _)| !unpriced.contains(agent))
         .collect();
     gaps.sort_by(|(a, _), (b, _)| lots.get(b).cmp(&lots.get(a)).then_with(|| a.cmp(b)));
     let committed =
@@ -2639,6 +2664,11 @@ fn leg_plan(
             plan.push((agent, qty));
         }
     }
+    let room = room.checked_sub(unplaced).unwrap_or(Qty::ZERO);
+    if unpriced.contains(&sequence.agent) {
+        let left = whole_shares(batch.ports, instrument, room)? > Qty::ZERO;
+        return Ok((plan, left));
+    }
     if let Some((_, qty)) = plan.iter_mut().find(|(agent, _)| agent == &sequence.agent) {
         *qty = whole_shares(batch.ports, instrument, qty.checked_add(room)?)?;
     } else {
@@ -2647,7 +2677,7 @@ fn leg_plan(
             plan.push((sequence.agent.clone(), owners));
         }
     }
-    Ok(plan)
+    Ok((plan, false))
 }
 
 /// The entry and prices `agent`'s leg is placed at (DEC-2849 item 8): the sequence's own, for its
@@ -9466,6 +9496,56 @@ mod sequence_tests {
                 ),
             ]
         );
+        Ok(())
+    }
+
+    /// DEC-2849 item 8: a holder with no prices of its own takes no share of the room before one
+    /// that can be protected. `agent-b`'s twelve have no prices; a leg of five no agent owns and
+    /// `agent-a`'s own working exit of three leave 14 of 22. `agent-a` still gets a leg for the
+    /// seven its ten less its exit leave, at its own prices, though `agent-b`'s lots are larger,
+    /// and `agent-b`'s twelve are journaled uncovered.
+    #[test]
+    fn an_unpriced_holder_takes_no_room_from_a_priced_one() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        holding(&mut executor, ("agent-b", "md-held-2", "12"), None)?;
+        let foreign = "md-foreign-p1";
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(foreign)),
+                ("agent", text("*")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("5")),
+                ("tif", text("gtc")),
+                ("purpose", text("protective")),
+                ("order_class", text("oco")),
+                ("take_profit", text("190")),
+                ("stop", text("120")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(foreign)),
+                ("state", text("accepted")),
+            ],
+        )?;
+        working_exit(&mut executor, LONE, "AAPL", "3")?;
+        let effects = re_placed(&executor, &ports)?;
+        assert_eq!(
+            legs_sent(&effects)?,
+            vec![(
+                "md-held-1".to_owned(),
+                Qty::parse("7")?,
+                "170/140".to_owned()
+            )]
+        );
+        let end = interval_end(&effects).ok_or(ExecutorError::Unimplemented { story: "test" })?;
+        assert_eq!(end.get("uncovered"), Some(&Value::Bool(true)), "{end:?}");
         Ok(())
     }
 
