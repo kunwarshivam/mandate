@@ -2417,6 +2417,29 @@ fn a_setup_run_offers_the_template_and_the_models_and_turns_a_valid_draft_into_a
         found[3].1
     );
     assert!(found[3].1.contains(r#""problems":[{"#), "{}", found[3].1);
+    let problems: Vec<(String, String)> = parse(found[3].1.as_bytes())
+        .ok()
+        .and_then(|r| {
+            r.get("problems")
+                .and_then(Value::as_array)
+                .map(|a| a.to_vec())
+        })
+        .unwrap_or_default()
+        .iter()
+        .map(|p| {
+            let member = |k: &str| {
+                p.get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            (member("path"), member("code"))
+        })
+        .collect();
+    assert!(
+        problems.iter().any(|(_, code)| code != "invalid"),
+        "each problem names the validator's own code: {problems:?}"
+    );
     assert!(
         found[4].1.starts_with(r#"{"message_id":""#),
         "{}",
