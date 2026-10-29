@@ -2138,6 +2138,26 @@
      {
       "path": "payload.decided_by",
       "value": "client_ceiling"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -2174,6 +2194,26 @@
      {
       "path": "payload.client_id",
       "value": "client_dots"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -2202,6 +2242,26 @@
      {
       "path": "payload.delegation_id",
       "value": "d1"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -2855,6 +2915,26 @@
      {
       "path": "payload.requested_by",
       "value": "owner"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -2881,6 +2961,26 @@
      {
       "path": "payload.decided_by",
       "value": "client_ceiling"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -2907,6 +3007,26 @@
      {
       "path": "payload.decided_by",
       "value": "rule:large_orders"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -2933,6 +3053,26 @@
      {
       "path": "payload.decided_by",
       "value": "rule:large_orders"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -3710,6 +3850,26 @@
      {
       "path": "payload.decided_by",
       "value": "policy_overlay"
+     },
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
      }
     ],
     "expect": {
@@ -6051,6 +6211,1040 @@
      1,
      2
     ]
+   }
+  ]
+ },
+ "owner_requests": {
+  "spec": "docs/specs/journal.md v0.117 §9.1 rule 8 and §9.6 rule 319 (DEC-2858)",
+  "decisions": {
+   "agent_asked": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3M1A000000000000000G4",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "DecisionMade",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:00.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"
+    },
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "buy",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150",
+     "purpose": "open",
+     "exit_origin": null,
+     "exit_conviction": "0.85554",
+     "buy_conviction": "0.75554",
+     "combined_score": "0.882",
+     "outputs_used": [
+      "01J8Z3M0R000000000000000G3"
+     ],
+     "model_weights": [
+      {
+       "key": "quant.mean_reversion",
+       "value": "0.9"
+      },
+      {
+       "key": "quant.momentum",
+       "value": "0.1"
+      }
+     ],
+     "clips_applied": [
+      "max_order_usd"
+     ],
+     "dry_run": "allow",
+     "reason_code": null,
+     "autonomy": "ask",
+     "ask_suppressed": null,
+     "decided_by": "rule:large_orders",
+     "delegation_id": null,
+     "requested_by": "agent",
+     "client_id": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "owner_asked": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3M1A000000000000000G4",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "DecisionMade",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:00.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"
+    },
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "buy",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150",
+     "purpose": "open",
+     "exit_origin": null,
+     "exit_conviction": null,
+     "buy_conviction": null,
+     "combined_score": null,
+     "outputs_used": [],
+     "model_weights": [],
+     "clips_applied": [
+      "max_order_usd"
+     ],
+     "dry_run": "allow",
+     "reason_code": null,
+     "autonomy": "ask",
+     "ask_suppressed": null,
+     "decided_by": "rule:large_orders",
+     "delegation_id": null,
+     "requested_by": "owner",
+     "client_id": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "client_asked": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3M1A000000000000000G4",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "DecisionMade",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:00.000000000Z",
+    "clock_source": "scheduler",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"
+    },
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "buy",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150",
+     "purpose": "open",
+     "exit_origin": null,
+     "exit_conviction": null,
+     "buy_conviction": null,
+     "combined_score": null,
+     "outputs_used": [],
+     "model_weights": [],
+     "clips_applied": [
+      "max_order_usd"
+     ],
+     "dry_run": "allow",
+     "reason_code": null,
+     "autonomy": "ask",
+     "ask_suppressed": null,
+     "decided_by": "client_ceiling",
+     "delegation_id": null,
+     "requested_by": "client",
+     "client_id": "client_dots"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "drafts": {
+   "requested_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3P0A000000000000000Q1",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ApprovalRequested",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:10:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3N9A000000000000000Q0",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "payload": {
+     "instrument": "AAPL",
+     "asset_class": "us_equity",
+     "side": "buy",
+     "qty": "10",
+     "limit": "155",
+     "purpose": "open",
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "decided_by": "rule:large_order",
+     "combined_score": "0.5",
+     "reference_mark": {
+      "price": "155",
+      "seq": 41
+     },
+     "approvers_required": 1,
+     "independent_required": false,
+     "deadline": 1790000100,
+     "timeout_s": 300,
+     "on_timeout": "skip",
+     "content": {
+      "action": {
+       "instrument": "AAPL",
+       "asset_class": "us_equity",
+       "side": "buy",
+       "qty": "10",
+       "limit": "155",
+       "order_usd": "1550",
+       "purpose": "open"
+      },
+      "trigger": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "decided_by": "rule:large_order"
+      },
+      "evidence": {
+       "combined_score": {
+        "label": "combined model score, not a probability of profit",
+        "value": "0.5"
+       },
+       "outputs": [
+        {
+         "event_id": "01J8Z3N8A000000000000000Q9",
+         "artifact": null,
+         "label": "Output of software you selected"
+        }
+       ]
+      },
+      "risk_impact": [],
+      "reference_mark": {
+       "price": "155",
+       "seq": 41
+      },
+      "deadline": "2026-09-21T14:15:00.000000000Z",
+      "default": "If you do nothing, this action is skipped",
+      "choices": [
+       "approve",
+       "skip"
+      ],
+      "approvers": {
+       "required": 1,
+       "independent": false
+      }
+     },
+     "content_hash": "sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702"
+    },
+    "artifact_refs": [
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702"
+    ],
+    "pii_refs": []
+   },
+   "unscored_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3P0A000000000000000Q1",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ApprovalRequested",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:10:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3N9A000000000000000Q0",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "payload": {
+     "instrument": "AAPL",
+     "asset_class": "us_equity",
+     "side": "buy",
+     "qty": "10",
+     "limit": "155",
+     "purpose": "open",
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "decided_by": "rule:large_order",
+     "combined_score": null,
+     "reference_mark": {
+      "price": "155",
+      "seq": 41
+     },
+     "approvers_required": 1,
+     "independent_required": false,
+     "deadline": 1790000100,
+     "timeout_s": 300,
+     "on_timeout": "skip",
+     "content": {
+      "action": {
+       "instrument": "AAPL",
+       "asset_class": "us_equity",
+       "side": "buy",
+       "qty": "10",
+       "limit": "155",
+       "order_usd": "1550",
+       "purpose": "open"
+      },
+      "trigger": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "decided_by": "rule:large_order"
+      },
+      "evidence": {
+       "combined_score": null,
+       "outputs": []
+      },
+      "risk_impact": [],
+      "reference_mark": {
+       "price": "155",
+       "seq": 41
+      },
+      "deadline": "2026-09-21T14:15:00.000000000Z",
+      "default": "If you do nothing, this action is skipped",
+      "choices": [
+       "approve",
+       "skip"
+      ],
+      "approvers": {
+       "required": 1,
+       "independent": false
+      }
+     },
+     "content_hash": "sha256:ffeb4cbc60b6ba6fcfa2809a9b940ccf86a28bfd5d45e4d9c6c89ea0ae507199"
+    },
+    "artifact_refs": [
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "sha256:ffeb4cbc60b6ba6fcfa2809a9b940ccf86a28bfd5d45e4d9c6c89ea0ae507199"
+    ],
+    "pii_refs": []
+   },
+   "unscored_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3P0A000000000000000Q1",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ApprovalRequested",
+    "schema_version": 2,
+    "event_time": "2026-09-21T14:10:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3N9A000000000000000Q0",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "payload": {
+     "instrument": "AAPL",
+     "asset_class": "us_equity",
+     "side": "buy",
+     "qty": "10",
+     "limit": "155",
+     "purpose": "open",
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "decided_by": "rule:large_order",
+     "combined_score": null,
+     "reference_mark": {
+      "price": "155",
+      "seq": 41
+     },
+     "approvers_required": 1,
+     "independent_required": false,
+     "deadline": 1790000100,
+     "timeout_s": 300,
+     "on_timeout": "skip",
+     "content": {
+      "action": {
+       "instrument": "AAPL",
+       "asset_class": "us_equity",
+       "side": "buy",
+       "qty": "10",
+       "limit": "155",
+       "order_usd": "1550",
+       "purpose": "open"
+      },
+      "trigger": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "decided_by": "rule:large_order"
+      },
+      "evidence": {
+       "combined_score": null,
+       "outputs": []
+      },
+      "risk_impact": [],
+      "reference_mark": {
+       "price": "155",
+       "seq": 41
+      },
+      "deadline": "2026-09-21T14:15:00.000000000Z",
+      "default": "If you do nothing, this action is skipped",
+      "choices": [
+       "approve",
+       "skip"
+      ],
+      "approvers": {
+       "required": 1,
+       "independent": false
+      },
+      "execution": {
+       "asset_class": "us_equity",
+       "tif": "gtc",
+       "protection_required": true,
+       "protection": {
+        "stop": "147.25",
+        "take_profit": "170.5"
+       }
+      }
+     },
+     "content_hash": "sha256:e9eb4b2e59c4e5e11977c8552bcf973537007fd46d20a5dea037265b0eec924d"
+    },
+    "artifact_refs": [
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "sha256:e9eb4b2e59c4e5e11977c8552bcf973537007fd46d20a5dea037265b0eec924d"
+    ],
+    "pii_refs": []
+   }
+  },
+  "decision_cases": [
+   {
+    "name": "owner_open_unevaluated",
+    "clause": "rule 8: an owner request",
+    "decision": "owner_asked",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_open_clipped_twice",
+    "clause": "rule 8: an owner request lists every bound that cut it",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.clips_applied",
+      "value": [
+       "max_order_usd",
+       "position_cap"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_open_unclipped",
+    "clause": "rule 8: an owner request the bounds left whole",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.clips_applied",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_increase_unevaluated",
+    "clause": "rule 8: whatever its purpose",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "increase"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_open_auto",
+    "clause": "rule 8: an owner request the rules let run",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "auto"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "default"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_open_denied_at_its_cap",
+    "clause": "rule 8, DEC-2858 item 7: a clip that leaves nothing is the gate's denial, no clip listed",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.clips_applied",
+      "value": []
+     },
+     {
+      "path": "payload.dry_run",
+      "value": "deny"
+     },
+     {
+      "path": "payload.reason_code",
+      "value": "max_order_size"
+     },
+     {
+      "path": "payload.autonomy",
+      "value": null
+     },
+     {
+      "path": "payload.decided_by",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_open_denied_by_a_rule_reading_the_score",
+    "clause": "rule 8, DEC-2858 item 8: a rule that reads the missing score denies, labelled with it",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "deny"
+     },
+     {
+      "path": "payload.decided_by",
+      "value": "rule:low_score"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "client_open_unevaluated",
+    "clause": "rule 8: a client request",
+    "decision": "client_asked",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_open_with_evaluation_numbers",
+    "clause": "rule 8: the first offending number",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.exit_conviction",
+      "value": "0.85554"
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": "0.75554"
+     },
+     {
+      "path": "payload.combined_score",
+      "value": "0.882"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   },
+   {
+    "name": "owner_open_with_a_score",
+    "clause": "rule 8: no score on an owner request",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.combined_score",
+      "value": "0.882"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "owner_open_citing_outputs",
+    "clause": "rule 8: no output on an owner request",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.outputs_used",
+      "value": [
+       "01J8Z3M0R000000000000000G3"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.outputs_used"
+    }
+   },
+   {
+    "name": "owner_open_with_weights",
+    "clause": "rule 8: no weight on an owner request",
+    "decision": "owner_asked",
+    "changes": [
+     {
+      "path": "payload.model_weights",
+      "value": [
+       {
+        "key": "quant.mean_reversion",
+        "value": "0.9"
+       },
+       {
+        "key": "quant.momentum",
+        "value": "0.1"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.model_weights"
+    }
+   },
+   {
+    "name": "client_open_with_evaluation_numbers",
+    "clause": "rule 8: a client request is not evaluated either",
+    "decision": "client_asked",
+    "changes": [
+     {
+      "path": "payload.exit_conviction",
+      "value": "0.85554"
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": "0.75554"
+     },
+     {
+      "path": "payload.combined_score",
+      "value": "0.882"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   },
+   {
+    "name": "agent_open_without_numbers",
+    "clause": "rule 8: the agent's opening was evaluated",
+    "decision": "agent_asked",
+    "changes": [
+     {
+      "path": "payload.exit_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.buy_conviction",
+      "value": null
+     },
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.outputs_used",
+      "value": []
+     },
+     {
+      "path": "payload.model_weights",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   }
+  ],
+  "invalid_drafts": [
+   {
+    "name": "score_without_its_object",
+    "clause": "§9.6 mirror: a top-level score and its object are null together",
+    "base_draft": "unscored_v1",
+    "changes": [
+     {
+      "path": "payload.combined_score",
+      "value": "0.5"
+     },
+     {
+      "path": "payload.content_hash",
+      "value": "sha256:ffeb4cbc60b6ba6fcfa2809a9b940ccf86a28bfd5d45e4d9c6c89ea0ae507199"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:ffeb4cbc60b6ba6fcfa2809a9b940ccf86a28bfd5d45e4d9c6c89ea0ae507199"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "object_without_its_score",
+    "clause": "§9.6 mirror: a score object beside a null top-level score",
+    "base_draft": "unscored_v1",
+    "changes": [
+     {
+      "path": "payload.content.evidence.combined_score",
+      "value": {
+       "label": "combined model score, not a probability of profit",
+       "value": "0.5"
+      }
+     },
+     {
+      "path": "payload.content_hash",
+      "value": "sha256:5bec7c027c0eb8b0814db541e70232a7e9811703896690ec6643a228a62d0179"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:5bec7c027c0eb8b0814db541e70232a7e9811703896690ec6643a228a62d0179"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "scored_request_drops_its_top_level_score",
+    "clause": "§9.6 mirror: a null top-level score beside the object",
+    "base_draft": "requested_v1",
+    "changes": [
+     {
+      "path": "payload.combined_score",
+      "value": null
+     },
+     {
+      "path": "payload.content.evidence.outputs",
+      "value": []
+     },
+     {
+      "path": "payload.content_hash",
+      "value": "sha256:5bec7c027c0eb8b0814db541e70232a7e9811703896690ec6643a228a62d0179"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:5bec7c027c0eb8b0814db541e70232a7e9811703896690ec6643a228a62d0179"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "unscored_request_cites_an_output",
+    "clause": "rule 319: no score, no output",
+    "base_draft": "unscored_v1",
+    "changes": [
+     {
+      "path": "payload.content.evidence.outputs",
+      "value": [
+       {
+        "event_id": "01J8Z3N8A000000000000000Q9",
+        "artifact": null,
+        "label": "Output of software you selected"
+       }
+      ]
+     },
+     {
+      "path": "payload.content_hash",
+      "value": "sha256:e3fa8219fea97956c66e394daccb5e0d70320d39cdacf431d6d7d2e2f31886bb"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:e3fa8219fea97956c66e394daccb5e0d70320d39cdacf431d6d7d2e2f31886bb"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.content.evidence.outputs"
+    }
+   },
+   {
+    "name": "unscored_v2_request_cites_an_output",
+    "clause": "rule 319 at version 2",
+    "base_draft": "unscored_v2",
+    "changes": [
+     {
+      "path": "payload.content.evidence.outputs",
+      "value": [
+       {
+        "event_id": "01J8Z3N8A000000000000000Q9",
+        "artifact": null,
+        "label": "Output of software you selected"
+       }
+      ]
+     },
+     {
+      "path": "payload.content_hash",
+      "value": "sha256:49a1bb31511c3db0ebfa7b6464fe0a17a3f7258f51d1bc4d3153ee3196e69681"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:49a1bb31511c3db0ebfa7b6464fe0a17a3f7258f51d1bc4d3153ee3196e69681"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.content.evidence.outputs"
+    }
+   },
+   {
+    "name": "score_object_with_a_null_value",
+    "clause": "§9.6: a present score object holds a decimal",
+    "base_draft": "unscored_v1",
+    "changes": [
+     {
+      "path": "payload.content.evidence.combined_score",
+      "value": {
+       "label": "combined model score, not a probability of profit",
+       "value": null
+      }
+     },
+     {
+      "path": "payload.content_hash",
+      "value": "sha256:9a8d9ae67a8735cd8b31f57de8589ac24a2953772cd940de143d1f0a3ce5a198"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "sha256:9a8d9ae67a8735cd8b31f57de8589ac24a2953772cd940de143d1f0a3ce5a198"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.content.evidence.combined_score.value"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "unscored_v1",
+    "clause": "rule 319: a null score, no output, no label to check",
+    "base_draft": "unscored_v1",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "unscored_v2",
+    "clause": "rule 319 at version 2",
+    "base_draft": "unscored_v2",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "scored_request_unchanged",
+    "clause": "rule 319: a score keeps its outputs",
+    "base_draft": "requested_v1",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "batches": [
+   {
+    "name": "owner_decision_and_its_unscored_request",
+    "clause": "rule 319",
+    "decision": "owner_asked",
+    "request": {
+     "base_draft": "unscored_v1",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "client_decision_and_its_unscored_v2_request",
+    "clause": "rule 319",
+    "decision": "client_asked",
+    "request": {
+     "base_draft": "unscored_v2",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "agent_decision_and_its_scored_request",
+    "clause": "rule 319: the agent's request keeps its score",
+    "decision": "agent_asked",
+    "request": {
+     "base_draft": "requested_v1",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_decision_and_a_scored_request",
+    "clause": "rule 319: no score is invented",
+    "decision": "owner_asked",
+    "request": {
+     "base_draft": "requested_v1",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "client_decision_and_a_scored_request",
+    "clause": "rule 319",
+    "decision": "client_asked",
+    "request": {
+     "base_draft": "requested_v1",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "agent_decision_and_an_unscored_request",
+    "clause": "rule 319: the agent's score is never dropped",
+    "decision": "agent_asked",
+    "request": {
+     "base_draft": "unscored_v1",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "scored_request_written_before_the_owner_decision",
+    "clause": "rule 319 judges the batch, whatever the order",
+    "decision": "owner_asked",
+    "request": {
+     "base_draft": "requested_v1",
+     "changes": []
+    },
+    "order": "request_first",
+    "expect": {
+     "outcome": "Invalid",
+     "index": 0,
+     "reason": "schema",
+     "path": "payload.combined_score"
+    }
+   },
+   {
+    "name": "unscored_request_naming_another_decision",
+    "clause": "rule 319 binds only the decision the request names",
+    "decision": "agent_asked",
+    "request": {
+     "base_draft": "unscored_v1",
+     "changes": [
+      {
+       "path": "causation_id",
+       "value": "01J8Z3N9A000000000000000Q7"
+      }
+     ]
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Valid"
+    }
    }
   ]
  },
