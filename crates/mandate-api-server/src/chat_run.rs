@@ -572,9 +572,27 @@ fn context(app: &App, control: &[StoredEvent], start: &Start) -> String {
         .map(|now| now.to_string())
         .unwrap_or_default();
     let Some(deployment) = start.deployment.as_ref() else {
+        let connections: Vec<String> = crate::connections::connections(control)
+            .iter()
+            .map(|c| {
+                format!(
+                    "{} ({} {}, {})",
+                    c.connection_id,
+                    c.broker,
+                    c.environment,
+                    c.state.code()
+                )
+            })
+            .collect();
         return format!(
-            "No agent yet: the owner is setting one up. Environment: {}. Now: {today}.",
-            if paper(control) { "paper" } else { "live" }
+            "No agent yet: the owner is setting one up. Environment: {}. Now: {today}.\n\
+             Broker connections (a mandate's connection_id must be an established one): {}.",
+            if paper(control) { "paper" } else { "live" },
+            if connections.is_empty() {
+                "none yet; the owner connects one under Settings".to_owned()
+            } else {
+                connections.join("; ")
+            }
         );
     };
     let doc = document(app, deployment);
