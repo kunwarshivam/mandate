@@ -900,7 +900,7 @@ per workspace deployment (item 6).
         ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
       - Both read the control stream, and `as_of` names it; the instrument snapshots and the
         model content come from the content-addressed store (item 2).
-      - `GET /instruments/{id}/price` returns `read-models/instrument-price`
+      - **(planned: E10-11)** `GET /instruments/{id}/price` returns `read-models/instrument-price`
         ([DEC-2152](../project/decisions/DEC-2152.md)): the last trusted daily bar of an
         instrument `GET /instruments` lists, authorized, folded and refused as that read is. An
         `{id}` it does not list is the one 404 (`not_found`).
@@ -918,7 +918,11 @@ per workspace deployment (item 6).
           - `not_covered`: an `asset_class` other than `us_equity`;
           - `no_bars`: no dataset manifest where the root and the clock name the symbol's daily
             bars;
-          - `untrusted`: anything `mandate-bars` refuses or cannot read.
+          - `untrusted`: anything `mandate-bars` refuses or cannot read. The rule fails closed over
+            the whole dataset span: one trading day without its bar, a day never fetched, a
+            split anywhere inside the span, a corrupt or duplicated partition, or a dataset that
+            does not end on the last completed session makes the price untrusted, never an older
+            close.
         - It writes nothing and dates no record by its clock. A bars failure never fails
           `GET /instruments`. `as_of` names the control stream.
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
@@ -1137,7 +1141,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Create a version | `POST /mandate-drafts/{id}/versions` | `MandateVersionCreated` | Requires a passing validation. Canonicalizes and hashes (mandate spec §9.1); records provenance, validation results, the classification against the base version, and the diff (§10) |
 | Read a version | `GET /mandate-versions/{hash}` | — | The stored canonical document and its records |
 | Instruments a version may pin | `GET /instruments` | — | `read-models/instruments` ([DEC-2136](../project/decisions/DEC-2136.md)): the pinnable registered instruments, as the create's check reads them (§3.11 item 11) |
-| An instrument's last trusted close | `GET /instruments/{id}/price` | — | `read-models/instrument-price` ([DEC-2152](../project/decisions/DEC-2152.md)): the close of the last completed regular session, as `mandate-bars`' trust rule admits it, or `reported` `false` with its reason, never a stub (§3.11 item 11) |
+| An instrument's last trusted close | `GET /instruments/{id}/price` | — | **(planned: E10-11)** `read-models/instrument-price` ([DEC-2152](../project/decisions/DEC-2152.md)): the close of the last completed regular session, as `mandate-bars`' trust rule admits it, or `reported` `false` with its reason, never a stub (§3.11 item 11) |
 | Signal models a version may name | `GET /signal-models` | — | `read-models/signal-models` ([DEC-2136](../project/decisions/DEC-2136.md)): the models V-007 admits, each with a fixed projection of its content object (§3.11 item 11) |
 | Diff | `GET /mandate-versions/{hash}/diff?against={hash}` | — | Every changed path with its §9.2 classification and when it applies (A6) |
 | Confirmation screen | `GET /mandate-versions/{hash}/confirmation` | — | The deterministic data A5 renders: provenance badges, platform defaults, worst-case figures, the unasked dollars (DEC-189), the crypto gap disclosure when it applies, and its `screen_digest` |
@@ -2725,7 +2729,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
-| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101), and the catalogue reads (`GET /instruments`, `GET /signal-models`, §3.11 item 11, DEC-2136), with an instrument's last trusted close (`GET /instruments/{id}/price`, DEC-2152); drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101), and the catalogue reads (`GET /instruments`, `GET /signal-models`, §3.11 item 11, DEC-2136), with an instrument's last trusted close (`GET /instruments/{id}/price`, DEC-2152) **(planned: E10-11)**; drafts, compile, validate, diffs, and an agent's later versions are planned |
 | Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2101); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2102); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
