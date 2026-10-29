@@ -947,7 +947,10 @@ per workspace deployment (item 6).
          else `409` `acknowledgment_unavailable`. The writer offers a hold only while it stands
          (§9.28), so an acknowledgment of a trigger already lifted, superseded, or never raised is
          refused here and not journaled for the executor to refuse. An account stream the server
-         cannot read is `journal_unavailable`.
+         cannot read is `journal_unavailable`. A reconciliation hold of one agent stands for that
+         agent alone, so another agent of its account cannot acknowledge it here, though journal
+         spec §9.28 and DEC-2830 item 1 let `agent` be any agent of the account: the API reads it
+         narrower on purpose, which adds no risk (DEC-176).
       6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
          stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
          (a version 1 request, which carries no `subject`, is read as `limit`, as §9.28 reads version
