@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use mandate_builder::{
-    AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
+    AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket, RequestedBy,
     RiskContext as BuilderRiskContext, buy_action,
 };
 use mandate_canon::{Digest, Value};
@@ -15,8 +15,8 @@ use mandate_gate_context::Freshness;
 use mandate_num::{CostBasis, FeeRate, Fraction, MarkPrice, Qty, Signed, SizeFraction, Unit, Usd};
 use mandate_ports::BuilderContext;
 use mandate_runtime::{
-    Autonomy, Classified, MandateView, ModelDirection, OrderExecution, OrderPlan, Proposal,
-    ProtectionPrices, SignalInputs, TimeInForce,
+    Autonomy, Classified, MandateView, ModelDirection, OrderExecution, OrderPlan, OwnerRequest,
+    Proposal, ProtectionPrices, SignalInputs, TimeInForce,
 };
 use mandate_spec::ValidationContext;
 use mandate_spec::condition::{Condition, ConditionField};
@@ -84,7 +84,10 @@ impl OrderPlan for Plan {
     /// or one whose facts have gone, is denied, which never adds risk (`AGENTS.md` rule 3). The
     /// plan cannot see every fact an autonomy rule may read (drawdown, daily P&L, what the agent
     /// bought today, gross exposure), so it never answers `auto` for an opening: §6.2 step 5c with
-    /// `auto_allowed` false makes an `auto` opening `ask` (DEC-2378 item 10).
+    /// `auto_allowed` false makes an `auto` opening `ask` (DEC-2378 item 10). A null score is an
+    /// owner's or a client's request (journal spec rule 319, DEC-2858): it is classified unscored,
+    /// so a rule reading the score denies it, and as the owner's, the client ceiling being the
+    /// runtime's to apply after.
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         if !proposal.purpose.adds_risk() {
             return Classified {
@@ -93,6 +96,23 @@ impl OrderPlan for Plan {
             };
         }
         self.classify_opening(view, proposal)
+    }
+    /// An owner's or a client's request (DEC-2858) for the deployment's own pinned asset, clipped
+    /// by the order builder over the same journaled facts an opening is sized on, so only while the
+    /// agent is flat with nothing working and the session admits an opening. `None` for any other
+    /// instrument, an unpinned mandate's (whose one instrument is its thesis's), or a missing fact
+    /// (`AGENTS.md` rule 3).
+    fn requested(&self, _view: &MandateView, request: &OwnerRequest) -> Option<Proposal> {
+        let pinned = self
+            .mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .find(|pinned| pinned.asset_id.as_str() == request.instrument.as_str())?;
+        let (validated, builder) = self.context(Opened::pinned(pinned))?;
+        mandate_ports::requested(&validated, &builder, request)
+            .ok()
+            .flatten()
     }
 }
 
@@ -294,18 +314,23 @@ impl Plan {
 impl Plan {
     fn classified(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<Classified> {
         let (validated, builder) = self.context(opened)?;
-        let Value::Str(score) = &proposal.combined_score else {
-            return None;
+        let score = match &proposal.combined_score {
+            Value::Null => None,
+            Value::Str(score) => Some(Unit::parse(score).ok()?),
+            _ => return None,
         };
-        let score = Unit::parse(score).ok()?;
-        let action = buy_action(
+        let mut action = buy_action(
             &builder.account,
             &builder.market,
             &builder.risk,
-            score,
+            score.unwrap_or(Unit::ZERO),
             proposal.qty,
         )
         .ok()?;
+        if score.is_none() {
+            action.combined_score = None;
+            action.requested_by = RequestedBy::Owner;
+        }
         let classified = mandate_ports::classify(&validated, &action, proposal, false).ok()?;
         if proposal.purpose.adds_risk() && denies_on_an_unseen_fact(&self.mandate) {
             return Some(Classified {

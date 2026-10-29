@@ -1158,7 +1158,6 @@ fn plan_with(rows: &Rows, document: &Value) -> Plan {
 /// caps: the owner's five, an opening with the mandate's protection, and no conviction, score,
 /// output, weight or clip (journal spec §9.1 rule 8, DEC-2858 item 1).
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_request_within_every_cap_is_proposed_unclipped_and_unscored() {
     let rows = journaled(REGULAR);
     let proposal = plan_over(&rows)
@@ -1188,7 +1187,6 @@ fn an_owners_request_within_every_cap_is_proposed_unclipped_and_unscored() {
 /// ten shares ($999.50) and all three recorded. Under a $300 order cap, five ($499.75) is cut to
 /// three by the order cap alone.
 #[test]
-#[ignore = "pending E10-30"]
 fn each_cap_that_cut_the_owners_quantity_is_recorded() {
     let rows = journaled(REGULAR);
     let every = plan_over(&rows)
@@ -1213,7 +1211,6 @@ fn each_cap_that_cut_the_owners_quantity_is_recorded() {
 /// Under a $50 order cap not one share fits: the owner's five go to the gate unclipped, with no
 /// clip recorded, for the gate's own reason to name the cap (DEC-2858 item 7).
 #[test]
-#[ignore = "pending E10-30"]
 fn a_cap_with_no_room_for_a_share_leaves_the_request_unclipped() {
     let rows = journaled(REGULAR);
     let proposal = plan_with(&rows, &order_capped("50"))
@@ -1226,7 +1223,6 @@ fn a_cap_with_no_room_for_a_share_leaves_the_request_unclipped() {
 /// A request is classified on its own facts: the demo, with no rules, asks by its default, and a
 /// client's request is classified the same, the ceiling being the runtime's (§6.2 step 5a).
 #[test]
-#[ignore = "pending E10-30"]
 fn the_demo_mandate_asks_the_owner_about_a_request() {
     let rows = journaled(REGULAR);
     let plan = plan_over(&rows);
@@ -1254,7 +1250,6 @@ fn the_demo_mandate_asks_the_owner_about_a_request() {
 /// id (DEC-2858 item 8), even with `default: auto`; a rule on a fact the plan cannot see still
 /// denies under the policy overlay.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_rule_reading_the_score_denies_a_request_by_its_own_id() {
     let rows = journaled(REGULAR);
     let mut document: serde_json::Value =

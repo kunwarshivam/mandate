@@ -1581,7 +1581,6 @@ fn owners(qty: &str) -> OwnerRequest {
 /// Five SPY ($499.75) under the $300 order cap is clipped to three ($299.85), which the gate
 /// allows with every deferral named, so the clipped request is asked as any opening is.
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_request_clipped_to_the_order_cap_is_one_the_gate_allows() {
     let rows = journaled_with(&RICH);
     let (plan, view) = plan_over(&rows, &document());
@@ -1595,7 +1594,6 @@ fn an_owners_request_clipped_to_the_order_cap_is_one_the_gate_allows() {
 /// Under a $50 order cap not one share fits, so the owner's five reach the gate unclipped, and the
 /// gate refuses them by the cap's own reason, which the `DecisionMade` records (DEC-2858 item 7).
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_with_no_room_for_a_share_is_refused_by_the_gates_own_reason() {
     let rows = journaled_with(&RICH);
     let text = String::from_utf8(mandate_canon::to_canonical(&document())).unwrap();
