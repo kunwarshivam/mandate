@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use mandate_canon::{Value, parse};
 use mandate_journal::{Environment, StoredEvent};
+pub use mandate_news_reader::Clock;
 use mandate_news_reader::{Config, Follow, NewsReader};
 use mandate_sources::SourceError;
 use mandate_sources::allowlist::{Allowlist, PermittedUrl};

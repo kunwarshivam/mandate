@@ -14,7 +14,7 @@ mod common;
 use std::collections::BTreeSet;
 
 use mandate_news_reader::poll::{
-    COOLDOWN_S, FIRST_LOOKBACK_S, MAX_PAGES, Round, cooldown_until, round_start,
+    COOLDOWN_S, FIRST_LOOKBACK_S, MAX_PAGES, POLL_OVERLAP_S, Round, cooldown_until, round_start,
 };
 use mandate_sources::fetch::MAX_NEWS_SYMBOLS;
 use mandate_sources::ingest::PageToken;
@@ -128,11 +128,14 @@ fn a_chunk_stops_at_the_page_cap_and_says_so() {
 }
 
 #[test]
-fn a_round_asks_from_the_last_known_time_or_the_lookback_and_a_pause_lasts_its_cooldown() {
+fn a_round_asks_from_the_last_known_time_less_the_overlap_or_the_lookback_and_a_pause_lasts_its_cooldown()
+ {
     assert_eq!(
         round_start(Some(plus(t0(), -5)), t0()),
-        Some(plus(t0(), -5))
+        Some(plus(t0(), -5 - POLL_OVERLAP_S)),
+        "the last known time, less the overlap"
     );
+    assert_eq!(POLL_OVERLAP_S, 15 * 60);
     assert_eq!(round_start(None, t0()), Some(plus(t0(), -FIRST_LOOKBACK_S)));
     assert_eq!(FIRST_LOOKBACK_S, 48 * 3_600);
     assert_eq!(cooldown_until(t0()), Some(plus(t0(), COOLDOWN_S)));
