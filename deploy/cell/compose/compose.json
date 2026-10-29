@@ -48,6 +48,9 @@
     "journal-role-mandate-migrator": {
       "file": "./secrets/journal-role-mandate-migrator.pgpass"
     },
+    "journal-role-mandate-news-reader": {
+      "file": "./secrets/journal-role-mandate-news-reader.pgpass"
+    },
     "journal-role-mandate-role-provisioner": {
       "file": "./secrets/journal-role-mandate-role-provisioner.pgpass"
     },
@@ -348,7 +351,8 @@
         "journal-role-mandate-dispatcher",
         "journal-role-mandate-gateway",
         "journal-role-mandate-exporter",
-        "journal-role-mandate-data"
+        "journal-role-mandate-data",
+        "journal-role-mandate-news-reader"
       ],
       "security_opt": [
         "no-new-privileges:true"

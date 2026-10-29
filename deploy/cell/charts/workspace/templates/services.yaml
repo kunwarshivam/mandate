@@ -2,7 +2,8 @@
 is its own template, api.yaml, the deployment manager's deploy-manager.yaml, the role
 provisioner's role-provisioner.yaml, and the connect finish's connect-finish.yaml. The
 dispatcher mounts its configuration file, the ConfigMap dispatcher.yaml renders, read-only at
-/etc/mandate/dispatcher (DEC-2516). A process the manager starts (the runtime and the executor, `started_by`) has no Deployment once the manager
+/etc/mandate/dispatcher (DEC-2516), and the news reader its allowlist, the ConfigMap
+news-reader.yaml renders, at /etc/mandate/news, beside its vault directory (DEC-2084). A process the manager starts (the runtime and the executor, `started_by`) has no Deployment once the manager
 renders: only the manager starts it, from its pod template (DEC-1170). Without the manager the
 executor is a Deployment on `default`, the fixture broker's alone: a paper executor, which reaches
 the vault for its connection's lease, needs the manager, and the render fails without it
@@ -43,6 +44,11 @@ spec:
     {{- $_ := set $launch "mounts" "- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
     {{- $volumes = include "mandate.vaultVolumes" (dict "root" .root "role" "bars-reader") }}
     {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "bars-reader") }}
+    {{- end }}
+    {{- if eq .p.name "news-reader" }}
+    {{- $_ := set $launch "mounts" "- {name: news-reader-allowlist, mountPath: /etc/mandate/news, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $volumes = printf "- {name: news-reader-allowlist, configMap: {name: news-reader-allowlist, defaultMode: 292, items: [{key: allowlist.toml, path: allowlist.toml}]}}\n%s" (include "mandate.vaultVolumes" (dict "root" .root "role" "news-reader")) }}
+    {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "news-reader") }}
     {{- end }}
     {{- if and (eq .p.name "model-gateway") .root.Values.modelGateway.registry }}
     {{- $_ := set $launch "mounts" "- {name: model-gateway-registry, mountPath: /run/mandate/model-gateway, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
