@@ -23,7 +23,8 @@
     "founding",
     "executor",
     "alpacaOAuth",
-    "oauthFixture"
+    "oauthFixture",
+    "news"
   ],
   "properties": {
     "workspace": {
@@ -62,6 +63,7 @@
         "model-gateway",
         "exporter",
         "data",
+        "news-reader",
         "deploy-manager",
         "role-provisioner"
       ],
@@ -114,6 +116,11 @@
         "data": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "news-reader": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$",
+          "description": "The news reader (DEC-2084): a released image pinned by digest, never a local build, since no cell runs it"
         },
         "deploy-manager": {
           "type": "string",
@@ -476,6 +483,44 @@
             "recorded",
             "alpaca-iex"
           ]
+        }
+      }
+    },
+    "news": {
+      "description": "The news reader's followed agents, each an agent and the broker account its executor trades (DEC-2281), and the user agent the vendor sees (DEC-2084); ids and a contact only, never a secret",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "follows",
+        "userAgent"
+      ],
+      "properties": {
+        "follows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "account"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              "account": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              }
+            }
+          }
+        },
+        "userAgent": {
+          "type": "string",
+          "pattern": "^[ -~]*@[ -~]*$",
+          "minLength": 3,
+          "maxLength": 200
         }
       }
     },

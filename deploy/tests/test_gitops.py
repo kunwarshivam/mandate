@@ -913,6 +913,7 @@ FQDN_EGRESS = {
     "control": {"wyyxngmblqqokcvraflx.supabase.co"},
     "executor": {"paper-api.alpaca.markets", "data.alpaca.markets"},
     "data": {"data.alpaca.markets"},
+    "news-reader": {"data.alpaca.markets"},
     "model-gateway": {"openrouter.ai"},
     "token-exchange": {"api.alpaca.markets"},
 }

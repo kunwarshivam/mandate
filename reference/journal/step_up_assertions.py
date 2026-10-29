@@ -248,6 +248,15 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
     return None
 
 
+def settled(*args, **kwargs) -> dict:
+    """An assertion made once its credential's enrolment cool-off has ended (`credentials.COOLED`),
+    so a stream vector of rule 254 keeps rule 318's converse too (§9.38): a stream that judges one
+    rule passes every other it is not meant to fail."""
+    record = asserted(*args, **kwargs)
+    record["event_time"] = credentials.COOLED
+    return record
+
+
 def stream_cases() -> list[dict]:
     def case(name, clause, records, index):
         expect = {"outcome": "Valid"} if index is None else {"outcome": "Invalid", "rule": "254", "index": index}
@@ -264,21 +273,21 @@ def stream_cases() -> list[dict]:
     def cases(enrolled, suffix: str, note: str) -> list[dict]:
         return [
             case(f"rising{suffix}", f"rule 254: above the last{note}",
-                 [enrolled(5), asserted(sign_count=6), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=9)], None),
+                 [enrolled(5), settled(sign_count=6), settled(LATER, challenge=OTHER_CHALLENGE, sign_count=9)], None),
             case(f"not_kept{suffix}", f"rule 254: 0 on both sides{note}",
-                 [enrolled(0), asserted(sign_count=0), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=0)], None),
+                 [enrolled(0), settled(sign_count=0), settled(LATER, challenge=OTHER_CHALLENGE, sign_count=0)], None),
             case(f"first_kept{suffix}", f"rule 254: from 0 at enrolment to 1, the first count kept{note}",
-                 [enrolled(0), asserted(sign_count=1)], None),
-            case(f"equal_to_enrolment{suffix}", f"rule 254: not equal{note}", [enrolled(5), asserted(sign_count=5)], 1),
+                 [enrolled(0), settled(sign_count=1)], None),
+            case(f"equal_to_enrolment{suffix}", f"rule 254: not equal{note}", [enrolled(5), settled(sign_count=5)], 1),
             case(f"below_the_last{suffix}", f"rule 254: never backwards{note}",
-                 [enrolled(5), asserted(sign_count=9), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=8)], 2),
-            case(f"zero_after_kept{suffix}", f"rule 254: 0 only when never kept{note}", [enrolled(5), asserted(sign_count=0)], 1),
+                 [enrolled(5), settled(sign_count=9), settled(LATER, challenge=OTHER_CHALLENGE, sign_count=8)], 2),
+            case(f"zero_after_kept{suffix}", f"rule 254: 0 only when never kept{note}", [enrolled(5), settled(sign_count=0)], 1),
             case(f"another_members{suffix}", f"rule 254: the actor's own{note}",
-                 [enrolled(5), asserted(sign_count=6, actor=OTHER_MEMBER)], 1),
+                 [enrolled(5), settled(sign_count=6, actor=OTHER_MEMBER)], 1),
             case(f"after_removal{suffix}", f"rule 254: not removed{note}",
-                 [enrolled(5), credentials.removed(), asserted(sign_count=6)], 2),
+                 [enrolled(5), credentials.removed(), settled(sign_count=6)], 2),
             case(f"challenge_twice{suffix}", f"rule 254: one assertion per challenge{note}",
-                 [enrolled(5), asserted(sign_count=6), asserted(LATER, sign_count=9)], 2),
+                 [enrolled(5), settled(sign_count=6), settled(LATER, sign_count=9)], 2),
         ]
 
     other_v2 = credentials.enrolled_v2(stepped=True)
@@ -288,12 +297,12 @@ def stream_cases() -> list[dict]:
     mixed = [
         at_version(1)(5),
         other_v2,
-        asserted(sign_count=6),
-        asserted(LATER, challenge=OTHER_CHALLENGE, credential=OTHER_CREDENTIAL, sign_count=4),
+        settled(sign_count=6),
+        settled(LATER, challenge=OTHER_CHALLENGE, credential=OTHER_CREDENTIAL, sign_count=4),
     ]
     return [
         *cases(at_version(1), "", ""),
-        case("never_enrolled", "rule 254: an enrolled credential", [asserted()], 0),
+        case("never_enrolled", "rule 254: an enrolled credential", [settled()], 0),
         *cases(at_version(2), "_v2", " (a version 2 enrolment)"),
         case("version_1_then_version_2", "rule 254: each credential's own counter, whichever version enrolled it", mixed, None),
     ]
@@ -301,7 +310,32 @@ def stream_cases() -> list[dict]:
 
 # --------------------------------------------------------------------------- independent oracles
 
-ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "batches.rule", "batches.oracle", "streams.records", "streams.rule")
+ORACLE_CHECKS = (
+    "drafts.valid",
+    "invalid_drafts",
+    "valid_drafts",
+    "batches.rule",
+    "batches.oracle",
+    "streams.records",
+    "streams.rule",
+    "streams.cool_off",
+)
+
+
+def inside_a_cool_off(records: list[dict]) -> int | None:
+    """The index of the first assertion made inside its credential's enrolment cool-off, which
+    rule 318's converse would refuse without a waiver (§9.38), or None. Each of rule 254's streams
+    is a valid journal for every rule but 254, so none has one."""
+    ends: dict[str, str | None] = {}
+    for i, record in enumerate(records):
+        payload = record["payload"]
+        if record["event_type"] == "CredentialEnrolled":
+            ends[payload["credential"]] = payload.get("cool_off_ends")
+        if record["event_type"] == "StepUpAsserted":
+            end = ends.get(payload["credential"])
+            if end is not None and end > record["event_time"]:
+                return i
+    return None
 
 
 def found(check: str, message: str) -> str:
@@ -381,6 +415,9 @@ def check_section(section: dict) -> list[str]:
         want = case["expect"].get("index")
         if stream_failure(case["records"]) != want or oracle_254(case["records"]) != want:
             problems.append(found("streams.rule", f"{case['name']}: expected {case['expect']}"))
+        early = inside_a_cool_off(case["records"])
+        if early is not None:
+            problems.append(found("streams.cool_off", f"{case['name']} record {early}: inside its cool-off"))
     return problems
 
 
@@ -447,6 +484,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "a stream case expects no refusal of a counter that went backwards",
             "streams.rule",
             mutated(lambda s: case(s, "streams", "below_the_last").update(expect={"outcome": "Valid"})),
+        ),
+        (
+            "a stream's assertion is made inside its credential's cool-off",
+            "streams.cool_off",
+            mutated(lambda s: case(s, "streams", "rising")["records"][1].update(event_time=AT)),
         ),
     ]
 

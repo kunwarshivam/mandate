@@ -90,6 +90,29 @@ pub struct Assertion {
     pub challenge: String,
     /// The signature counter the assertion carried.
     pub sign_count: u32,
+    /// The record's `event_time`, which rule 318's converse judges against the credential's
+    /// `cool_off_ends` (journal spec §9.38).
+    pub event_time: UtcNanos,
+}
+
+/// A `StepUpCoolOffWaived` (journal spec §9.38, [DEC-2146]), as the fold reads it: whose waiver it
+/// was, of which credential and challenge, the `cool_off_ends` it waived, and when.
+///
+/// [DEC-2146]: ../../../docs/project/decisions/DEC-2146.md
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiver {
+    /// The record's `seq` on the control stream.
+    pub seq: u64,
+    /// The member who stepped up, the record's actor.
+    pub member: PrincipalId,
+    /// The credential whose cool-off was waived.
+    pub credential: String,
+    /// The waived step-up's challenge, its ULID text.
+    pub challenge: String,
+    /// The enrolment's `cool_off_ends` the waiver names.
+    pub cool_off_ends: UtcNanos,
+    /// The record's `event_time`.
+    pub event_time: UtcNanos,
 }
 
 /// A `CredentialRemoved`, as the fold reads it.
@@ -112,6 +135,8 @@ pub enum CredentialRecord {
     Removed(Removal),
     /// A `StepUpAsserted`.
     Asserted(Assertion),
+    /// A `StepUpCoolOffWaived`.
+    Waived(Waiver),
 }
 
 /// Why a credential read gives no answer.
@@ -128,6 +153,10 @@ pub enum CredentialError {
     /// The record offered for append would break rule 251.
     #[error("the record would break rule 251")]
     Breaks,
+    /// A check its story has not implemented yet (DEC-77): rule 318's reading of
+    /// `StepUpCoolOffWaived`, until DEC-2146's fold lands.
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
 }
 
 /// The §9.31 record in the control-stream `envelope` at `seq`, a `StepUpAsserted` as
@@ -245,13 +274,29 @@ fn assertion(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialE
     if !artifact_ref(text("assertion", "payload.assertion")?) {
         return Err(at("payload.assertion"));
     }
+    let event_time = envelope
+        .get("event_time")
+        .and_then(Value::as_str)
+        .and_then(|t| UtcNanos::parse(t).ok())
+        .ok_or(at("event_time"))?;
     Ok(CredentialRecord::Asserted(Assertion {
         seq,
         member,
         credential: credential.to_owned(),
         challenge: challenge.to_owned(),
         sign_count,
+        event_time,
     }))
+}
+
+/// A `StepUpCoolOffWaived` at schema version 1 (journal spec §9.38) in the control-stream
+/// `envelope` at `seq`, its member read from its actor, mapped whole or not at all.
+///
+/// # Errors
+/// [`CredentialError::Unreadable`] naming the member at fault.
+pub fn waiver(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialError> {
+    let _unread_until_implemented = (seq, envelope);
+    Err(CredentialError::Unimplemented { story: "E9-4" })
 }
 
 /// §9.31's `credential_id`: unpadded base64url of 16 to 1023 bytes, so 22 to 1364 characters and
@@ -358,15 +403,31 @@ impl CredentialFold {
         }
     }
 
+    /// The `seq` of the first record that breaks stream rule 318 (journal spec §9.38), or `None`:
+    /// a waiver that names a credential its actor does not hold, a `cool_off_ends` other than that
+    /// enrolment's or not after the waiver's `event_time`, or a challenge already waived; or an
+    /// assertion inside its credential's cool-off that the next record does not waive.
+    ///
+    /// # Errors
+    /// None yet but [`CredentialError::Unimplemented`].
+    pub fn first_waiver_break(&self) -> Result<Option<u64>, CredentialError> {
+        let _unread_until_implemented = &self.records;
+        Err(CredentialError::Unimplemented { story: "E9-4" })
+    }
+
     /// The records replayed: each credential's history, the members broken and from which `seq`,
     /// the enrolments the records that keep rule 251 leave held, in enrolment order, and each held
     /// credential's last kept counter with the challenges its assertions used.
     fn fold(&self) -> Folded<'_> {
         let mut folded = Folded::default();
         for record in &self.records {
-            if let CredentialRecord::Asserted(assertion) = record {
-                folded.assert(assertion);
-                continue;
+            match record {
+                CredentialRecord::Asserted(assertion) => {
+                    folded.assert(assertion);
+                    continue;
+                }
+                CredentialRecord::Waived(_) => continue,
+                CredentialRecord::Enrolled(_) | CredentialRecord::Removed(_) => {}
             }
             let Some((credential, member)) = record.names() else {
                 continue;
@@ -470,7 +531,7 @@ impl CredentialRecord {
         match self {
             Self::Enrolled(e) => Some((&e.credential, e.member)),
             Self::Removed(r) => Some((&r.credential, r.member)),
-            Self::Asserted(_) => None,
+            Self::Asserted(_) | Self::Waived(_) => None,
         }
     }
 
@@ -480,6 +541,7 @@ impl CredentialRecord {
             Self::Enrolled(e) => e.seq,
             Self::Removed(r) => r.seq,
             Self::Asserted(a) => a.seq,
+            Self::Waived(w) => w.seq,
         }
     }
 }
