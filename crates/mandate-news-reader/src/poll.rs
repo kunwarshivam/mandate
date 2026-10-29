@@ -26,11 +26,13 @@ pub const MAX_PAGES: u32 = 20;
 /// How long the reader waits after a round it could not start or that failed.
 pub const COOLDOWN_S: i64 = 30;
 
-/// Where a round asks from: the stream's last known time, or [`FIRST_LOOKBACK_S`] before `now` for
-/// an empty stream. `None` only past the representable range.
+/// Where a round asks from: [`POLL_OVERLAP_S`] before the stream's last known time, or
+/// [`FIRST_LOOKBACK_S`] before `now` for an empty stream. `None` only past the representable range.
 pub fn round_start(last_known: Option<UtcNanos>, now: UtcNanos) -> Option<UtcNanos> {
     match last_known {
-        Some(known) => Some(known),
+        Some(known) => {
+            UtcNanos::from_parts(known.secs().checked_sub(POLL_OVERLAP_S)?, known.nanos()).ok()
+        }
         None => UtcNanos::from_parts(now.secs().checked_sub(FIRST_LOOKBACK_S)?, now.nanos()).ok(),
     }
 }

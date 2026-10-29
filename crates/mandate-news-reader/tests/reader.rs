@@ -429,7 +429,7 @@ fn a_late_indexed_item_within_the_overlap_is_stored_and_a_held_one_is_not_stored
     let (journal, shelf) = (Journal::default(), Shelf::default());
     spy(&journal, &shelf);
     let held = item(61, "2026-10-26T14:55:00Z", "2026-10-26T14:55:00Z", &["SPY"]);
-    let transport = Recorded::answering(&[page(&[held.clone()], None)]);
+    let transport = Recorded::answering(&[page(std::slice::from_ref(&held), None)]);
     let mut reader = started(&journal, &shelf, &transport, t0());
     block_on(reader.step(Clock::agreed(t0())));
     assert_eq!(ids(&journal), ["61:2026-10-26T14:55:00.000000000Z"]);
