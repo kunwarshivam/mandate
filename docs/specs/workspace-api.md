@@ -1062,6 +1062,39 @@ per workspace deployment (item 6).
       read takes the
       "View agents, positions, decisions" row, users only until client tokens land (E10-14).
     - The hold and its lift wait for the runtime, as item 10 says.
+13. **An owner's request** ([DEC-2151](../project/decisions/DEC-2151.md), E10-30) **(planned: E10-30)**. `POST /agents/{agent_id}/requests`
+    (operation `owner_request` for §3.4) records what the owner asks their agent to trade, as owner
+    input (`AGENTS.md` rule 11, DEC-141): it places nothing and decides nothing. The runtime copies
+    it to its order builder, which clips it to the mandate's caps and classifies it as any proposal,
+    and the gate and the autonomy rules then decide it (mandate spec §6.2). An order the rules
+    `ask` reaches §4.3's approvals; one they make `auto` goes to the executor. It is refused, with
+    nothing committed, at the first of these checks that fails:
+    1. §3.3's checks, then the body, decoded strictly as `commands/owner-request`: else `invalid`.
+    2. The "Make an owner request" row of §3.7, users only until client tokens land (E10-14): a
+       role without it is `forbidden`, a non-member the one 404.
+    3. The agent in the path is one an `AgentDeployed` on the control stream names, and no
+       `AgentStopped` names it: else `not_found`, the body an absent agent gets (API-9).
+    4. The workspace is `paper`: else `live_unavailable`.
+    5. `side` is `buy`: else `invalid` at `/side`. An owner's sale is the owner exit's (§5.4,
+       `AGENTS.md` rule 13), and the runtime records no decision for a sale an owner requested
+       (DEC-2858, lane X); the schema keeps `sell` for a later version.
+    6. `size` is present and greater than 0: else `invalid` at `/size`. The schema keeps `size`
+       optional, for the builder to size, but v1 has no sizing rule for an owner request, so the
+       server requires it and the builder only clips it.
+    7. `instrument` is one the agent's deployed mandate document pins
+       (`universe.pinned_instruments[].asset_id`): else `invalid` at `/instrument`. A request never
+       changes the envelope (rule 11), so an instrument outside the agent's universe, and any
+       instrument for an agent whose universe is not pinned, is refused here rather than journaled
+       for the runtime to refuse. A document the store cannot give is `journal_unavailable`.
+
+    It commits `OwnerRequestSubmitted` (journal spec §9.9) with `agent_id`, `instrument_id` the
+    `instrument`, `side` `buy`, `quantity` the `size`, `requested_by` `owner` and `client_id` `null`, the
+    actor the calling user (rule 79), under §3.4's id, and answers `202` `commands/command-accepted`,
+    whose `command_id` is that event's id. A repeat under the same key answers as before. An append
+    that does not settle answers as item 10's do. §5.5's command status follows the request through
+    the steps whose `causation_id` names it. No step-up is asked: the request adds risk only through
+    the builder, the gate and the autonomy rules, which judge it as they judge the agent's own
+    proposals.
 
 ---
 
@@ -1241,7 +1274,7 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Dry run | `POST /agents/{id}/dry-run` | `RecordsAccessed` | DEC-190: the decision (`auto`, `ask`, `deny`) and the gate's reason code for a described order, with the client ceiling for a client. Places nothing, creates no approval |
-| Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.9) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
+| Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.9) | §3.11 item 13 ([DEC-2151](../project/decisions/DEC-2151.md)): served for a user, for the agent's own pinned instrument and a required size. An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
 | Chat | `POST /agents/{id}/chat`, `GET .../chat` | The model call, on the agent stream | A reply is quoted model output (API-18). When a message asks for an action, deterministic code returns a card: an owner request with the builder's proposal, gate verdict, and autonomy outcome, or a draft version that opens A6. Sending the card is a separate call carrying its `card_digest` (D14, DEC-192) |
 | The desk | `POST /agents/{id}/desk/messages`, `GET /agents/{id}/desk`, `GET /agents/{id}/desk/messages/{message_id}` | `OwnerQuestionSubmitted` (journal spec §9.25); the answer is an `owner` run on the agent stream | §4.6.1. A question about the agent's own records, answered with citations by an `owner` run ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)); read only in slice 1, never advice (E12-5, E19-15) |
 
