@@ -3056,11 +3056,9 @@ mod tests {
         );
     }
 
-    /// L5: an unreviewed path, a path naming a key or state, and hidden files are refused; a
-    /// reviewed path passes, inline or in a block.
     /// The cell's passkey hand-off (DEC-2411) can never be uploaded: the file is refused by its
-    /// words and as unlisted, each directory above it is refused as unlisted, and no reviewed
-    /// artifact path holds it.
+    /// words and as unlisted, each directory above it is refused, and no reviewed artifact path
+    /// holds it.
     #[test]
     fn the_cells_passkey_hand_off_is_never_an_artifact() {
         let handoff = crate::cell::web::PASSKEY_HANDOFF;
@@ -3092,6 +3090,8 @@ mod tests {
         );
     }
 
+    /// L5: an unreviewed path, a path naming a key or state, and hidden files are refused; a
+    /// reviewed path passes, inline or in a block.
     #[test]
     fn an_artifact_uploads_only_a_reviewed_path() {
         let upload = |with: &str| {

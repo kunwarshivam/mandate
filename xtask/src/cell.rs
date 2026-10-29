@@ -6042,6 +6042,28 @@ mod tests {
 
     use super::*;
 
+    /// `cell down` deletes the passkey hand-off first, before it looks for a cluster, so a cell
+    /// torn down after its cluster is already gone still forgets the key (DEC-2411): read from
+    /// `down`'s own source, since its cluster calls cannot run in a unit test.
+    #[test]
+    fn cell_down_forgets_the_passkey_hand_off_first() -> Result<()> {
+        let source = fs::read_to_string(crate::repo_root()?.join("xtask/src/cell.rs"))?;
+        let code = source
+            .split_once("#[cfg(test)]\nmod tests")
+            .map_or(source.as_str(), |(code, _)| code);
+        let body = code
+            .split_once("pub fn down() -> Result<()> {\n")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .map(|(body, _)| body)
+            .context("cell.rs has no `pub fn down`")?;
+        assert_eq!(
+            body.lines().next().map(str::trim),
+            Some("web::forget_passkey(&crate::repo_root()?)?;"),
+            "down's first statement forgets the passkey hand-off: {body}"
+        );
+        Ok(())
+    }
+
     /// The cluster's default arguments are exactly the ones before [`LOW_EVICTION_ENV`] existed, so
     /// CI and a laptop create the same cluster; the switch adds only the kubelet's lowered
     /// hard-eviction thresholds, and the cgroup v1 argument is independent of it.

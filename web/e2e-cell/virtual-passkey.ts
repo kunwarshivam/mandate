@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { CDPSession, Page } from "@playwright/test";
 
 /**
@@ -16,7 +16,11 @@ export interface VirtualPasskey {
   credentials(): Promise<number>;
   /** Removes the authenticator, so a later page has no passkey. */
   remove(): Promise<void>;
-  /** Writes every credential the authenticator holds to `path`, owner-only, for a later run of this cell; answers how many. */
+  /**
+   * Writes every credential the authenticator holds to `path`, for a later run of this cell, and
+   * answers how many: any file already there is deleted first and the new one created exclusively
+   * at 0600, so the key never sits in a file another user can read, even for a moment.
+   */
   exportTo(path: string): Promise<number>;
   /** Adds the credentials a run wrote with `exportTo` at `path`; answers how many. */
   importFrom(path: string): Promise<number>;
@@ -39,8 +43,8 @@ export async function virtualPasskey(page: Page): Promise<VirtualPasskey> {
     },
     async exportTo(path) {
       const { credentials } = await held();
-      writeFileSync(path, JSON.stringify({ credentials }), { mode: 0o600 });
-      chmodSync(path, 0o600);
+      rmSync(path, { force: true });
+      writeFileSync(path, JSON.stringify({ credentials }), { mode: 0o600, flag: "wx" });
       return credentials.length;
     },
     async importFrom(path) {
