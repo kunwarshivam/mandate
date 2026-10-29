@@ -1428,7 +1428,8 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
     one init container into a memory-backed directory at 0600 with nothing else in it, which the API
     mounts read-only and names in `MANDATE_API_VAULT_DIR`, never a credential in its environment;
     and its egress to the vault on 8200 alone. No other pod names its AppRole, and the API pod names
-    no other: the connection manager's is the connect finish's alone (DEC-2348 item 3)."""
+    no other: the connection manager's is the connect finish's alone (DEC-2348 item 3), the bars
+    reader's is the data process's (DEC-2082), and the model gateway's is its own (DEC-2081)."""
     problems = []
     for w in [w for w in workloads(docs) if w["metadata"]["name"] == "api"]:
         spec = pod_spec(w)
@@ -1488,7 +1489,12 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
         for w in workloads(docs)
         for name in APPROLE_NAME.findall(json.dumps(w))
         if (w["metadata"]["name"], name)
-        not in ((PROVISIONER, "vault-approle-provisioner"), (FINISH, "vault-approle-connection-manager"))
+        not in (
+            (PROVISIONER, "vault-approle-provisioner"),
+            (FINISH, "vault-approle-connection-manager"),
+            ("data", "vault-approle-bars-reader"),
+            ("model-gateway", "vault-approle-model-gateway"),
+        )
     )
     if holders != ([("Deployment", "api", "vault-approle-api")] if on else []):
         problems.append(f"the AppRoles are named by {holders}")

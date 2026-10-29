@@ -13,7 +13,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-backup-plugin-tls
   ref:
-    digest: sha256:9d2ffa4836e88513df334133754f6a7507f4b83f37e5e67e3e7741b192d1ff6c
+    digest: sha256:2f7a511d8801920ec7a939a4b7f0b57bfe4962ac0bd52ffc9784cacdf970f5f3
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -32,7 +32,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-journal-db
   ref:
-    digest: sha256:e5aee2bd04514fbd74edb38209a0f729372fea38e628c897e5b6097514472ab2
+    digest: sha256:4a5c4b49f75249054a71c3e1c9ac7feeda7289cd90c6a23d0356748a383ebb7d
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -51,7 +51,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-workspace
   ref:
-    digest: sha256:e2a6477b6f4c6ac125adffd3300c630088db53a8d9f8d70caa78e0572f179087
+    digest: sha256:babc404fa08477e2a727a27f9a841bea9b4990172d0465d89b7678d4c0a3eaeb
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -70,7 +70,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-vault-server
   ref:
-    digest: sha256:ccaf78b460759ce8277447cc50f635b946d67208b8817c2921fc1bd500b69bcd
+    digest: sha256:c3e9765f62b50f8d4a5486bb4c51787137a842f66a02c7b63682bc11d756d7ba
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
