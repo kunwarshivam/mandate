@@ -1288,9 +1288,9 @@ fn a_rule_reading_the_score_denies_a_request_by_its_own_id() {
     );
 }
 
-/// The plan proposes no request it could not have sized an opening on: an instrument outside the
-/// pins, an agent that holds or has an order working, stale facts, a closed session, a zero
-/// quantity, or an unpinned mandate, whose single instrument is its thesis's and not the
+/// The plan proposes no request it could not size: an instrument outside the pins, an agent with an
+/// order working in the asset, stale facts, a closed session, a zero quantity, or an unpinned
+/// mandate, whose single instrument is its thesis's and not the
 /// deployment's own asset (DEC-2858; `AGENTS.md` rule 3).
 #[test]
 fn a_request_the_plan_could_not_have_opened_on_proposes_nothing() {
@@ -1299,10 +1299,22 @@ fn a_request_the_plan_could_not_have_opened_on_proposes_nothing() {
     elsewhere.instrument = InstrumentId::new("11111111-2222-4333-8444-555555555555").unwrap();
     assert!(plan_over(&rows).requested(&view(), &elsewhere).is_none());
     assert!(plan_over(&rows).requested(&view(), &owners("0")).is_none());
-    let held = holding(journaled(REGULAR), "3", REGULAR);
+    let mut working = journaled(REGULAR);
+    working.push(
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{REGULAR}"}}"#),
+    );
+    working.push(
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"o1","instrument_id":"{SPY}","side":"buy"}}"#),
+    );
     assert!(
-        plan_over(&held).requested(&view(), &owners("5")).is_none(),
-        "held"
+        plan_over(&working)
+            .requested(&view(), &owners("5"))
+            .is_none(),
+        "an order of the agent's working in the asset"
     );
     assert!(
         plan_over(&journaled(CLOSING))
@@ -1321,5 +1333,36 @@ fn a_request_the_plan_could_not_have_opened_on_proposes_nothing() {
             .requested(&view(), &owners("5"))
             .is_none(),
         "unpinned"
+    );
+}
+
+/// An owner's second buy, after the first filled: holding three at the 99.95 bid ($299.85), the
+/// position and gross rooms are $700.15 each, so twenty ($1999) is clipped to seven, by all three
+/// caps, as an increase; the plan classifies it on the held position as any opening (DEC-2858
+/// item 10 makes the runtime run it as the owner's own).
+#[test]
+#[ignore = "pending E10-30"]
+fn an_owners_request_while_holding_is_clipped_against_the_held_position() {
+    let held = holding(journaled(REGULAR), "3", REGULAR);
+    let plan = plan_over(&held);
+    let proposal = plan
+        .requested(&view(), &owners("20"))
+        .expect("the owner's buy on top of the held three");
+    assert_eq!(proposal.purpose, Purpose::Increase);
+    assert_eq!(proposal.qty, Qty::parse("7").unwrap());
+    assert_eq!(
+        proposal.clips_applied,
+        vec![
+            DecisionClip::MaxOrderUsd,
+            DecisionClip::PositionCap,
+            DecisionClip::GrossExposureCap,
+        ]
+    );
+    assert_eq!(
+        plan.classify(&view(), &proposal),
+        Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some("default".into()),
+        }
     );
 }
