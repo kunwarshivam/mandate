@@ -1640,8 +1640,12 @@ mod published_examples {
 mod price_read {
     use super::*;
     use mandate_canon::DecStr;
+    use mandate_marketdata::actions::{RecordedActions, write_actions};
     use mandate_marketdata::dataset::Store;
-    use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
+    use mandate_marketdata::model::{
+        AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
+        SplitRatio, Symbol,
+    };
     use mandate_time::{Date, ExchangeCalendar, new_york_midnight};
 
     /// The last completed regular session at `T0`.
@@ -1680,30 +1684,51 @@ mod price_read {
         format!("{}.25", 400 + n % 11)
     }
 
+    fn dataset(symbol: &str, timeframe: &str) -> DatasetId {
+        DatasetId::new(
+            AssetClass::UsEquity,
+            Feed::Iex,
+            Kind::Bars(timeframe.parse().expect("a timeframe")),
+            Symbol::parse(symbol).expect("a symbol"),
+        )
+        .expect("a dataset")
+    }
+
+    fn bar_at(start: UtcNanos, close: &str) -> Bar {
+        let price = DecStr::parse(close).expect("a price");
+        Bar {
+            start,
+            open: price.clone(),
+            high: price.clone(),
+            low: price.clone(),
+            close: price.clone(),
+            volume: DecStr::parse("1000000").expect("a volume"),
+            vwap: price,
+            trade_count: 10,
+        }
+    }
+
     /// Stores `symbol`'s 30 daily bars ending on `through` under `root`; answers each session with
     /// the close stored for it.
     fn daily(root: &std::path::Path, symbol: &str, through: Date) -> Vec<(Date, String)> {
+        daily_skipping(root, symbol, through, None)
+    }
+
+    /// [`daily`], leaving out the session at index `skip` of the 30 when it names one.
+    fn daily_skipping(
+        root: &std::path::Path,
+        symbol: &str,
+        through: Date,
+        skip: Option<usize>,
+    ) -> Vec<(Date, String)> {
         let store = Store::new(root);
-        let id = DatasetId::new(
-            AssetClass::UsEquity,
-            Feed::Iex,
-            Kind::Bars("1Day".parse().expect("a timeframe")),
-            Symbol::parse(symbol).expect("a symbol"),
-        )
-        .expect("a dataset");
+        let id = dataset(symbol, "1Day");
         let mut stored = Vec::new();
         for (n, d) in sessions_to(through).into_iter().enumerate() {
-            let price = DecStr::parse(&close_of(n)).expect("a price");
-            let bar = Bar {
-                start: new_york_midnight(d).expect("a start"),
-                open: price.clone(),
-                high: price.clone(),
-                low: price.clone(),
-                close: price.clone(),
-                volume: DecStr::parse("1000000").expect("a volume"),
-                vwap: price,
-                trade_count: 10,
-            };
+            if Some(n) == skip {
+                continue;
+            }
+            let bar = bar_at(new_york_midnight(d).expect("a start"), &close_of(n));
             store
                 .put_day(&id, d, &Records::Bars(vec![bar]))
                 .expect("stored");
@@ -1893,6 +1918,89 @@ mod price_read {
         daily(&root, "QQQ", Date::new(2026, 10, 1).expect("a date"));
         let (f, control) = registered(Some(root));
         unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    #[ignore = "pending E10-11"]
+    fn a_trading_day_missing_inside_the_span_is_untrusted() {
+        let root = bars_dir("hole", "cell-recorded");
+        let stored = daily_skipping(&root, "QQQ", last(), Some(15));
+        assert_eq!(stored.len(), 29, "one session of the 30 left out");
+        assert_eq!(stored.last().expect("a session").0, last());
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    #[ignore = "pending E10-11"]
+    fn a_split_inside_the_span_is_untrusted() {
+        let root = bars_dir("split", "cell-recorded");
+        let stored = daily(&root, "QQQ", last());
+        let (first, ex_date) = (stored[0].0, stored[10].0);
+        let dir = mandate_bars::daily_dir(&root, "QQQ").expect("the layout");
+        write_actions(
+            &dir,
+            &RecordedActions {
+                range: DayRange::new(first, last()).expect("a range"),
+                actions: CorporateActions {
+                    splits: vec![Split {
+                        id: "split".to_owned(),
+                        ex_date,
+                        ratio: SplitRatio::new(4, 1).expect("a ratio"),
+                    }],
+                    ..CorporateActions::none(Symbol::parse("QQQ").expect("a symbol"))
+                },
+            },
+        )
+        .expect("the actions");
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    #[ignore = "pending E10-11"]
+    fn two_bars_sharing_a_start_are_untrusted() {
+        let root = bars_dir("duplicate", "cell-recorded");
+        let stored = daily_skipping(&root, "QQQ", last(), Some(29));
+        assert_eq!(
+            stored.len(),
+            29,
+            "every session but the last, which is written below"
+        );
+        let start = new_york_midnight(last()).expect("a start");
+        Store::new(&root)
+            .put_day(
+                &dataset("QQQ", "1Day"),
+                last(),
+                &Records::Bars(vec![bar_at(start, "500.25"), bar_at(start, "501.25")]),
+            )
+            .expect("stored");
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    #[ignore = "pending E10-11"]
+    fn another_symbol_s_or_a_minute_dataset_at_the_symbol_s_path_is_untrusted() {
+        for (case, from_symbol, timeframe) in [("other", "SPY", "1Day"), ("minute", "QQQ", "1Min")]
+        {
+            let root = bars_dir(case, "cell-recorded");
+            let source = root.join("source");
+            let store = Store::new(&source);
+            let id = dataset(from_symbol, timeframe);
+            for d in sessions_to(last()) {
+                let bar = bar_at(new_york_midnight(d).expect("a start"), "400.25");
+                store
+                    .put_day(&id, d, &Records::Bars(vec![bar]))
+                    .expect("stored");
+            }
+            let from = source.join(id.relative_dir());
+            let to = mandate_bars::daily_dir(&root, "QQQ").expect("the layout");
+            std::fs::create_dir_all(to.parent().expect("a parent")).expect("the layout's parent");
+            std::fs::rename(&from, &to).expect("moved to QQQ's daily path");
+            let (f, control) = registered(Some(root));
+            unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+        }
     }
 
     #[test]
