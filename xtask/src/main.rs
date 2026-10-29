@@ -294,12 +294,16 @@ const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)"
 /// old reference cases by the new one — cannot be split at all, so it ships whole with a marker
 /// that names its own DEC. The list is finite and each entry is one PR: nothing here is a standing
 /// loosening, and deleting the entry restores the guard for that PR.
-const ATOMIC_EXCEPTIONS: [(u64, &str); 3] = [
+const ATOMIC_EXCEPTIONS: [(u64, &str); 4] = [
     (2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)"),
     (2200, "ES-22-atomic-exception: J2 PR #2200 (DEC-2335)"),
     (
         2979,
         "ES-22-atomic-exception: owner requests PR #2979 (DEC-2858)",
+    ),
+    (
+        3003,
+        "ES-22-atomic-exception: the agent's chat PR #3003 (DEC-2293)",
     ),
 ];
 
