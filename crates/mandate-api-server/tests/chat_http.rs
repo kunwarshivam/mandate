@@ -541,6 +541,61 @@ fn a_read_after_a_message_s_seq_serves_only_the_messages_after_it() {
     );
 }
 
+/// A message to a setup thread at `query`, as the setup screen sends it.
+fn post_setup(f: &Fixture, cookie: &str, query: &str, key: &str) -> Reply {
+    let cookie = format!("{COOKIE_NAME}={cookie}");
+    send(
+        f.addr,
+        "POST",
+        &format!("/v1/workspaces/{WORKSPACE}/setup/messages{query}"),
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Content-Type", "application/json"),
+            ("Cookie", &cookie),
+            ("Idempotency-Key", key),
+        ],
+        br#"{"text":"an agent for SPY"}"#,
+    )
+}
+
+#[test]
+fn a_setup_message_keeps_a_named_setup_and_refuses_a_name_that_is_not_an_identifier() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let named = post_setup(&f, &cookie, "?setup_id=setup_one-2", "setupkey00000000001");
+    assert_eq!(
+        named.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&named.body)
+    );
+    let answer = parse(&named.body).expect("JSON");
+    assert_eq!(
+        answer.get("setup_id").and_then(Value::as_str),
+        Some("setup_one-2")
+    );
+    for _ in 0..800 {
+        if chat_rows(&f)
+            .iter()
+            .any(|row| row.event_type == "ChatRunEnded")
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let before = chat_rows(&f).len();
+    for query in ["?setup_id=", "?setup_id=a%20b", "?setup_id=a.b"] {
+        let refused = post_setup(&f, &cookie, query, "setupkey00000000002");
+        assert_eq!(refused.status, 422, "{query}");
+    }
+    assert_eq!(
+        chat_rows(&f).len(),
+        before,
+        "a refused setup id journals nothing"
+    );
+}
+
 #[test]
 fn a_blank_message_or_an_unknown_agent_is_refused_with_nothing_journaled() {
     let f = fixture(None);
