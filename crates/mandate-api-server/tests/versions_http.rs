@@ -123,6 +123,8 @@ enum Port {
     Methods,
     /// [`Port::Methods`] in a test cell started with the cool-off waiver (DEC-2146 item 2).
     Waived(CoolOffWaiver),
+    /// [`Port::Waived`] with the waiver's expiry, in seconds (DEC-2150 item 2).
+    WaivedUntil(CoolOffWaiver, i64),
 }
 
 fn fixture() -> Fixture {
@@ -171,13 +173,17 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
     let step_up: Arc<dyn StepUp> = match port {
         Port::Accepting => Arc::clone(&asked) as Arc<dyn StepUp>,
         Port::Unbound => Arc::new(Unbound),
-        Port::Methods | Port::Waived(_) => Arc::new(Methods {
+        Port::Methods | Port::Waived(_) | Port::WaivedUntil(..) => Arc::new(Methods {
             passkey: Passkey {
                 challenges: Arc::clone(&challenges),
                 rp: support_passkey::rp(),
                 keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
                 cool_off_waiver: match port {
-                    Port::Waived(waiver) => Some(waiver),
+                    Port::Waived(waiver) | Port::WaivedUntil(waiver, _) => Some(waiver),
+                    _ => None,
+                },
+                cool_off_waiver_until: match port {
+                    Port::WaivedUntil(_, until) => Some(at(until)),
                     _ => None,
                 },
             },
@@ -3843,6 +3849,103 @@ fn an_acknowledgment_to_an_undeployed_agent_is_not_found() {
     assert_eq!(control(&w.f).len(), deployed, "nothing more is recorded");
 }
 
+/// An `OwnerAcknowledgmentRequested` the server cannot read fails the list and an acknowledgment
+/// closed, `journal_unavailable` with nothing recorded, rather than read as no request: a spent or
+/// another hold's request must never read as unspent and matching.
+#[test]
+fn an_unreadable_request_fails_the_list_and_the_acknowledgment_closed() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &format!(
+            r#"{{"event":"{}","requested_by":"{BOB}","subject":"limit"}}"#,
+            hold.event_id
+        ),
+    );
+    refused(
+        &list(&w, "?state=open"),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack(
+            "acknowledgments",
+            KEY_3,
+            &ack_body(&hold.event_id, "limit", None, "null", None),
+        ),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+}
+
+/// A hold of another account blocks no agent of this one, though `agt_b` is deployed on that
+/// account here: `agt_a`'s list leaves it out and an acknowledgment of it through `agt_a` is
+/// `acknowledgment_unavailable`, so it is never copied to a stream where the executor would find
+/// no trigger.
+#[test]
+fn a_hold_of_another_account_blocks_no_agent_of_this_one() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    seed_control_v2(
+        &w.f,
+        "ConnectionEstablished",
+        &established_payload()
+            .replace(CONNECTION, "conn_other")
+            .replace(ACCOUNT, "acct_elsewhere"),
+    );
+    let elsewhere_document = document("v1").replace(CONNECTION, "conn_other");
+    assert_ne!(
+        elsewhere_document,
+        document("v1"),
+        "it names another connection"
+    );
+    w.f.store
+        .put(&to_canonical(&json(&elsewhere_document)))
+        .expect("stored");
+    seed_control_v2(
+        &w.f,
+        "AgentDeployed",
+        &format!(
+            r#"{{"agent_id":"agt_b","connection_id":"conn_other","mandate_version":"{}","record_ref":"{}"}}"#,
+            reference(&elsewhere_document),
+            reference("{}")
+        ),
+    );
+    let elsewhere = seed_stream(
+        &w.f,
+        &format!("acct:{WORKSPACE}:acct_elsewhere"),
+        "AccountRestrictionChanged",
+        &restriction("pattern_day_trader", "closing_only"),
+        None,
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open")),
+        std::slice::from_ref(&elsewhere.event_id),
+        "the workspace's list serves it"
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open&agent=agt_a")),
+        Vec::<String>::new()
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack(
+            "acknowledgments",
+            KEY_3,
+            &ack_body(&elsewhere.event_id, "restriction", None, "null", None),
+        ),
+        409,
+        ProblemCode::AcknowledgmentUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+}
+
 /// A request is refused as an acknowledgment is, with nothing recorded and the challenge kept: a
 /// hold that does not stand, no step-up, a method other than passkey, and no assertion.
 #[test]
@@ -4082,6 +4185,68 @@ fn a_ci_cells_waived_deploy_with_a_fresh_passkey_commits_and_journals_the_waiver
         2,
         "the confirmation's waiver, then the deployment's: one per step-up"
     );
+}
+
+/// DEC-2150 items 1 and 5: in a staging cell started with the waiver, a version's confirmation
+/// judged before the waiver's expiry, with a passkey still in its cool-off, commits and journals
+/// the waiver naming `staging`.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_staging_cells_waived_confirm_before_its_expiry_commits_and_journals_the_waiver() {
+    let w = passkeyed_in(
+        Port::WaivedUntil(CoolOffWaiver::Staging, T0 + 60),
+        false,
+        COOLING,
+    );
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    journals_the_waiver(
+        &w.f,
+        "MandateConfirmed",
+        "confirm_version",
+        "confirm_version_step_up_asserted",
+        KEY,
+        &issued,
+        "staging",
+    );
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// DEC-2150 item 4: a step-up judged at or after the waiver's expiry is not waived. The cooling
+/// passkey's confirmation is `step_up_missing`, nothing is appended, and the challenge is kept, in
+/// a staging cell and in a test cell given an expiry alike: the clock only ends the waiver.
+#[test]
+#[ignore = "pending E9-4"]
+fn at_or_after_its_expiry_the_waiver_counts_nothing() {
+    for (waiver, until) in [
+        (CoolOffWaiver::Staging, T0),
+        (CoolOffWaiver::Staging, T0 - 1),
+        (CoolOffWaiver::Ci, T0),
+        (CoolOffWaiver::Dev, T0 - 3_600),
+    ] {
+        let w = passkeyed_in(Port::WaivedUntil(waiver, until), false, COOLING);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            reply.status,
+            401,
+            "{waiver:?} until {until}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        refused(&reply, 401, ProblemCode::StepUpMissing);
+        assert!(events(&w.f, "MandateConfirmed").is_empty(), "{waiver:?}");
+        assert!(events(&w.f, "StepUpAsserted").is_empty(), "{waiver:?}");
+        assert!(events(&w.f, "StepUpCoolOffWaived").is_empty(), "{waiver:?}");
+        assert!(w.held(&issued), "{waiver:?}: nothing is taken");
+    }
 }
 
 /// DEC-2146 items 1 and 2: without the waiver the same cell keeps the cool-off. A passkey still

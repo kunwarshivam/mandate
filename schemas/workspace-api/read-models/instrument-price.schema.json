@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/instrument-price.schema.json",
+  "description": "GET /instruments/{id}/price (§4.1, §3.11 item 11, DEC-2152): the last trusted daily bar of an instrument GET /instruments lists, as mandate-bars' trust rule admits it at the API's clock: the close of the last completed regular equity session, never a bid, a quote or a current price. When no trusted bar can be served, reported is false with one reason and no close: never a stub. as_of names the control stream the instrument was read from; the envelope's served_at is the API clock the bars were read at.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "instrument_id",
+    "symbol",
+    "reported"
+  ],
+  "properties": {
+    "instrument_id": {
+      "$ref": "../common.schema.json#/$defs/AssetId"
+    },
+    "symbol": {
+      "description": "The listed instrument's symbol, as GET /instruments serves it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "reported": {
+      "description": "Whether a trusted bar is served.",
+      "type": "boolean"
+    },
+    "close": {
+      "description": "The bar's close as stored, the last completed regular session's.",
+      "$ref": "../common.schema.json#/$defs/Decimal"
+    },
+    "bar_start": {
+      "description": "The bar's start as stored.",
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "timeframe": {
+      "description": "The bar's timeframe: daily alone in v1 (DEC-2152 alternatives).",
+      "enum": [
+        "1Day"
+      ]
+    },
+    "source": {
+      "description": "alpaca-iex for the data process's generations root (staging), recorded for any other root (the local cell's recording).",
+      "enum": [
+        "alpaca-iex",
+        "recorded"
+      ]
+    },
+    "reason": {
+      "description": "Why no trusted bar is served: no_store (no bars root, or it does not exist), not_covered (an asset class other than us_equity), no_bars (no dataset manifest where the root and clock name it), untrusted (anything mandate-bars refuses or cannot read).",
+      "enum": [
+        "no_store",
+        "not_covered",
+        "no_bars",
+        "untrusted"
+      ]
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "reported": {
+          "const": true
+        }
+      },
+      "required": [
+        "close",
+        "bar_start",
+        "timeframe",
+        "source"
+      ],
+      "not": {
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "reported": {
+          "const": false
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "close"
+            ]
+          },
+          {
+            "required": [
+              "bar_start"
+            ]
+          },
+          {
+            "required": [
+              "timeframe"
+            ]
+          },
+          {
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

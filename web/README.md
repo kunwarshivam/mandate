@@ -87,6 +87,7 @@ To run without sign-in, set neither variable (or leave `.env.local` out). To run
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The publishable key (`sb_publishable_…`, Project Settings > API Keys); never the secret key |
 | `NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN` | `1` shows the email link on `/login`; leave it unset until the project has SMTP. The deployed Worker's build reads it from the GitHub variable of that name (repository or `production` environment), like the two Supabase values (DEC-1005 item 6) |
 | `NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN`, `NEXT_PUBLIC_OWLHEAD_APP_ORIGIN` | The public site's and the app's origins (DEC-2405). With both set, the site serves only its public pages and sends sign-in and every app screen to the app with a 308, so the session lives on the app alone. Leave both unset locally; the Worker's build sets them in `web-deploy.yml` |
+| `NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL` | The staging demo's cool-off waiver in the browser (DEC-2412): until this `YYYY-MM-DDTHH:MM:SSZ` instant, a passkey still in its first 24 hours is offered and the staging server judges it (DEC-2150). No later than 2026-11-05T00:00:00Z, which the build refuses past. Only `web-deploy.yml` sets it; leave it unset locally |
 
 Next reads `.env.local` for `npm run dev`, `npm run build` and `npm start`; the variables are
 inlined into the build, so rebuild after changing them. For the deployed Worker they are variables of
@@ -209,7 +210,16 @@ instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read eve
 state the journal has not given is "not reported", a list that cannot be read is never shown as
 empty, and an agent with no account found says so. It also lists the latest 20 records on the
 agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequence, type and time,
-never a body (DEC-2377). Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
+never a body (DEC-2377). Instruments (`/instruments`) lists the instruments `GET /instruments` registers,
+in symbol order, filtered by the symbol typed: display only, with no ranking or suggestion (DEC-528 item 2). An instrument's page shows its last
+trusted daily close from `GET /instruments/{id}/price` (DEC-2152), read every 30 s and labelled with
+its session, never as a live price or a bid; a price the deployment does not report says so. An instrument's page offers each running agent "Ask agent
+to buy" with a typed quantity, sent as `POST /agents/{id}/requests` (`{instrument, side: "buy",
+size}`, DEC-2151) and followed through `GET /commands/{id}`. It is the owner's request, never an
+order: the agent's builder sizes it within the mandate, the gate and autonomy rules judge it, and an
+`ask` puts it in Approvals, where a request the content's `trigger.requested_by` names `owner`
+reads "Requested by you" (DEC-2858). An instrument the agent's mandate does not pin is refused at
+`/instrument` and shown as such. Over the fixtures the screens say there is nothing to search. Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
 groups the agents by the account their reads name: each agent's own net quantity per instrument, its
 cost basis, risk mark and protection shown as not reported until the API serves them (DEC-2111 item
 5), and the account's holdings at its last reconciliation from the same reads. Audit's Timeline reads the latest 50 records of the control
@@ -291,7 +301,7 @@ The visual system is the calm, consumer-grade redesign of DEC-204: one hero numb
 scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
 and dense), in Ink and Ultramarine (DEC-205), light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens and the do and don't list, and
 `web/design/reference.md` how each surface is drawn (DEC-511); `web/PRODUCT.md` holds the audience, voice, and the safety
-rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
+rules that constrain visuals. `/design` (dev only, like `/palette`: a `page.dev.tsx` that production builds leave out and that answers 404 in production, so app.owlhead.ai shows none of its sample figures; not linked from the navigation) renders the tokens with
 their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
  every state treatment, the components, and motion samples.
 

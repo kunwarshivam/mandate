@@ -93,7 +93,11 @@ impl Refused {
 }
 
 /// Authenticates, then authorizes the read of `workspace`, then reads its control stream.
-async fn reader(app: &App, headers: &HeaderMap, workspace: &str) -> Result<Reader, Refused> {
+pub(crate) async fn reader(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+) -> Result<Reader, Refused> {
     let (admitted, now) = session(app, headers, Request::Other)?;
     authorized(
         app,
@@ -629,7 +633,7 @@ async fn all_approvals(
 
 /// The `account_ref` the control stream binds to the connection `document` names, and that
 /// account stream's rows (DEC-1020 item 3); `None` with no document or no bound reference.
-async fn account_of(
+pub(crate) async fn account_of(
     app: &App,
     reader: &Reader,
     document: Option<&Envelope>,

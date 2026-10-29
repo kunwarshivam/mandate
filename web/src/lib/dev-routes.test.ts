@@ -2,6 +2,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import DesignPage from "@/app/(app)/design/page.dev";
+import KumoSpecimenPage from "@/app/(app)/kumo-specimen/page";
 import PalettePage from "@/app/(app)/palette/page.dev";
 import { DEV_PAGE_EXTENSION, pageExtensions } from "./dev-routes";
 
@@ -39,6 +41,36 @@ describe("the /palette reference stays out of production", () => {
 
   it("is not linked from the navigation", () => {
     expect(readFileSync(web("src/components/shell/nav.tsx"), "utf8")).not.toContain("/palette");
+  });
+});
+
+describe("the /design reference, with its sample figures, stays out of production", () => {
+  it("has no route file a production build would pick up", () => {
+    const files = readdirSync(web("src/app/(app)/design"));
+    expect(files).toContain("page.dev.tsx");
+    const production = pageExtensions("production");
+    const routeFile = /^(page|layout|route|template|default|loading|error|not-found)\.(.+)$/;
+    for (const f of files) {
+      const ext = routeFile.exec(f)?.[2];
+      if (ext) expect(production, `${f} would be a production route`).not.toContain(ext);
+    }
+  });
+
+  it("answers 404 in production even if compiled", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    expect(() => DesignPage()).toThrow("NEXT_NOT_FOUND");
+    vi.stubEnv("NODE_ENV", "development");
+    expect(DesignPage()).toBeTruthy();
+  });
+
+  it("is not linked from the navigation", () => {
+    expect(readFileSync(web("src/components/shell/nav.tsx"), "utf8")).not.toContain("/design");
+  });
+
+  it("leaves the e2e build only its Kumo specimen; every other build renders the not-found page in its place", () => {
+    expect(() => KumoSpecimenPage()).toThrow("NEXT_NOT_FOUND");
+    expect(readFileSync(web("src/app/(app)/kumo-specimen/page.tsx"), "utf8")).toContain("if (!scenariosEnabled) notFound();");
+    expect(readFileSync(web("e2e/flat-fills.spec.ts"), "utf8")).not.toContain('"/design"');
   });
 });
 

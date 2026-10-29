@@ -626,7 +626,7 @@ SCHEMAS[("ctl", "StepUpCoolOffWaived")] = rec(
     ("challenge", ULID),
     ("credential", CREDENTIAL_ID),
     ("cool_off_ends", TS),
-    ("tier", one_of("dev", "ci")),
+    ("tier", one_of("dev", "ci", "staging")),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
@@ -1541,7 +1541,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderAbandoned", 1): rec(
         ("client_order_id", STR),
         ("intent_id", IDENT_T),
-        ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
+        ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit", "flatten_covered")),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.95 §9.5 (DEC-2812): one broker fill. Version 2 is version 1's members with

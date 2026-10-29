@@ -13,7 +13,7 @@
 import { array, closedEnum, isRecord, nullable, object, string, timestamp } from "./decode";
 import type { ContentRef, Decoder, Timestamp } from "./types";
 import type { StepUpChallenge } from "./step-up";
-import { coolOffWaivedFrom } from "@/lib/cool-off-build";
+import { coolOffWaivedFrom, stagingWaived, stagingWaiverUntil } from "@/lib/cool-off-build";
 import { sha256Hex } from "@/lib/sha256";
 
 /** `envelope.schema.json`'s `StepUpEvidence` as a passkey call carries it (DEC-2108 item 7: `authenticated_at` is the challenge's `issued_at`). */
@@ -155,6 +155,8 @@ const bytesOf = (buffer: unknown): Uint8Array | null =>
 
 /** DEC-2411's flag as this build was made with it; the only place it is read (`coolOffWaivedFrom`). */
 const COOL_OFF_WAIVED = coolOffWaivedFrom(process.env.NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED);
+/** The staging demo's waiver instant as this build was made with it, or `null` (DEC-2150; `stagingWaiverUntil`). */
+const STAGING_UNTIL = stagingWaiverUntil(process.env.NEXT_PUBLIC_OWLHEAD_STAGING_COOL_OFF_UNTIL);
 
 /**
  * The member's passkeys that can sign now, by this page's clock (which runs on the server's): none
@@ -162,10 +164,11 @@ const COOL_OFF_WAIVED = coolOffWaivedFrom(process.env.NEXT_PUBLIC_OWLHEAD_COOL_O
  * passkey still cooling off is never offered, so the authenticator cannot pick one the server refuses,
  * except in a build that tries one, `waived` (DEC-2411), which leaves the verdict to the server.
  */
-export function usablePasskeys(passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp, waived = COOL_OFF_WAIVED): { ok: true; value: Passkey[] } | { ok: false; reason: AssertionRefusal } {
+export function usablePasskeys(passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp, waived?: boolean): { ok: true; value: Passkey[] } | { ok: false; reason: AssertionRefusal } {
   if (!authenticator) return { ok: false, reason: "passkey_unavailable" };
   if (passkeys.length === 0) return { ok: false, reason: "no_passkey" };
   const at = instant(now);
+  waived ??= COOL_OFF_WAIVED || stagingWaived(STAGING_UNTIL, at);
   const usable = passkeys.filter((p) => waived || p.cool_off_ends === null || instant(p.cool_off_ends) <= at);
   return usable.length > 0 ? { ok: true, value: usable } : { ok: false, reason: "passkey_cooling_off" };
 }

@@ -1,6 +1,6 @@
 # E2-10 follow-up: the research pass stops re-reading every stored news record on every pass
 
-- **E2-10e (Proposed, M5, debt; lane SC)** As the founder, I want the runtime's research pass to
+- **E2-10e (Done, M5, debt; lane SC; DEC-2291)** As the founder, I want the runtime's research pass to
   read each stored news record once, so that a workspace whose news stream has grown to thousands
   of items does not read thousands of artifacts on every pass. Today `CellSource` (DEC-2288) reads
   the whole `news:{workspace}` stream, and the record of every `NewsItemStored` on it, on every

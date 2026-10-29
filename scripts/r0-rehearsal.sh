@@ -375,10 +375,10 @@ step 2t '"side":"sell","state":"filled","stop_price"' curl -sf -X POST \
   "${ENDPOINT%/mcp}/rehearsal/market" || true
 # The same command on the account the stop left flat: the record is spent by the entry's fill
 # (DEC-910 item 3), so it is refused before any place call, as R0 step 7 is (DEC-529 item 13: one
-# order per live record). A second entry needs a fresh connection record. Until R23 is decided
-# (DEC-1152 item 4, Proposed) the lapse counts the sold-out position's zero row, so the refusal
-# today is `not flat`, which the lapse checks before the spent record; both send nothing.
-run 2u refused 'the account the connection binds is not flat' --place-one-order
+# order per live record). A second entry needs a fresh connection record. R23 is decided: a
+# sold-out position's row of quantity zero is flat (DEC-2390 item 1, the founder), so the lapse
+# finds the account flat and refuses the spent record; it sends nothing.
+run 2u refused 'the connection record is spent' --place-one-order
 
 echo
 echo "record: $RECORD"

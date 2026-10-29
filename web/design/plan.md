@@ -212,7 +212,7 @@ process is revised, and decisions already taken may be revised with it.
 - [x] **`npm run shots`.** Every listed screen on the fixture scenarios at two widths in both
       themes into `web/.shots/`, with a contact sheet (`index.html`) that puts the golden path
       first. (DEC-516)
-- [x] **The tracker on one page.** `08-work-tracker.md` is where things stand; `11-work-log.md`
+- [x] **The tracker on one page.** `08-work-tracker.md` is where things stand; git history
       is how they got there. (2026-10-08)
 - [ ] **A decisions index by area** (web, journal, risk, process) so an agent finds what was
       decided before deciding it again.

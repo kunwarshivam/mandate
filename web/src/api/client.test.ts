@@ -317,7 +317,7 @@ describe("no order ticket (DEC-528)", () => {
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
     connect: ["API_CONNECTION_ID", "CONNECTION_STATES", "CONNECT_START_ROUTE", "connectStartBody", "connectStarted", "connectionDetail", "connectionRead", "connectionsRead"],
-    commands: ["UI_BUILD", "isAssetId", "prepareApprovalResponse", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "prepareOwnerExit", "recordRef"],
+    commands: ["UI_BUILD", "isAssetId", "prepareApprovalResponse", "prepareAskAgent", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "prepareOwnerExit", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     catalogue: ["instrumentsRead", "signalModelsRead"],
     enrol: ["CREATE_TIMEOUT_MS", "ENROL_ROUTE", "REGISTRATION_ROUTE", "browserCreator", "createPasskey", "enrolBody", "enrolStepUpDigest", "enrolled", "passkeyList", "registrationChallenge"],
@@ -329,6 +329,7 @@ describe("no order ticket (DEC-528)", () => {
     passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi", "reconciledHolding"],
     reads: ["emptyWorkspace"],
+    price: ["PRICE_REASONS", "priceRead", "priceRoute"],
     records: ["recordsRead"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
     theses: ["ADMISSION_REASONS", "thesesOf"],
@@ -357,7 +358,9 @@ describe("no order ticket (DEC-528)", () => {
     }
     expect([...members].filter((name) => ORDERISH.test(name))).toEqual([]);
     expect(ALL.filter((op) => ORDERISH.test(op))).toEqual([]);
-    expect(Object.values(OPERATIONS).filter((route) => /\/(orders|requests|positions|fills|trades)\b/.test(route))).toEqual([]);
+    expect(Object.values(OPERATIONS).filter((route) => /\/(orders|positions|fills|trades)\b/.test(route))).toEqual([]);
+    expect(Object.values(OPERATIONS).filter((route) => /\/requests\b/.test(route)), "only the owner's ask to their own agent (DEC-2151, DEC-528 item 1), which its builder sizes and its gate judges").toEqual(["/agents/{agent}/requests"]);
+    expect(OPERATIONS.ask_agent).toBe("/agents/{agent}/requests");
   });
 
   it("pending E11-9: refuses an operation outside its table at runtime", () => {

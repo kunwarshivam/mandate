@@ -13,9 +13,11 @@
   2. **Could:** `requests()` reads a version-1 request that carries `subject` as that subject;
      journal spec §9.28 and [DEC-2838](../decisions/DEC-2838.md) read every version-1 request as
      `limit`. No writer emits that shape today.
-  3. **Should:** the differential property test in `mandate-executor`'s `acknowledge.rs` fixes
-     `request` to `null` and draws only limit triggers and reconciliation holds, so it never
-     exercises a restriction or the independence path.
+  3. **Should**, **done** (the differential test now draws restrictions and their lifts,
+     requests named by acknowledgments, and policy records, and fails on a seeded bug in each):
+     the differential property test in `mandate-executor`'s `acknowledge.rs` fixed `request` to
+     `null` and drew only limit triggers and reconciliation holds, so it never exercised a
+     restriction or the independence path.
   4. **Could:** without an agent, the command printed under an account-wide hold names the
      placeholder `AGENT_ID` (`ANY_AGENT` in `mandate-cli`'s `agent.rs`) and no line says to replace
      it with an agent deployed on the account.
