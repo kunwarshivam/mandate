@@ -86,6 +86,18 @@ function requestText(approval: ApprovalDetail, agents: AgentDetail[]): string {
 
 const byDeadline = (a: ApprovalDetail, b: ApprovalDetail) => a.deadline - b.deadline;
 
+/**
+ * Whether the owner asked for this order (DEC-2151, DEC-2858): `ApprovalRequested`'s content names
+ * who asked in `trigger.requested_by`. Such a request carries no model score and no model outputs,
+ * so it shows as the owner's own request, never as an empty score.
+ */
+export function requestedByOwner(approval: Pick<ApprovalDetail, "content">): boolean {
+  const trigger = approval.content.trigger;
+  return typeof trigger === "object" && trigger !== null && !Array.isArray(trigger) && (trigger as Record<string, unknown>).requested_by === "owner";
+}
+
+const REQUESTED_BY_YOU = "Requested by you";
+
 function RequestLinks({ approvals, agents }: { approvals: ApprovalDetail[]; agents: AgentDetail[] }) {
   return (
     <ul className="grid">
@@ -94,6 +106,11 @@ function RequestLinks({ approvals, agents }: { approvals: ApprovalDetail[]; agen
           <Link href={`/approvals/${approval.approval_id}`} className="font-medium underline-offset-4 hover:underline">
             {requestText(approval, agents)}
           </Link>
+          {requestedByOwner(approval) ? (
+            <span className="text-sm font-medium" data-slot="requested-by-you">
+              {REQUESTED_BY_YOU}
+            </span>
+          ) : null}
           <span className="text-sm text-muted-foreground">Skipped at {clock(deadlineIso(approval.deadline))} unless you answer</span>
         </li>
       ))}
@@ -516,7 +533,8 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     ["Deadline", clock(deadlineIso(approval.deadline))],
   ];
   const deferred = deferredChecks(approval.content, approval.schema_version, approval.decision_deferred_to_binding);
-  const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`), ...deferredLines(deferred)];
+  const byOwner = requestedByOwner(approval);
+  const shown = [nameOf(agent) ?? "Name not reported", ...(byOwner ? [REQUESTED_BY_YOU] : []), line, ...facts.map(([term, value]) => `${term}: ${value}`), ...deferredLines(deferred)];
   const environment = agent?.environment ?? "unknown";
   const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };
   const skip = () => {
@@ -551,6 +569,11 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
             <EnvironmentBadge environment={environment} />
           </div>
           <p className="text-muted-foreground">{agent ? <AgentName agent={agent} /> : <NotReported>Name not reported</NotReported>}</p>
+          {byOwner ? (
+            <p className="text-sm font-medium" data-slot="requested-by-you">
+              {REQUESTED_BY_YOU}: your agent sized this order within its mandate.
+            </p>
+          ) : null}
           <p className="text-h1 text-pretty">{line}</p>
         </header>
         <Panel well>

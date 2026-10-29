@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/exit_intents.rs"
+test = "a_flattens_remainder_parses_on_every_record_version"
+reason = """
+Journal spec v0.114 (DEC-2857) admits a flatten's remainder, `k-{ulid}-{n}r`, as §9.1's `intent`.
+The journal's type check has no stub: until E7-4's implementation extends it, it refuses the form
+`non_canonical`, and that refusal is the failure. The implementation deletes this file with the
+test's `#[ignore]` line.
+"""
