@@ -289,6 +289,40 @@ impl RetrievedObservation {
     }
 }
 
+/// Why a stored news item is not offered as an event trigger (DEC-2288 item 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredRefusal {
+    /// The row or the record does not read: not canonical JSON, or a member missing or of the
+    /// wrong form.
+    Unreadable,
+    /// The record is not the one the row names: its bytes do not hash to `item_ref`, or a member
+    /// both carry differs, or a licensed record holds text. A tampered or corrupt store.
+    Mismatch,
+}
+
+impl StoredRefusal {
+    /// The refusal's stable code (ADR-0001 ES-09).
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Unreadable => "news_record_unreadable",
+            Self::Mismatch => "news_record_mismatch",
+        }
+    }
+}
+
+impl RetrievedObservation {
+    /// The offer of a news item the news reader stored (journal spec §9.37, DEC-2288): `row` the
+    /// body of its `NewsItemStored`, `record` the bytes its `item_ref` names.
+    ///
+    /// # Errors
+    /// [`StoredRefusal`].
+    pub fn stored(row: &[u8], record: &[u8]) -> Result<Self, StoredRefusal> {
+        let _ = (row, record);
+        Err(StoredRefusal::Unreadable)
+    }
+}
+
 /// What the research worker hands the core (spec §10.3).
 #[allow(
     clippy::large_enum_variant,
