@@ -7,14 +7,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_builder::{
     AccountSnapshot, Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip,
-    Direction, Market, ModelOutput as BuilderModelOutput,
+    Direction, Market, ModelOutput as BuilderModelOutput, RequestCut, RequestedBy,
 };
 use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
 use mandate_num::{Price, Qty, Usd, UsdExact};
 use mandate_runtime::{
-    Autonomy, Classified, DecisionClip, ExitOrigin, ModelDirection, OrderExecution, Proposal,
-    Purpose, SignalInputs, TimeInForce,
+    Autonomy, Classified, DecisionClip, ExitOrigin, ModelDirection, OrderExecution, OwnerRequest,
+    Proposal, Purpose, Requester, SignalInputs, TimeInForce,
 };
 use mandate_spec::ValidatedMandate;
 use mandate_time::UtcNanos;
@@ -314,6 +314,76 @@ pub fn size(
     runtime_proposal(proposal, builder, &mandate, validated)
 }
 
+/// An owner's or a client's request for a buy (journal spec §2 and §9.9, DEC-2858) as the
+/// runtime's proposal: the order builder's [`mandate_builder::requested_buy`] over `builder`'s
+/// facts, clipped and never sized, at the ask, with no conviction, score, model output or weight
+/// (journal spec §9.1 rule 8) and every limit that cut it in `clips_applied`. `Ok(None)` when the
+/// builder proposes nothing for it.
+///
+/// # Errors
+/// [`PortError::Absent`] for a request in another instrument than `builder`'s market, or an
+/// execution policy the mandate does not derive; [`PortError::Builder`] as the builder refuses.
+pub fn requested(
+    validated: &ValidatedMandate,
+    builder: &BuilderContext,
+    request: &OwnerRequest,
+) -> Result<Option<Proposal>, PortError> {
+    if request.instrument.as_str() != builder.market.instrument.as_str() {
+        return Err(PortError::Absent {
+            what: "a request in the builder market's instrument",
+        });
+    }
+    let requested_by = match request.requested_by {
+        Requester::Owner => RequestedBy::Owner,
+        Requester::Client { .. } => RequestedBy::Client,
+    };
+    let Some(buy) = mandate_builder::requested_buy(
+        &BuilderMandate::try_from(validated)?,
+        &builder.account,
+        &builder.market,
+        &builder.risk,
+        requested_by,
+        request.qty,
+    )?
+    else {
+        return Ok(None);
+    };
+    let purpose = runtime_purpose(buy.action.purpose);
+    validate_order_execution(Side::Buy, purpose, builder.execution)?;
+    if builder.execution.asset_class != builder.market.asset_class
+        || builder.execution.protection_required != validated.mandate().protection.enabled
+    {
+        return Err(PortError::Absent {
+            what: "the mandate-derived execution policy",
+        });
+    }
+    let clips_applied = buy
+        .cut_by
+        .iter()
+        .map(|cut| match cut {
+            RequestCut::MaxOrderUsd => DecisionClip::MaxOrderUsd,
+            RequestCut::PositionCap => DecisionClip::PositionCap,
+            RequestCut::GrossExposureCap => DecisionClip::GrossExposureCap,
+        })
+        .collect();
+    Ok(Some(Proposal {
+        instrument: request.instrument.clone(),
+        asset_class: builder.market.asset_class,
+        side: Side::Buy,
+        qty: buy.qty,
+        limit: buy.limit_price,
+        purpose,
+        exit_origin: None,
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: Value::Null,
+        outputs_used: BTreeSet::new(),
+        model_weights: BTreeMap::new(),
+        clips_applied,
+        execution: Some(builder.execution),
+    }))
+}
+
 /// Mandate spec v0.10 §8.3 step 2's first branch on its own (MI-34, DEC-2391): when `market`'s
 /// instrument's thesis ended (`inputs.ended_theses`) and the universe is unpinned, the whole
 /// `account` position less the runtime's working exits in it, at the bid, with `exit_origin`
@@ -411,7 +481,9 @@ pub fn classify(
     proposal: &Proposal,
     policy_nonconforming: bool,
 ) -> Result<Classified, PortError> {
-    let expected_score = Value::Str(action.combined_score.to_string());
+    let expected_score = action
+        .combined_score
+        .map_or(Value::Null, |score| Value::Str(score.to_string()));
     if action.instrument.as_str() != proposal.instrument.as_str()
         || action.asset_class != proposal.asset_class
         || runtime_purpose(action.purpose) != proposal.purpose

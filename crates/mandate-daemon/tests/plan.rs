@@ -12,8 +12,8 @@ use mandate_gate_context::Freshness;
 use mandate_journal::StoredEvent;
 use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_runtime::{
-    ApprovalSettings, Autonomy, Classified, MandateView, ModelDirection, ModelOutput, OrderPlan,
-    Proposal, Purpose, RiskClock, SignalInputs,
+    ApprovalSettings, Autonomy, Classified, DecisionClip, EventId, MandateView, ModelDirection,
+    ModelOutput, OrderPlan, OwnerRequest, Proposal, Purpose, Requester, RiskClock, SignalInputs,
 };
 use mandate_spec::document::Mandate;
 use mandate_time::UtcNanos;
@@ -232,7 +232,7 @@ fn a_proposal_with_no_facts_to_classify_it_on_is_denied() {
     elsewhere.instrument = InstrumentId::new("11111111-2222-4333-8444-555555555555").unwrap();
     assert_eq!(plan.classify(&view(), &elsewhere).autonomy, Autonomy::Deny);
     let mut unscored = proposal.clone();
-    unscored.combined_score = Value::Null;
+    unscored.combined_score = Value::Str("not a score".into());
     assert_eq!(plan.classify(&view(), &unscored).autonomy, Autonomy::Deny);
     let stale = plan_over(&journaled(CLOSING));
     assert_eq!(stale.classify(&view(), &proposal).autonomy, Autonomy::Deny);
@@ -1122,5 +1122,246 @@ fn an_opening_whose_class_differs_from_its_thesis_is_denied() {
         research_plan(&crypto).classify(&view(), &proposal).autonomy,
         Autonomy::Deny,
         "its thesis names SPY crypto"
+    );
+}
+
+/// An owner's request for `qty` SPY, as the runtime hands it to the plan (DEC-2858).
+fn request(qty: &str, requested_by: Requester) -> OwnerRequest {
+    OwnerRequest {
+        request: EventId("01J8Z3MOWNERREQUEST0000001".into()),
+        instrument: InstrumentId::new(SPY).unwrap(),
+        qty: Qty::parse(qty).unwrap(),
+        requested_by,
+    }
+}
+
+fn owners(qty: &str) -> OwnerRequest {
+    request(qty, Requester::Owner)
+}
+
+/// The demo mandate with its order cap at `cap` dollars.
+fn order_capped(cap: &str) -> Value {
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&mandate_canon::to_canonical(&document())).unwrap();
+    document["risk"]["max_order_usd"] = serde_json::json!(cap);
+    mandate_canon::parse(&serde_json::to_vec(&document).unwrap()).unwrap()
+}
+
+fn plan_with(rows: &Rows, document: &Value) -> Plan {
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    Plan::new(facts, Mandate::parse(document).unwrap(), FRESH)
+}
+
+/// Five SPY at the 99.95 bid, which the plan takes as the ask, is $499.75, under the demo's $1000
+/// caps: the owner's five, an opening with the mandate's protection, and no conviction, score,
+/// output, weight or clip (journal spec §9.1 rule 8, DEC-2858 item 1).
+#[test]
+fn an_owners_request_within_every_cap_is_proposed_unclipped_and_unscored() {
+    let rows = journaled(REGULAR);
+    let proposal = plan_over(&rows)
+        .requested(&view(), &owners("5"))
+        .expect("the owner's buy");
+    assert_eq!(proposal.instrument.as_str(), SPY);
+    assert_eq!(proposal.side, Side::Buy);
+    assert_eq!(proposal.purpose, Purpose::Open);
+    assert_eq!(proposal.qty, Qty::parse("5").unwrap());
+    assert_eq!(proposal.limit, Price::parse("99.95").unwrap());
+    assert_eq!(proposal.exit_origin, None);
+    assert_eq!(proposal.exit_conviction, None);
+    assert_eq!(proposal.buy_conviction, None);
+    assert_eq!(proposal.combined_score, Value::Null);
+    assert!(proposal.outputs_used.is_empty(), "{proposal:?}");
+    assert!(proposal.model_weights.is_empty(), "{proposal:?}");
+    assert!(proposal.clips_applied.is_empty(), "{proposal:?}");
+    let execution = proposal.execution.unwrap();
+    assert!(execution.protection_required);
+    assert_eq!(
+        execution.protection.unwrap().stop,
+        Price::parse("94.96").unwrap()
+    );
+}
+
+/// Twenty is $1999: past the $1000 order cap, the $1000 position cap and the $1000 gross room, so
+/// ten shares ($999.50) and all three recorded. Under a $300 order cap, five ($499.75) is cut to
+/// three by the order cap alone.
+#[test]
+fn each_cap_that_cut_the_owners_quantity_is_recorded() {
+    let rows = journaled(REGULAR);
+    let every = plan_over(&rows)
+        .requested(&view(), &owners("20"))
+        .expect("the owner's buy, clipped");
+    assert_eq!(every.qty, Qty::parse("10").unwrap());
+    assert_eq!(
+        every.clips_applied,
+        vec![
+            DecisionClip::MaxOrderUsd,
+            DecisionClip::PositionCap,
+            DecisionClip::GrossExposureCap,
+        ]
+    );
+    let capped = plan_with(&rows, &order_capped("300"))
+        .requested(&view(), &owners("5"))
+        .expect("the owner's buy, clipped");
+    assert_eq!(capped.qty, Qty::parse("3").unwrap());
+    assert_eq!(capped.clips_applied, vec![DecisionClip::MaxOrderUsd]);
+}
+
+/// Under a $50 order cap not one share fits: the owner's five go to the gate unclipped, with no
+/// clip recorded, for the gate's own reason to name the cap (DEC-2858 item 7).
+#[test]
+fn a_cap_with_no_room_for_a_share_leaves_the_request_unclipped() {
+    let rows = journaled(REGULAR);
+    let proposal = plan_with(&rows, &order_capped("50"))
+        .requested(&view(), &owners("5"))
+        .expect("the owner's buy, unclipped");
+    assert_eq!(proposal.qty, Qty::parse("5").unwrap());
+    assert!(proposal.clips_applied.is_empty(), "{proposal:?}");
+}
+
+/// A request is classified on its own facts: the demo, with no rules, asks by its default, and a
+/// client's request is classified the same, the ceiling being the runtime's (§6.2 step 5a).
+#[test]
+fn the_demo_mandate_asks_the_owner_about_a_request() {
+    let rows = journaled(REGULAR);
+    let plan = plan_over(&rows);
+    for requested_by in [
+        Requester::Owner,
+        Requester::Client {
+            client_id: "client-1".into(),
+        },
+    ] {
+        let proposal = plan
+            .requested(&view(), &request("5", requested_by.clone()))
+            .expect("the request's buy");
+        assert_eq!(
+            plan.classify(&view(), &proposal),
+            Classified {
+                autonomy: Autonomy::Ask,
+                decided_by: Some("default".into()),
+            },
+            "{requested_by:?}"
+        );
+    }
+}
+
+/// A rule that reads `combined_score` cannot be evaluated for a request and denies it by its own
+/// id (DEC-2858 item 8), even with `default: auto`; a rule on a fact the plan cannot see still
+/// denies under the policy overlay.
+#[test]
+fn a_rule_reading_the_score_denies_a_request_by_its_own_id() {
+    let rows = journaled(REGULAR);
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&mandate_canon::to_canonical(&document())).unwrap();
+    document["autonomy"]["default"] = serde_json::json!("auto");
+    document["autonomy"]["rules"] = serde_json::json!([{
+        "id": "confident", "then": "auto",
+        "when": {"field": "combined_score", "op": "gte", "value": "0.5"},
+    }]);
+    let scored = mandate_canon::parse(&serde_json::to_vec(&document).unwrap()).unwrap();
+    let plan = plan_with(&rows, &scored);
+    let proposal = plan
+        .requested(&view(), &owners("5"))
+        .expect("the owner's buy");
+    assert_eq!(
+        plan.classify(&view(), &proposal),
+        Classified {
+            autonomy: Autonomy::Deny,
+            decided_by: Some("rule:confident".into()),
+        }
+    );
+    let unseen = plan_with(
+        &rows,
+        &with_rule(serde_json::json!({"id": "cap", "then": "deny", "when":
+            {"field": "drawdown", "op": "gt", "value": "0.05"}})),
+    );
+    let proposal = unseen
+        .requested(&view(), &owners("5"))
+        .expect("the owner's buy");
+    assert_eq!(
+        unseen.classify(&view(), &proposal),
+        Classified {
+            autonomy: Autonomy::Deny,
+            decided_by: Some("policy_overlay".into()),
+        }
+    );
+}
+
+/// The plan proposes no request it could not size: an instrument outside the pins, an agent with an
+/// order working in the asset, stale facts, a closed session, a zero quantity, or an unpinned
+/// mandate, whose single instrument is its thesis's and not the
+/// deployment's own asset (DEC-2858; `AGENTS.md` rule 3).
+#[test]
+fn a_request_the_plan_could_not_have_opened_on_proposes_nothing() {
+    let rows = journaled(REGULAR);
+    let mut elsewhere = owners("5");
+    elsewhere.instrument = InstrumentId::new("11111111-2222-4333-8444-555555555555").unwrap();
+    assert!(plan_over(&rows).requested(&view(), &elsewhere).is_none());
+    assert!(plan_over(&rows).requested(&view(), &owners("0")).is_none());
+    let mut working = journaled(REGULAR);
+    working.push(
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{REGULAR}"}}"#),
+    );
+    working.push(
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"o1","instrument_id":"{SPY}","side":"buy"}}"#),
+    );
+    assert!(
+        plan_over(&working)
+            .requested(&view(), &owners("5"))
+            .is_none(),
+        "an order of the agent's working in the asset"
+    );
+    assert!(
+        plan_over(&journaled(CLOSING))
+            .requested(&view(), &owners("5"))
+            .is_none(),
+        "close window"
+    );
+    assert!(
+        plan_over(&journaled(PRE_MARKET))
+            .requested(&view(), &owners("5"))
+            .is_none(),
+        "pre-market"
+    );
+    assert!(
+        research_plan(&rows)
+            .requested(&view(), &owners("5"))
+            .is_none(),
+        "unpinned"
+    );
+}
+
+/// An owner's second buy, after the first filled: holding three at the 99.95 bid ($299.85), the
+/// position and gross rooms are $700.15 each, so twenty ($1999) is clipped to seven, by all three
+/// caps, as an increase; the plan classifies it on the held position as any opening (DEC-2858
+/// item 10 makes the runtime run it as the owner's own).
+#[test]
+fn an_owners_request_while_holding_is_clipped_against_the_held_position() {
+    let held = holding(journaled(REGULAR), "3", REGULAR);
+    let plan = plan_over(&held);
+    let proposal = plan
+        .requested(&view(), &owners("20"))
+        .expect("the owner's buy on top of the held three");
+    assert_eq!(proposal.purpose, Purpose::Increase);
+    assert_eq!(proposal.qty, Qty::parse("7").unwrap());
+    assert_eq!(
+        proposal.clips_applied,
+        vec![
+            DecisionClip::MaxOrderUsd,
+            DecisionClip::PositionCap,
+            DecisionClip::GrossExposureCap,
+        ]
+    );
+    assert_eq!(
+        plan.classify(&view(), &proposal),
+        Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some("default".into()),
+        }
     );
 }
