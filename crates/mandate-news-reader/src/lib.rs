@@ -37,6 +37,7 @@ pub mod items;
 pub mod key;
 pub mod poll;
 pub mod reader;
+pub mod recorded;
 pub mod records;
 pub mod tickers;
 pub mod watch;
