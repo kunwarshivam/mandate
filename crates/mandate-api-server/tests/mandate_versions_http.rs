@@ -1484,3 +1484,130 @@ fn a_second_application_of_one_confirmation_is_journal_unavailable() {
     );
     assert_eq!(code(&reply), "journal_unavailable");
 }
+
+/// The reasons journal spec §9.3 rule 33 says only an increase meets.
+const INCREASE_ONLY: [&str; 3] = [
+    "increase_blocked_while_latched",
+    "waiting_period",
+    "still_below_new_floor",
+];
+
+/// The reasons any change may meet.
+const ANY_CHANGE: [&str; 3] = [
+    "equity_below_exposure",
+    "would_trigger_limit",
+    "not_loosening",
+];
+
+#[test]
+#[ignore = "pending E10-28"]
+fn a_reduction_refused_for_a_reason_only_an_increase_meets_is_journal_unavailable() {
+    let [b, s, l, r] = all_documents();
+    for reason in INCREASE_ONLY {
+        let mut world = seeded();
+        let [first, _, _] = world.confirmations.clone();
+        world.account.applied(
+            AGENT,
+            (&b.version, &s.version),
+            &first,
+            Some(reason),
+            "risk_reducing",
+        );
+        let f = fixture(&[&b, &s, &l, &r]);
+        install(&f, &[&world.control, &world.account]);
+        let cookie = operator(&f);
+        let reply = get(&f, &path(AGENT), &cookie);
+        assert_eq!(
+            reply.status,
+            503,
+            "{reason} on a reduction breaks rule 33: {}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        assert_eq!(code(&reply), "journal_unavailable", "{reason}");
+    }
+}
+
+#[test]
+#[ignore = "pending E10-28"]
+fn an_unclassified_entry_refused_for_a_reason_only_an_increase_meets_is_journal_unavailable() {
+    let [b, s, l, _] = all_documents();
+    for (reason, told) in INCREASE_ONLY
+        .into_iter()
+        .zip(["neutral", "risk_reducing", "neutral"])
+    {
+        let mut world = seeded();
+        let [first, _, _] = world.confirmations.clone();
+        world
+            .account
+            .applied(AGENT, (&b.version, &s.version), &first, Some(reason), told);
+        let f = fixture(&[&b, &l]);
+        install(&f, &[&world.control, &world.account]);
+        let cookie = operator(&f);
+        let reply = get(&f, &path(AGENT), &cookie);
+        assert_eq!(
+            reply.status,
+            503,
+            "{reason} told {told} breaks rule 33 even where the server cannot classify: {}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        assert_eq!(code(&reply), "journal_unavailable", "{reason}");
+    }
+}
+
+#[test]
+fn a_refusal_any_change_may_meet_is_served_whatever_the_classification() {
+    let [b, s, l, r] = all_documents();
+    for reason in ANY_CHANGE {
+        let mut world = seeded();
+        let [first, second, _] = world.confirmations.clone();
+        world.account.applied(
+            AGENT,
+            (&b.version, &s.version),
+            &first,
+            Some(reason),
+            "risk_reducing",
+        );
+        world.account.applied(
+            AGENT,
+            (&s.version, &l.version),
+            &second,
+            Some(reason),
+            "risk_increasing",
+        );
+        let f = fixture(&[&b, &s, &l, &r]);
+        install(&f, &[&world.control, &world.account]);
+        let cookie = operator(&f);
+        let body = served(&get(&f, &path(AGENT), &cookie));
+        let results: Vec<Value> = versions(&body)
+            .iter()
+            .map(|e| member(e, "application").clone())
+            .filter(|a| *a != Value::Null)
+            .map(|a| member(&a, "reason").clone())
+            .collect();
+        assert_eq!(
+            results,
+            vec![Value::Str(reason.to_owned()), Value::Str(reason.to_owned())],
+            "{reason} meets a reduction and an increase alike"
+        );
+    }
+}
+
+#[test]
+fn an_increase_refused_for_a_reason_only_an_increase_meets_is_served() {
+    let [b, s, l, r] = all_documents();
+    for reason in INCREASE_ONLY {
+        let mut world = seeded();
+        let [_, second, _] = world.confirmations.clone();
+        world.account.applied(
+            AGENT,
+            (&s.version, &l.version),
+            &second,
+            Some(reason),
+            "risk_increasing",
+        );
+        let f = fixture(&[&b, &s, &l, &r]);
+        install(&f, &[&world.control, &world.account]);
+        let cookie = operator(&f);
+        served(&get(&f, &path(AGENT), &cookie));
+    }
+}

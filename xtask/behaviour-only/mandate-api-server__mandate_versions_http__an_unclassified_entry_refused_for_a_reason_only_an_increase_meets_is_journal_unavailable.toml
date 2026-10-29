@@ -1,0 +1,8 @@
+file = "crates/mandate-api-server/tests/mandate_versions_http.rs"
+test = "an_unclassified_entry_refused_for_a_reason_only_an_increase_meets_is_journal_unavailable"
+reason = """
+The mandate-versions read is live (E10-27) and does not re-check journal spec §9.3 rule 33 yet, so
+it serves this row with a 200 and the test fails on that answer, not at a stub: no stub is added,
+so no release build can reach a panicking path (R1 on #2914). E10-28's impl PR adds the check and
+deletes this row.
+"""
