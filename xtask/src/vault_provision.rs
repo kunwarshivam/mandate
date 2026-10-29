@@ -15,10 +15,11 @@
 //! credential in use is rotated.
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::net::SocketAddrV4;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -418,7 +419,10 @@ impl Drop for Forward {
 /// `kubectl` (a command already naming the cluster) starts, with `--address` and `--ca` (the
 /// ConfigMap `vault-ca`'s, which is not secret) added and `stdin` on its standard input, answering
 /// whether it succeeded and what it printed. Its environment is cleared, and its standard error,
-/// which carries reason codes alone, is shown.
+/// which carries reason codes alone, is shown. The forward's own output is read until it ends: it
+/// reports each connection there, and a forward whose output is closed dies of `SIGPIPE` at the
+/// CLI's first connection. The reading thread is never joined: it ends when the output does, and a
+/// process the forward left behind holding the pipe open must not hold the apply.
 pub(crate) fn run_cli(
     kubectl: &dyn Fn() -> Command,
     read: Kubectl<'_>,
@@ -457,10 +461,12 @@ pub(crate) fn run_cli(
         .context("starting kubectl port-forward")?;
     let stdout = child.stdout.take().context("port-forward's stdout")?;
     let forward = Forward(child);
+    let mut output = BufReader::new(stdout);
     let mut line = String::new();
-    BufReader::new(stdout)
+    output
         .read_line(&mut line)
         .context("reading port-forward's address")?;
+    thread::spawn(move || io::copy(&mut output, &mut io::sink()));
     let port = line
         .strip_prefix("Forwarding from 127.0.0.1:")
         .and_then(|rest| rest.split_whitespace().next())
