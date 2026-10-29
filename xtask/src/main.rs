@@ -2111,7 +2111,8 @@ fn step_up_in_window(
     let (read, template) = kubectl(&["get", "cronjob", step_up::TEMPLATE, "-o", "json"], None)?;
     ensure!(
         read,
-        "reading {} failed: staging's values set stepUp.template, and Flux renders it",
+        "reading {} failed: staging renders it once a promotion pins a chart with \
+         stepUp.template and sets it in the overlay (DEC-2087)",
         step_up::TEMPLATE
     );
     let template: serde_json::Value =
