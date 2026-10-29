@@ -49,7 +49,7 @@ function stepWords(step: SetUpStep | null, done: string): string | null {
  * owner confirms it and deploys it to paper, through the runtime's own confirm and deploy, with the
  * passkey checks they ask for. The chat never confirms or deploys (DEC-2293 item 5).
  */
-function ConfirmCard({ card }: { card: Extract<Card, { kind: "confirm_mandate" }> }) {
+export function ConfirmCard({ card }: { card: Extract<Card, { kind: "confirm_mandate" }> }) {
   const { adoptVersion, confirmVersion, deployVersion, setUps, ws } = useRuntime();
   const mayDeploy = useCan("agents.deploy");
   const router = useRouter();

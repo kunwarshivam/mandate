@@ -44,12 +44,12 @@ function AgentChatSettings({ agent, models }: { agent: HomeAgent; models: ChatMo
   };
   const changed = saved !== null && (model !== (saved.chat_model ?? models[0]?.model_id ?? "") || cap !== saved.daily_cap_usd);
   return (
-    <fieldset className="grid gap-3 rounded-2xl border border-border px-4 py-3" data-slot="agent-chat-settings">
+    <fieldset className="grid min-w-0 gap-3 rounded-2xl border border-border px-4 py-3" data-slot="agent-chat-settings">
       <legend className="px-1 text-h3">{agent.name}</legend>
       <div className="flex flex-wrap items-end gap-3">
-        <label className="grid gap-1" htmlFor={`${id}-model`}>
+        <label className="grid min-w-0 max-w-full gap-1" htmlFor={`${id}-model`}>
           <span className="text-label text-muted-foreground">Chat model</span>
-          <select id={`${id}-model`} className={FIELD} value={model} onChange={(e) => setModel(e.target.value)} disabled={saved === null}>
+          <select id={`${id}-model`} className={cn(FIELD, "w-full max-w-full min-w-0 truncate")} value={model} onChange={(e) => setModel(e.target.value)} disabled={saved === null}>
             {models.map((m) => (
               <option key={m.model_id} value={m.model_id}>
                 {m.label} · {usd(m.input_per_million_usd)} in, {usd(m.output_per_million_usd)} out per million tokens

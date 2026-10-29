@@ -105,7 +105,7 @@ export function OwnerExit({ agentId, holding }: { agentId: string; holding: Agen
           {state.step === "idle" ? "Exit" : "Exit again"}
         </Button>
       ) : null}
-      <p role="status" className="text-sm">
+      <p role="status" aria-label={`Your exit from ${instrument}`} className="text-sm">
         {exitWords(state)}
       </p>
     </div>

@@ -90,6 +90,19 @@ describe("a new agent", () => {
     await say("trade SPY with $1,000, carefully");
     await waitFor(() => expect(screen.getByText(FIXTURE_ANSWER)).toBeInTheDocument());
   });
+
+  it("opens a version made outside the chat as its confirm card, and ignores a query that is not a version", async () => {
+    const version = `sha256:${"ab".repeat(32)}`;
+    setPathname("/new", `version=${version}`);
+    const { unmount } = renderWithRuntime(<SetupScreen />);
+    const card = await screen.findByRole("region", { name: "Your new agent" });
+    expect(card).toHaveTextContent("On paper, with simulated money.");
+    unmount();
+    setPathname("/new", "version=../agents");
+    renderWithRuntime(<SetupScreen />);
+    await screen.findByText(/Tell me what you want this agent to do/);
+    expect(screen.queryByRole("region", { name: "Your new agent" })).toBeNull();
+  });
 });
 
 describe("each agent's chat settings", () => {

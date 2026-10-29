@@ -339,7 +339,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const id = decodeURIComponent(thread[2]);
       if (thread[1] === "agents" && !agentOf(id)) return problem(404, "not_found", "none");
       const answer = await chat.thread(thread[1] === "agents" ? { agent: id } : { setup: id }, Number(query.get("after") ?? "0"));
-      return answer.ok ? read({ agent_id: thread[1] === "agents" ? id : null, setup_id: thread[1] === "setup" ? id : null, ...answer.value }) : problem(503, answer.reason, "none");
+      if (!answer.ok) return problem(503, answer.reason, "none");
+      /** An approval card names the approval as the API does, as `servedId` names it in the approvals reads. */
+      const messages = answer.value.messages.map((m) => (m.card?.kind === "approval" ? { ...m, card: { ...m.card, approval_id: m.card.approval_id.replace(/^apr_/, "") } } : m));
+      return read({ agent_id: thread[1] === "agents" ? id : null, setup_id: thread[1] === "setup" ? id : null, ...answer.value, messages });
     }
     if ([...query.keys()].length > 0) return null;
     if (route === "/home") {

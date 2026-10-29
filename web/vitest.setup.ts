@@ -8,7 +8,7 @@ vi.mock("next/navigation", async () => {
   return {
     usePathname: () => navigation.pathname,
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() }),
-    useSearchParams: () => new URLSearchParams(),
+    useSearchParams: () => new URLSearchParams(navigation.search),
     notFound: () => {
       throw new Error("NEXT_NOT_FOUND");
     },
