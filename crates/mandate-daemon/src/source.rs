@@ -9,7 +9,9 @@ use std::rc::Rc;
 
 use mandate_canon::{Digest, Value, parse};
 use mandate_gateway::meter::SharedMeter;
-use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
+use mandate_journal::{
+    ArtifactError, ArtifactRef, ArtifactSource, Environment, StoredEvent, StreamId,
+};
 use mandate_num::Usd;
 use mandate_research::{
     AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
@@ -18,7 +20,8 @@ use mandate_research::{
 };
 use mandate_research_run::{InstrumentFact, ItemKind, RetrievedItem, Symbol};
 use mandate_runtime::{
-    ActiveThesis, EventTriggers, JournalCatalog, Preconditions, RiskClock, RuntimeState,
+    ActiveThesis, EventTriggers, JournalCatalog, Preconditions, RetrievedObservation, RiskClock,
+    RuntimeState, StoredRefusal,
 };
 use mandate_spec::Mandate;
 use mandate_spec::document::EventTrigger;
@@ -29,7 +32,7 @@ use mandate_time::UtcNanos;
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, FeedItem};
-use crate::runtime::{ContextUnread, ResearchParts, ResearchSource, StoredNews};
+use crate::runtime::{ContextUnread, RefusedNews, ResearchParts, ResearchSource, StoredNews};
 
 /// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
 /// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
@@ -345,6 +348,54 @@ impl CellSource {
     }
 }
 
+impl CellSource {
+    /// The workspace's news stream as a pass at `clock` offers it (journal spec §9.37, DEC-2288):
+    /// each `NewsItemStored` whose item is known by `clock`, offered from its row and the record
+    /// its `item_ref` names in the artifact store, and each it cannot offer refused by its row's
+    /// event id, whenever it is known. A stream the store cannot answer gives the pass no context.
+    fn stored_news(&self, clock: RiskClock) -> Result<StoredNews, ContextUnread> {
+        let stream = StreamId::parse(&format!("news:{}", self.who.workspace))
+            .ok_or(ContextUnread::StreamName)?;
+        let rows = self.rows.rows(&stream).ok_or(ContextUnread::News)?;
+        let mut stored = StoredNews::default();
+        for row in rows.iter().filter(|row| row.event_type == "NewsItemStored") {
+            match self.offer_of(row) {
+                Ok(offer) if offer.item.knowledge_at.secs() <= clock.secs() => {
+                    stored.offers.push(offer);
+                }
+                Ok(_) => {}
+                Err(refusal) => stored.refused.push(RefusedNews {
+                    event_id: row.event_id.clone(),
+                    refusal,
+                }),
+            }
+        }
+        Ok(stored)
+    }
+
+    /// The offer of one stored item: unreadable when its row names no record or the store gives
+    /// none, a mismatch when the store holds bytes that do not hash to the reference.
+    fn offer_of(&self, row: &StoredEvent) -> Result<RetrievedObservation, StoredRefusal> {
+        let reference = parse(&row.body)
+            .ok()
+            .and_then(|body| {
+                body.get("payload")?
+                    .get("item_ref")?
+                    .as_str()
+                    .and_then(ArtifactRef::parse)
+            })
+            .ok_or(StoredRefusal::Unreadable)?;
+        let record = self
+            .documents
+            .read_artifact(&reference)
+            .map_err(|error| match error {
+                ArtifactError::Corrupt => StoredRefusal::Mismatch,
+                ArtifactError::Missing | ArtifactError::Unavailable => StoredRefusal::Unreadable,
+            })?;
+        RetrievedObservation::stored(&row.body, &record)
+    }
+}
+
 impl ResearchSource for CellSource {
     fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
         let named = |text: String| StreamId::parse(&text).ok_or(ContextUnread::StreamName);
@@ -411,6 +462,14 @@ impl ResearchSource for CellSource {
         } else {
             Vec::new()
         };
+        let reads_news = event_triggers
+            .as_ref()
+            .is_some_and(|triggers| triggers.kinds.contains(&ItemKind::News));
+        let stored = if reads_news {
+            self.stored_news(clock)?
+        } else {
+            StoredNews::default()
+        };
         Ok(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope),
@@ -443,7 +502,7 @@ impl ResearchSource for CellSource {
                 .collect::<BTreeSet<Symbol>>(),
             events,
             event_triggers,
-            stored: StoredNews::default(),
+            stored,
         })
     }
 }

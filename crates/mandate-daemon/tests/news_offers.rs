@@ -73,7 +73,11 @@ fn an_item_in_both_the_feed_and_the_stream_is_offered_once_in_arrival_order() {
     let stored = RetrievedObservation::stored(STORED_ROW, STORED_RECORD).unwrap();
     let stored_at = stored.item.knowledge_at.secs();
     let middle = captured(3, stored_at);
-    let expected = vec![early.clone(), late.clone(), middle.clone(), stored.clone()];
+    let expected = vec![early.clone(), late.clone(), stored.clone(), middle.clone()];
+    assert!(
+        stored.item.item_id.as_str() < middle.item.item_id.as_str(),
+        "known together, they go by item id"
+    );
     assert!(
         expected
             .windows(2)
