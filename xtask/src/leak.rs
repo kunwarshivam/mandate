@@ -3058,6 +3058,40 @@ mod tests {
 
     /// L5: an unreviewed path, a path naming a key or state, and hidden files are refused; a
     /// reviewed path passes, inline or in a block.
+    /// The cell's passkey hand-off (DEC-2411) can never be uploaded: the file is refused by its
+    /// words and as unlisted, each directory above it is refused as unlisted, and no reviewed
+    /// artifact path holds it.
+    #[test]
+    fn the_cells_passkey_hand_off_is_never_an_artifact() {
+        let handoff = crate::cell::web::PASSKEY_HANDOFF;
+        let path = ".github/workflows/ci.yml";
+        let upload = |entry: &str| {
+            workflow(
+                "",
+                &format!(
+                    "      - uses: actions/upload-artifact@0123456789012345678901234567890123456789\n\
+                     \x20       with:\n          name: x\n          path: {entry}"
+                ),
+            )
+        };
+        assert_eq!(rules(path, &upload(handoff)), ["L5", "L5"]);
+        let mut above = handoff;
+        while let Some((parent, _)) = above.rsplit_once('/') {
+            assert!(
+                rules(path, &upload(&format!("{parent}/"))).contains(&"L5"),
+                "{parent}/ is refused"
+            );
+            above = parent;
+        }
+        assert!(
+            ARTIFACT_PATHS
+                .iter()
+                .all(|(_, reviewed)| *reviewed != handoff
+                    && !(reviewed.ends_with('/') && handoff.starts_with(reviewed))),
+            "a reviewed artifact path holds the passkey hand-off"
+        );
+    }
+
     #[test]
     fn an_artifact_uploads_only_a_reviewed_path() {
         let upload = |with: &str| {

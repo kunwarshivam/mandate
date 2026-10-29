@@ -1469,8 +1469,10 @@ fn restarted_containers(listing: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// `cargo xtask cell down`: delete the cluster and everything in it.
+/// `cargo xtask cell down`: delete the cluster and everything in it, and the virtual passkey the
+/// set-up handed on ([`web::forget_passkey`], DEC-2411), with or without a cluster.
 pub fn down() -> Result<()> {
+    web::forget_passkey(&crate::repo_root()?)?;
     if cluster_exists()? {
         sh("k3d", &["cluster", "delete", CLUSTER])?;
     }

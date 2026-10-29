@@ -661,6 +661,26 @@ const REPORT_TIMEOUT_MS: &str = "270000";
 /// The report visit's steps, in the order the spec reaches them; its result names each one.
 pub const REPORT_STEPS: [&str; 2] = ["report_link", "report_shown"];
 
+/// Where the deploying set-up hands its virtual passkey on to the trade loop's resume
+/// (`OWLHEAD_CELL_PASSKEY_FILE`, DEC-2411): a virtual authenticator's test key, never a member's,
+/// written only in a dev or ci cell that waives a first passkey's cool-off (DEC-2146), deleted at
+/// teardown, and refused as an artifact path by the leak guard's L5, which a test pins.
+pub const PASSKEY_HANDOFF: &str = "target/cell/passkey/credential.json";
+
+/// Deletes the passkey hand-off under `root` ([`PASSKEY_HANDOFF`]), as `cell down` does at
+/// teardown; a hand-off that was never written is already gone.
+///
+/// # Errors
+/// A hand-off that exists and cannot be deleted.
+pub fn forget_passkey(root: &Path) -> Result<()> {
+    match fs::remove_file(root.join(PASSKEY_HANDOFF)) {
+        Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => {
+            other.with_context(|| format!("deleting the cell's passkey hand-off {PASSKEY_HANDOFF}"))
+        }
+    }
+}
+
 /// The owner's visit of the backtest `backtest`'s report from `web/` (`backtest-report.spec.ts`) in
 /// `workspace`: the owner, signed in, opens its link, `/backtests/{id}`, since the API lists no
 /// backtests, and sees the report the runner stored, read through the API. Needs no market session.
@@ -902,6 +922,20 @@ mod tests {
                 "the spec writes {step}"
             );
         }
+        Ok(())
+    }
+
+    /// Teardown deletes a written passkey hand-off, and a missing one is no error.
+    #[test]
+    fn teardown_forgets_the_passkey_hand_off() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("xtask-handoff-{}", std::process::id()));
+        let file = root.join(PASSKEY_HANDOFF);
+        fs::create_dir_all(file.parent().context("a parent")?)?;
+        fs::write(&file, "{}")?;
+        forget_passkey(&root)?;
+        assert!(!file.exists(), "the hand-off is deleted");
+        forget_passkey(&root)?;
+        fs::remove_dir_all(&root)?;
         Ok(())
     }
 

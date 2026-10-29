@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type Locator, type Page, type Response, expect, test } from "@playwright/test";
 import { deferredCheckLabel } from "../src/lib/deferred-checks";
 import { signedUsd, usd } from "../src/lib/format";
+import { virtualPasskey } from "./virtual-passkey";
 
 /**
  * The trade loop from web/, end to end in the local cell (the founder's 2026-10-27 deadline): a
@@ -12,8 +13,10 @@ import { signedUsd, usd } from "../src/lib/format";
  * records from the served reads (DEC-2377), the positions screen shows the agent's own position with
  * the market value and unrealized P&L the API served at its risk mark (DEC-2138), the
  * audit timeline shows the agent's and its account's records, the owner pauses the agent from its
- * page (`POST /agents/{id}/pause`, no step-up) and it reads paused, the browser's kill switch is
- * recorded for the paused agent, which a pause leaves available (trading spec §7.4), and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
+ * page (`POST /agents/{id}/pause`, no step-up) and it reads paused, then, given the set-up's passkey
+ * (`OWLHEAD_CELL_PASSKEY_FILE`), resumes it from the Stop sheet with the passkey step-up DEC-2140
+ * asks for (`POST /agents/{id}/resume`) and it reads normal, the browser's kill switch is
+ * recorded for the agent, paused or resumed, which a pause leaves available (trading spec §7.4), and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -33,6 +36,12 @@ const CONFIRM_DONE = process.env.OWLHEAD_CELL_CONFIRM_DONE ?? "";
 const PROPOSAL_MS = Number(process.env.OWLHEAD_CELL_PROPOSAL_MS ?? 120_000);
 const CONFIRM_MS = Number(process.env.OWLHEAD_CELL_CONFIRM_MS ?? 60_000);
 const FILL_MS = Number(process.env.OWLHEAD_CELL_FILL_MS ?? 120_000);
+/**
+ * The passkey the deploying set-up handed on (`setup.spec.ts`, DEC-2411), which the driver names
+ * only in a cell that waives a first passkey's cool-off (DEC-2146): with it the owner resumes the
+ * paused agent, stepping up as DEC-2140 asks. Unset, there is no passkey here and no resume.
+ */
+const PASSKEY_FILE = process.env.OWLHEAD_CELL_PASSKEY_FILE ?? "";
 
 /**
  * The sentence the approver is shown above the checks the dry run deferred, read from the journal
@@ -280,6 +289,25 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     if (!(await until(page, `/agents/${AGENT}`, 30_000, async () => (await paused.count()) > 0))) refuse("the pause was recorded but the agent's page did not read it paused within 30 s");
     step("paused", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
+
+  if (PASSKEY_FILE) {
+    await test.step("the owner resumes the paused agent from the Stop sheet with the passkey, and it reads normal", async () => {
+      const authenticator = await virtualPasskey(page);
+      if ((await authenticator.importFrom(PASSKEY_FILE)) < 1) refuse("the set-up handed on no passkey to resume with");
+      await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
+      await page.getByRole("button", { name: "Stop", exact: true }).first().click();
+      const sheet = page.getByRole("dialog", { name: /^Stop/ });
+      await expect(sheet).toBeVisible({ timeout: 15_000 });
+      const sent = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/resume`, { timeout: 60_000 });
+      await sheet.getByRole("button", { name: /^Resume / }).click({ timeout: 30_000 });
+      const answer = await sent.catch(() => null);
+      if (!answer) return refuse(`the browser sent no resume within 60 s; the page said: ${((await page.getByRole("status").first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "nothing").trim()}`);
+      if (!answer.ok()) refuse(`the API answered ${answer.status()} for the resume: ${(await answer.text()).slice(0, 400)}`);
+      const normal = page.locator('article header [data-slot="mode-badge"][data-mode="normal"]');
+      if (!(await until(page, `/agents/${AGENT}`, 30_000, async () => (await normal.count()) > 0))) refuse("the resume was recorded but the agent's page did not read it normal within 30 s");
+      step("resumed", ((await answer.json()) as { command_id?: string }).command_id ?? "");
+    });
+  }
 
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {
     await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });

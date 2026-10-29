@@ -43,6 +43,13 @@ const PAGE_MS = 90_000;
  * that answer. Unset, the confirm is held as the cool-off holds it.
  */
 const DEPLOY = process.env.OWLHEAD_CELL_SETUP_DEPLOY === "1";
+/**
+ * Where the deploying set-up hands its virtual passkey on, so a later run of this cell (the trade
+ * loop's resume) can step up with it: a file the driver names under `target/cell` in a dev or ci
+ * cell only, deletes at teardown, and the leak guard refuses as an artifact (DEC-2411). Unset, the
+ * key stays in this run's browser.
+ */
+const PASSKEY_FILE = process.env.OWLHEAD_CELL_PASSKEY_FILE ?? "";
 /** An agent id as the API mints it, the form the driver accepts. */
 const AGENT_ID = /^agt_[A-Za-z0-9]{26}$/;
 /** The demo's figures: inside the paper account's room, and a loss inside the workspace's ceiling. */
@@ -177,6 +184,7 @@ test("the owner's set-up from web/: a passkey added in Settings, version 1 creat
       await expect(shown).toBeVisible({ timeout: 30_000 });
       const agent = ((await shown.textContent()) ?? "").trim();
       if (!AGENT_ID.test(agent)) refuse(`the deployment showed agent "${agent}", not an id of the form agt_ and 26 letters or digits`);
+      if (PASSKEY_FILE && (await authenticator.exportTo(PASSKEY_FILE)) < 1) refuse("the deployment was recorded but the browser's authenticator held no passkey to hand on");
       step("agent_deployed", agent);
     });
   } else {
