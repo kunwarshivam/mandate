@@ -109,7 +109,8 @@ pub struct NewsReader<S, A, T> {
 impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
     /// Starts at `now` with the key read once, `key`. A refused key, a refused follow, or a source
     /// not in effect leaves the reader started and not ready, holding no epoch; a store that cannot
-    /// answer exits it `Refused`. Otherwise it takes a newer epoch and folds its stream.
+    /// answer exits it `Refused`. Otherwise it folds its stream, and only a stream it can read has it take a newer epoch and
+    /// fold the stream again.
     pub fn start(
         store: S,
         artifacts: A,
@@ -177,6 +178,14 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             this.lifecycle.observe(now, Input::Failed);
             return this;
         };
+        let Some(rows) = this.store.rows(&stream) else {
+            this.lifecycle.observe(now, Input::Failed);
+            return this;
+        };
+        if fold(&rows).is_none() {
+            this.not_ready = Some("news_stream_unreadable");
+            return this;
+        }
         let Some(epoch) = this.store.take_ownership(&stream) else {
             this.lifecycle.observe(now, Input::Failed);
             return this;
@@ -187,10 +196,13 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             this.lifecycle.observe(now, Input::Failed);
             return this;
         };
-        if this.replay(&rows).is_none() {
+        let Some(folded) = fold(&rows) else {
             this.not_ready = Some("news_stream_unreadable");
             return this;
-        }
+        };
+        this.head = folded.head;
+        this.held = folded.held;
+        this.last_known = folded.last_known;
         this.lifecycle.observe(
             now,
             Input::Replayed {
@@ -360,26 +372,40 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
         }
         Some(assets)
     }
+}
 
-    /// The item ids the stream holds and its last `knowledge_at`, and its head; `None` when a
-    /// `NewsItemStored` row's body, `item_id` or `knowledge_at` cannot be read, since the held ids
-    /// or the last known time would then be short (DEC-2281 item 3).
-    fn replay(&mut self, rows: &[StoredEvent]) -> Option<()> {
-        for row in rows {
-            self.head = row.seq;
-            if row.event_type != "NewsItemStored" {
-                continue;
-            }
-            let body = parse(&row.body).ok()?;
-            let payload = body.get("payload")?;
-            let member = |name: &str| payload.get(name).and_then(Value::as_str);
-            let item_id = member("item_id")?;
-            let known = UtcNanos::parse(member("knowledge_at")?).ok()?;
-            self.held.insert(item_id.to_owned());
-            self.last_known = self.last_known.max(Some(known));
+/// What a news stream's rows fold to: its head, the item ids it holds, and its last
+/// `knowledge_at`.
+struct Folded {
+    head: u64,
+    held: BTreeSet<String>,
+    last_known: Option<UtcNanos>,
+}
+
+/// `rows` folded; `None` when a `NewsItemStored` row's body, `item_id` or `knowledge_at` cannot be
+/// read, since the held ids or the last known time would then be short (DEC-2281 item 3). The
+/// reader folds its stream once before it takes the writer epoch, so that a stream it cannot read
+/// fences no earlier writer, and once after, from the rows the epoch now guards.
+fn fold(rows: &[StoredEvent]) -> Option<Folded> {
+    let mut folded = Folded {
+        head: 0,
+        held: BTreeSet::new(),
+        last_known: None,
+    };
+    for row in rows {
+        folded.head = row.seq;
+        if row.event_type != "NewsItemStored" {
+            continue;
         }
-        Some(())
+        let body = parse(&row.body).ok()?;
+        let payload = body.get("payload")?;
+        let member = |name: &str| payload.get(name).and_then(Value::as_str);
+        let item_id = member("item_id")?;
+        let known = UtcNanos::parse(member("knowledge_at")?).ok()?;
+        folded.held.insert(item_id.to_owned());
+        folded.last_known = folded.last_known.max(Some(known));
     }
+    Some(folded)
 }
 
 /// The exit a reader stopped with, if it has.
