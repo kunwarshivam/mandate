@@ -129,7 +129,6 @@ fn expected_break(stream: &Value) -> Option<u64> {
 /// `credential_record`: the actor as member, the credential, the challenge, the `cool_off_ends`
 /// and the record's `event_time`.
 #[test]
-#[ignore = "pending E9-4"]
 fn each_waiver_maps_its_member_credential_challenge_end_and_time() {
     let section = section();
     let base = section
@@ -156,7 +155,6 @@ fn each_waiver_maps_its_member_credential_challenge_end_and_time() {
 /// ULID or credential id is refused at that member, and one at another schema version at
 /// `schema_version`, so the fold reads it as unreadable rather than as no waiver.
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unreadable_waiver_is_refused_at_its_member() {
     let section = section();
     let mut checked = 0;
@@ -183,7 +181,6 @@ fn an_unreadable_waiver_is_refused_at_its_member() {
 /// The fold finds each rule-318 stream's first break at the `seq` the vectors name, and none in a
 /// valid stream.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_fold_finds_each_rule_318_break_where_the_vectors_name_it() {
     let section = section();
     let streams = list(&section, "streams");
@@ -205,7 +202,6 @@ fn the_fold_finds_each_rule_318_break_where_the_vectors_name_it() {
 /// rule 254 alone leaves, the stream without its waivers and with each assertion past every
 /// cool-off: a waiver changes no counter. Route 2's view reads no waiver.
 #[test]
-#[ignore = "pending E9-4"]
 fn step_up_fails_closed_from_the_first_rule_318_break_and_route_two_reads_no_waiver() {
     let section = section();
     for stream in list(&section, "streams") {
@@ -290,7 +286,6 @@ fn step_up_fails_closed_from_the_first_rule_318_break_and_route_two_reads_no_wai
 /// next `seq`. A waiver of the same challenge after any other row (here one at `seq` 3 that no
 /// credential record maps) does not settle it: the rule breaks at the assertion, for the member.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_after_another_row_does_not_settle_its_assertion() {
     let fold = CredentialFold::new([
         record(1, Step::Enrol(0, 0, true)),
@@ -453,7 +448,6 @@ fn oracle(steps: &[Step]) -> Option<u64> {
 /// Over random streams of enrolments, removals, assertions and waivers, the fold's first
 /// rule-318 break is the oracle's. The runner keeps no failure file (DEC-381).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_rule_318_break_is_the_oracles() {
     let config = ProptestConfig {
         cases: 512,
