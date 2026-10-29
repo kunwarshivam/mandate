@@ -86,7 +86,7 @@ use mandate_time::TimeError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BuilderError {
     /// A stub of a DEC-77 tests PR returns this, so every pending test fails on it (DEC-77, DEC-83,
-    /// DEC-110). E10-30's tests PR stubs `requested_buy` with it; it stays after because
+    /// DEC-110). Nothing returns it since E10-30's `requested_buy`; it stays because
     /// `tests/vocabulary.rs` pins every stable code, and removing it is a tests change of its own.
     #[error("the order builder is not implemented yet")]
     Unimplemented,
