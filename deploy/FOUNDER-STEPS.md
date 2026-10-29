@@ -575,3 +575,50 @@ that is missing.
 5). The gateway then answers every call `credential_invalid`, and the data process stops, so
 research goes on without fresh bars and no order depends on it.
 
+
+## P. Pointing app.owlhead.ai at staging ([DEC-975](../docs/project/decisions/DEC-975.md), [DEC-2108](../docs/project/decisions/DEC-2108.md))
+
+Until now the deployed web app has shown the fixtures. These steps make it read and command
+staging's workspace instead, so app.owlhead.ai shows only what staging reports. They spend nothing
+and place no order: staging trades Alpaca paper only.
+
+**Before you start.** Staging must sign you in. That means the link, the mount and the grant of
+[gitops/BOOTSTRAP.md](gitops/BOOTSTRAP.md) are done: an apply logged `founding: linked`,
+`clusters/staging/workspace.yaml` sets `subjectLinks: subject-links` under `api`, and
+`founding.enabled` is `true`. Until then staging refuses every sign-in, and the app, once pointed at it, reads
+nothing and takes no command.
+
+**Steps**
+1. **Check the Supabase project.** In GitHub, open **Settings → Environments → `production` →
+   Environment variables**. `NEXT_PUBLIC_SUPABASE_URL` must be
+   `https://wyyxngmblqqokcvraflx.supabase.co`, the project staging's API trusts. If it names
+   another project, staging refuses every session the app opens. Fix it and run **Actions →
+   web-deploy** again, since the value is built into the app.
+2. **Allow the app's address in Supabase.** In that project's dashboard, open **Authentication →
+   URL Configuration** and add the redirect URL `https://app.owlhead.ai/**`. Keep the `localhost`
+   entries. Without it, Google sign-in on app.owlhead.ai ends on an error page.
+3. **Set the three Worker variables.** In the Cloudflare dashboard, open **Workers & Pages →
+   `owlhead-web` → Settings → Variables and Secrets**. Add each one as a plain-text variable:
+
+   | Variable | Value |
+   |---|---|
+   | `OWLHEAD_DATA_SOURCE` | `api` |
+   | `OWLHEAD_API_ORIGIN` | `https://api-staging.owlhead.ai` |
+   | `OWLHEAD_WORKSPACE_ID` | `01KDEM0000000000000000000W` |
+
+   Click **Deploy**. None is a secret. The Worker reads them on every request, and `keep_vars` in
+   `web/wrangler.jsonc` keeps them across later deploys, so you set them once.
+4. **Sign in** at `https://app.owlhead.ai`. The dashboard should show staging's workspace, or say
+   that something is not reported. It should never show the example agents.
+5. **Add your passkey right away.** Open **Settings → Profile → Passkeys for confirming** and click
+   **Add a passkey** within five minutes of signing in; after that, sign in again first. This is
+   the passkey that confirms a mandate, a deployment or an approval. It is not the Supabase
+   sign-in passkey. A first passkey cannot confirm anything for 24 hours (DEC-2108 item 5), and
+   staging has no way round that: the waiver exists only in development and CI builds
+   ([DEC-2146](../docs/project/decisions/DEC-2146.md), [DEC-2411](../docs/project/decisions/DEC-2411.md)).
+   Every day you wait to add it is a day added to the first deploy.
+6. **After 24 hours, set up the demo agent** under **Agents → New**. Each step-up the app shows
+   comes with a code. Confirm it as section J says.
+
+**To undo:** delete `OWLHEAD_DATA_SOURCE` from the Worker's variables and deploy. The app then
+shows the fixtures again. Nothing in staging changes, and your passkey stays enrolled.
