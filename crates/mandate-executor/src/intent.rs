@@ -275,13 +275,14 @@ fn decide(
             story: "E7-4",
         });
     };
+    let room = flatten_room(&batch.view, intent, *qty)?;
     let decision = binding_checks(
         &batch.view,
         &Proposal {
             agent: &agent,
             instrument,
             side: *side,
-            qty: flatten_room(&batch.view, intent, *qty)?,
+            qty: room,
             purpose: *purpose,
             protection: if fractional(batch, instrument, *qty)? {
                 None
@@ -292,7 +293,7 @@ fn decide(
             market: limit.is_none(),
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
-            certain: crate::kill::is_certain(&batch.view, intent),
+            certain: crate::kill::is_certain(&batch.view, intent) && room > Qty::ZERO,
             owner_confirmed_bid: confirmed_bid(&batch.view, intent, batch.at()),
         },
         pass,
@@ -526,9 +527,6 @@ fn submit(
     }
     let room = flatten_room(&batch.view, intent, qty)?;
     if room == Qty::ZERO {
-        if crate::kill::capped_waits(&batch.view, intent)? {
-            return Ok(());
-        }
         if crate::kill::is_remainder(&batch.view, intent) {
             abandon_record(batch, intent, "flatten_covered")?;
             return Ok(());

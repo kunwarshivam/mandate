@@ -2283,8 +2283,7 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
             &exit.agent,
             &exit.instrument,
             exit.purpose,
-        ) && !crate::kill::capped_waits(&batch.view, &exit.intent)?
-        {
+        ) {
             crate::intent::holds_alone(gate_and_submit(batch, &exit.intent))?;
         }
     }

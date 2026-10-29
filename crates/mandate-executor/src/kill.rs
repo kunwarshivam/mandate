@@ -706,7 +706,8 @@ fn in_doubt_buys(
 /// `Unknown` order turns out to have done the agent's sub-ledger and the position stay at or above
 /// zero. The lower of the sub-ledger less every live non-protective sell the switch reaches, and
 /// the long position less every live non-protective sell in the instrument and every `Unknown`
-/// protective one; neither counts `own`'s orders.
+/// protective one; neither counts the order of `own` being sized, but an earlier one of it still
+/// `Unknown` is counted.
 fn flatten_cap(
     view: &ExecutorState,
     agent: &AgentId,
@@ -719,7 +720,9 @@ fn flatten_cap(
             && order.side == Side::Sell
             && !order.state.is_terminal()
             && order.state != OrderState::Intent
-            && own.is_none_or(|intent| order.intent_id.as_ref() != Some(intent))
+            && own.is_none_or(|intent| {
+                order.intent_id.as_ref() != Some(intent) || order.state == OrderState::Unknown
+            })
     });
     let mut reaching = Qty::ZERO;
     let mut anyone = Qty::ZERO;
@@ -774,22 +777,6 @@ pub(crate) fn is_remainder(view: &ExecutorState, intent: &IntentId) -> bool {
 /// items 1 and 3).
 pub(crate) fn is_certain(view: &ExecutorState, intent: &IntentId) -> bool {
     is_flatten(view, intent) && !intent.0.0.ends_with(REMAINDER)
-}
-
-/// DEC-2857 item 5: whether a switch's flatten capped to nothing waits, because other sells hold
-/// what the agent still has, rather than ending.
-pub(crate) fn capped_waits(view: &ExecutorState, intent: &IntentId) -> Result<bool, ExecutorError> {
-    let Some(switch) = switch_of(view, intent) else {
-        return Ok(false);
-    };
-    let Some(IntentBody::Order {
-        instrument, qty, ..
-    }) = view.bodies.get(intent)
-    else {
-        return Ok(false);
-    };
-    Ok(flatten_room(view, intent, *qty)? == Qty::ZERO
-        && sub_ledger(view, &switch.agent, instrument)? > Qty::ZERO)
 }
 
 /// Whether `switch`'s close `ordinal` is `agent`'s sell of `instrument`: what makes an intent

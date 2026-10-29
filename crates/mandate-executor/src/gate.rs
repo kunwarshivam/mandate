@@ -280,8 +280,8 @@ pub(crate) struct Proposal<'s> {
     pub(crate) tif: TimeInForce,
     /// Whether the order is a kill switch's own flatten (§5.5), which the agent's mode never holds.
     pub(crate) flatten: bool,
-    /// Whether the order is a kill switch flatten's certain part, which no `Unknown` order holds
-    /// (§5.3 rule 9, DEC-2857 item 3).
+    /// Whether the order is a kill switch flatten's certain part with anything left to sell, which
+    /// no `Unknown` order holds (§5.3 rule 9, DEC-2857 items 3 and 5).
     pub(crate) certain: bool,
     /// The bid the owner confirmed for an owner's exit, which lets it go outside the regular
     /// session (§5.5, DEC-2040 item 3); it overrides the snapshot's.
