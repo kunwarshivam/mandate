@@ -45,7 +45,6 @@ fn cuts(names: &[RequestCut]) -> BTreeSet<RequestCut> {
 /// Five at the 100 ask is 500, under every limit: the owner's five, at the ask, unscored, with
 /// the owner as the requester and no limit named.
 #[test]
-#[ignore = "pending E10-30"]
 fn an_owners_buy_within_every_limit_is_the_owners_quantity_at_the_ask() {
     let buy = owners("5");
     assert_eq!(buy.qty, qty("5"));
@@ -66,7 +65,6 @@ fn an_owners_buy_within_every_limit_is_the_owners_quantity_at_the_ask() {
 /// is 2500: over the order cap, the 1500 position room and the 2000 gross room, so ten shares and
 /// all three named.
 #[test]
-#[ignore = "pending E10-30"]
 fn each_limit_below_the_requested_notional_is_named_and_the_quantity_clipped() {
     let order_capped = owners("12");
     assert_eq!(order_capped.qty, qty("10"));
@@ -86,7 +84,6 @@ fn each_limit_below_the_requested_notional_is_named_and_the_quantity_clipped() {
 /// Holding 12 marked at 100 leaves 1500 − 1200 = 300 of position room: five (500) is cut to three
 /// by the position cap alone, as an increase.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_held_position_leaves_only_its_room_under_the_position_cap() {
     let buy = owners_on(&account("12", "100"), "5");
     assert_eq!(buy.qty, qty("3"));
@@ -98,7 +95,6 @@ fn a_held_position_leaves_only_its_room_under_the_position_cap() {
 /// requested quantity goes on unclipped and no limit is named, for the gate's own reason to name
 /// the cap that refuses it (DEC-2858 item 7).
 #[test]
-#[ignore = "pending E10-30"]
 fn a_clip_that_leaves_nothing_hands_the_gate_the_requested_quantity() {
     for held in ["15", "20"] {
         let buy = owners_on(&account(held, "100"), "2");
@@ -110,7 +106,6 @@ fn a_clip_that_leaves_nothing_hands_the_gate_the_requested_quantity() {
 
 /// A client's request carries the client as its requester; the ceiling is §6.2 step 5a's.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_clients_buy_names_the_client() {
     let buy = requested_buy(
         &two_stock_swing(),
@@ -130,7 +125,6 @@ fn a_clients_buy_names_the_client() {
 /// under an `accumulate` goal, whose bounds no journal clip of a request names (`AGENTS.md` rule
 /// 3).
 #[test]
-#[ignore = "pending E10-30"]
 fn nothing_is_proposed_for_no_quantity_the_agent_or_an_accumulate_goal() {
     let none = |mandate, market, by, quantity| {
         requested_buy(
@@ -164,7 +158,6 @@ fn nothing_is_proposed_for_no_quantity_the_agent_or_an_accumulate_goal() {
 
 /// A requested buy is refused where any buy is: a crossed quote and the overnight session.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_crossed_quote_and_the_overnight_session_refuse_a_requested_buy() {
     let code = |market| {
         requested_buy(
@@ -191,7 +184,6 @@ fn a_crossed_quote_and_the_overnight_session_refuse_a_requested_buy() {
 /// cannot be evaluated without a score: deny, by that rule (DEC-2858 item 8). An unscored 1000
 /// matches `large_orders` first, which asks as for any proposal.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_rule_reading_the_score_denies_a_request_by_its_own_id() {
     let small = owners("5").action;
     let denied = classify(&base_policy(), &small).unwrap_or_else(|e| panic!("{e}"));
@@ -208,7 +200,6 @@ fn a_rule_reading_the_score_denies_a_request_by_its_own_id() {
 /// the rule cannot be evaluated for a request and denies it; a client's request is denied the
 /// same way, the ceiling only tightening.
 #[test]
-#[ignore = "pending E10-30"]
 fn a_score_anywhere_in_a_rule_denies_a_request() {
     let score = compare(ConditionField::CombinedScore, Operator::Gt, decimal("0.5"));
     let order = compare(ConditionField::OrderUsd, Operator::Gt, decimal("100000"));
@@ -380,7 +371,6 @@ fn one_case(case: &Case) -> Result<(), TestCaseError> {
 /// was clipped to, every limit below the requested notional named, and the requested quantity
 /// whole whenever no limit cut it or a clip would leave nothing.
 #[test]
-#[ignore = "pending E10-30"]
 fn every_requested_buy_is_clipped_exactly_as_the_oracle_says() -> Result<(), String> {
     TestRunner::new(ProptestConfig::with_cases(512))
         .run(&cases(), |case| one_case(&case))

@@ -836,6 +836,26 @@ pub fn buy_action(
     combined_score: Unit,
     quantity: Qty,
 ) -> Result<ActionContext, BuilderError> {
+    buy_facts(
+        account,
+        market,
+        risk,
+        Some(combined_score),
+        RequestedBy::Agent,
+        quantity,
+    )
+}
+
+/// [`buy_action`]'s facts for any requester: the builder's own buy with its score, or an owner's
+/// or a client's request with none.
+fn buy_facts(
+    account: &AccountSnapshot,
+    market: &Market,
+    risk: &RiskContext,
+    combined_score: Option<Unit>,
+    requested_by: RequestedBy,
+    quantity: Qty,
+) -> Result<ActionContext, BuilderError> {
     if market.bid > market.ask {
         return Err(BuilderError::CrossedQuote);
     }
@@ -855,7 +875,7 @@ pub fn buy_action(
     Ok(ActionContext {
         purpose,
         order_usd,
-        combined_score: Some(combined_score),
+        combined_score,
         instrument: market.instrument.clone(),
         asset_class: market.asset_class,
         session: market.session,
@@ -868,7 +888,7 @@ pub fn buy_action(
         gross_usd_after: account.gross_usd.checked_add(order_usd)?,
         bought_today_usd: risk.bought_today_usd.checked_add(order_usd)?,
         position_pnl_fraction: risk.position_pnl_fraction,
-        requested_by: RequestedBy::Agent,
+        requested_by,
         risk_day: risk.risk_day,
     })
 }
@@ -906,14 +926,64 @@ pub struct RequestedBuy {
 /// # Errors
 /// [`BuilderError::CrossedQuote`], [`BuilderError::UntradableSession`], or an arithmetic error.
 pub fn requested_buy(
-    _mandate: &BuilderMandate,
-    _account: &AccountSnapshot,
-    _market: &Market,
-    _risk: &RiskContext,
-    _requested_by: RequestedBy,
-    _quantity: Qty,
+    mandate: &BuilderMandate,
+    account: &AccountSnapshot,
+    market: &Market,
+    risk: &RiskContext,
+    requested_by: RequestedBy,
+    quantity: Qty,
 ) -> Result<Option<RequestedBuy>, BuilderError> {
-    Err(BuilderError::Unimplemented)
+    if quantity.is_zero()
+        || requested_by == RequestedBy::Agent
+        || matches!(mandate.goal, GoalKind::Accumulate(_))
+    {
+        return Ok(None);
+    }
+    let limits = &mandate.limits;
+    let equity = UsdExact::of(account.agent_equity);
+    let cap = UsdExact::of(limits.max_position_usd)
+        .min(equity.times_size_fraction(limits.max_position_fraction)?)?;
+    let current_mv =
+        UsdExact::of_qty(account.position_qty).checked_mul(UsdExact::of_mark(account.risk_mark))?;
+    let rooms = [
+        (UsdExact::of(limits.max_order_usd), RequestCut::MaxOrderUsd),
+        (
+            cap.checked_sub(current_mv)?
+                .checked_sub(UsdExact::of(account.working_opening_cost))?,
+            RequestCut::PositionCap,
+        ),
+        (
+            UsdExact::of(limits.max_gross_exposure_usd)
+                .min(equity)?
+                .checked_sub(UsdExact::of(account.gross_usd))?,
+            RequestCut::GrossExposureCap,
+        ),
+    ];
+    let requested = value_at(quantity, market.ask)?;
+    let mut budget = requested;
+    let mut cut_by = BTreeSet::new();
+    for (room, cut) in rooms {
+        if room.is_below(requested)? {
+            cut_by.insert(cut);
+            budget = budget.min(room)?;
+        }
+    }
+    let clipped = budget.shares_at(market.ask, market.increment)?;
+    let leaves_nothing = clipped.is_zero()
+        || value_at(clipped, market.ask)?.is_below(UsdExact::of(market.min_order_usd))?;
+    let (qty, cut_by) = if leaves_nothing {
+        (quantity, BTreeSet::new())
+    } else {
+        (clipped, cut_by)
+    };
+    let action = buy_facts(account, market, risk, None, requested_by, qty)?;
+    Ok(Some(RequestedBuy {
+        qty,
+        limit_price: market.ask,
+        order_usd: action.order_usd,
+        action,
+        cut_by,
+    }))
 }
 
 fn value_at(quantity: Qty, price: Price) -> Result<UsdExact, BuilderError> {

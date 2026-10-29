@@ -245,6 +245,10 @@ pub enum Outcome {
 /// date and the action's risk day is after it, comes after the client ceiling, and only tightens
 /// (MI-32, DEC-188, DEC-271).
 ///
+/// An owner's or a client's request carries no combined score: a rule the walk reaches that reads
+/// it cannot be evaluated, so it decides `deny` under its own id, whatever its `then`, and a rule
+/// before it that matches decides as for any action (DEC-2858 item 8).
+///
 /// The whole rule set is re-checked before any rule is read, not only the rules the walk reaches: a
 /// malformed rule behind a matching one still refuses the action, because a rule set the order path
 /// cannot trust is not one it may half-apply, and refusing an opening action adds no risk
@@ -258,8 +262,14 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
         });
     }
     check_rules(&policy.rules)?;
-    let matched = first_match(&policy.rules, |condition| Ok(condition.matches(action)?))?;
+    let unscored = action.combined_score.is_none();
+    let matched = first_match(&policy.rules, |condition| {
+        Ok((unscored && reads_the_score(condition)) || condition.matches(action)?)
+    })?;
     let (ruled, ruled_by) = match matched {
+        Some(rule) if unscored && reads_the_score(&rule.when) => {
+            (AutonomyDecision::Deny, DecidedBy::Rule(rule.id.clone()))
+        }
         Some(rule) => (rule.then, DecidedBy::Rule(rule.id.clone())),
         None => (policy.default, DecidedBy::Default),
     };
@@ -287,6 +297,22 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
         decision,
         by,
         approval,
+    })
+}
+
+/// Whether `condition` reads `combined_score` anywhere in its tree. For an owner's or a client's
+/// request, which has no score, such a rule cannot be evaluated, so the walk stops at it and the
+/// request is denied by that rule (DEC-2858 item 8): a rule that cannot be evaluated never reads
+/// as "does not match", and a denial adds no risk (`AGENTS.md` rule 3).
+fn reads_the_score(condition: &Condition) -> bool {
+    condition.comparisons().iter().any(|(comparison, _)| {
+        matches!(
+            comparison,
+            Condition::Compare {
+                field: ConditionField::CombinedScore,
+                ..
+            }
+        )
     })
 }
 
