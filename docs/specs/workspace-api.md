@@ -328,8 +328,12 @@ the code:
 6. the credential belongs to this principal and its enrolment cool-off has ended, the signature
    verifies, user verification shows in the flags, and the counter has not gone backwards: else
    `step_up_missing`. In a `dev` or `ci` cell started with `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`
-   `true` (refused at start in any other tier and for any other value), a cool-off that has not
+   `true` (refused at start in `production` and for any other value), a cool-off that has not
    ended does not refuse on a route that appends the step-up's `StepUpAsserted` (DEC-2146 item 3).
+   A `staging` cell may start with it too, but only with `MANDATE_API_STEP_UP_COOL_OFF_WAIVER_UNTIL`
+   no later than the built-in ceiling 2026-11-05T00:00Z. There the waiver counts only while the
+   verifier's own judging instant is before that expiry; at or after it the cool-off refuses
+   `step_up_missing` again ([DEC-2150](../project/decisions/DEC-2150.md)).
    The reply is the route's own, unchanged; only the journal shows the waiver. The server then appends `StepUpCoolOffWaived` immediately after the
    `StepUpAsserted` (journal spec §9.38, [DEC-2146](../project/decisions/DEC-2146.md)). Nothing a
    request carries turns this on;

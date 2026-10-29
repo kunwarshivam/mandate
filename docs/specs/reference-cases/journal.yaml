@@ -82257,18 +82257,8 @@ cool_off_waivers:
       outcome: Invalid
       reason: non_canonical
       path: payload.cool_off_ends
-  - name: tier.staging
-    clause: '§9.38 `tier`: `dev` or `ci` only'
-    base_draft: cool_off_waived
-    changes:
-    - path: payload.tier
-      value: staging
-    expect:
-      outcome: Invalid
-      reason: non_canonical
-      path: payload.tier
   - name: tier.production
-    clause: '§9.38 `tier`: `dev` or `ci` only'
+    clause: '§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)'
     base_draft: cool_off_waived
     changes:
     - path: payload.tier
@@ -82278,11 +82268,21 @@ cool_off_waivers:
       reason: non_canonical
       path: payload.tier
   - name: tier.capitalised
-    clause: '§9.38 `tier`: `dev` or `ci` only'
+    clause: '§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)'
     base_draft: cool_off_waived
     changes:
     - path: payload.tier
       value: CI
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.tier
+  - name: tier.staging_capitalised
+    clause: '§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: Staging
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -82404,6 +82404,14 @@ cool_off_waivers:
     changes:
     - path: payload.tier
       value: dev
+    expect:
+      outcome: Valid
+  - name: in_a_staging_cell
+    clause: '§9.38 `tier`: `staging`, before its expiry (DEC-2150)'
+    base_draft: cool_off_waived
+    changes:
+    - path: payload.tier
+      value: staging
     expect:
       outcome: Valid
   - name: another_credential
