@@ -255,6 +255,7 @@ fn world_with(setup: &Setup<'_>) -> World {
         connect: None,
         reduction: Arc::default(),
         folds: Arc::default(),
+        bars: None,
     };
     let w = World {
         addr: serve(http::api(app, Drain::new())),

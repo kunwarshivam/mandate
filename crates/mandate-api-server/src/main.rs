@@ -45,9 +45,10 @@ use mandate_api_server::challenges::Challenges;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
-    COOL_OFF_WAIVER, COOL_OFF_WAIVER_UNTIL, INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store,
-    check_bind, check_database_url, check_environment, check_internal_paper, check_key_set_tier,
-    cool_off_waiver, internal_paper_workspace, read_session_key,
+    BARS, COOL_OFF_WAIVER, COOL_OFF_WAIVER_UNTIL, INTERNAL_PAPER_WORKSPACE, StartRefusal,
+    artifact_store, bars_root, check_bind, check_database_url, check_environment,
+    check_internal_paper, check_key_set_tier, cool_off_waiver, internal_paper_workspace,
+    read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
@@ -166,6 +167,8 @@ struct Start {
     /// The waiver of a first passkey's cool-off and its expiry, when set (DEC-2146 item 2,
     /// DEC-2150 item 2).
     cool_off_waiver: Option<(CoolOffWaiver, Option<UtcNanos>)>,
+    /// The stored bars root the price read reads (`MANDATE_BARS`, DEC-2152).
+    bars: Option<std::path::PathBuf>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -242,6 +245,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         ingress,
         connect,
         cool_off_waiver: waiver,
+        bars: bars_root(env::var_os(BARS).as_deref()),
     };
     Ok((args, start))
 }
@@ -356,6 +360,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         ),
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
         folds: Arc::default(),
+        bars: start.bars,
     };
     let api = spawn_listener(
         serve(

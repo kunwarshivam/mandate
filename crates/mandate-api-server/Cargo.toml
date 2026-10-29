@@ -37,6 +37,8 @@ rustix.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "signal", "sync", "time"] }
 
 [dev-dependencies]
+mandate-bars.workspace = true
+mandate-marketdata.workspace = true
 axum.workspace = true
 mandate-release.workspace = true
 mandate-artifacts-fs.workspace = true

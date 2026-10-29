@@ -76,6 +76,23 @@ pub async fn instruments(
     served(&read.0, vec![("instruments", Value::Array(listed))])
 }
 
+/// `GET /v1/workspaces/{ws}/instruments/{id}/price`: `read-models/instrument-price` (DEC-2152).
+/// The route, a stub until E10-11's price read lands; its tests come first (DEC-77). It is mounted
+/// in debug builds only (`http::api`): a release build aborts on a panic, so a release server never
+/// routes to this stub, and answers the path the one 401 until the read mounts the route itself.
+#[expect(
+    clippy::todo,
+    reason = "E10-11's price read stub: its tests land first (DEC-77, DEC-137)"
+)]
+pub async fn price(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let _ = (app, headers, path);
+    todo!()
+}
+
 /// `GET /v1/workspaces/{ws}/signal-models`: `read-models/signal-models`.
 pub async fn signal_models(
     State(app): State<Arc<App>>,

@@ -294,6 +294,7 @@ fn fixture_bound(
         connect: connect.clone(),
         reduction: Arc::default(),
         folds: Arc::default(),
+        bars: None,
     };
     journal
         .streams
