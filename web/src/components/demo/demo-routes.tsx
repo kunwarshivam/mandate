@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import { AgentScreen } from "@/components/agent-chat/agent-screen";
 import { HomeScreen } from "@/components/agent-chat/home";
 import { SettingsScreen } from "@/components/agent-chat/settings-screen";
 import { SetupScreen } from "@/components/agent-chat/setup-screen";
 import { ApprovalRequestScreen } from "@/components/screens/approval-request";
+import { WorkspaceGate } from "@/components/screens/common";
 import { StopRecordScreen } from "@/components/stop/record-screen";
 import { AGENT_ID, APPROVAL_ID, CONNECTION_ID } from "@/lib/ids";
 
@@ -23,14 +24,29 @@ export function demoScreen(href: string): ReactNode | null {
   const [first, second, ...rest] = path.split("/").slice(1);
   switch (first) {
     case "":
-      return <HomeScreen />;
+      return (
+        <WorkspaceGate api>
+          <HomeScreen />
+        </WorkspaceGate>
+      );
     case "new":
-      return second === undefined ? <SetupScreen /> : null;
+      return second === undefined ? (
+        <Suspense>
+          <WorkspaceGate api>
+            <SetupScreen />
+          </WorkspaceGate>
+        </Suspense>
+      ) : null;
     case "settings":
       return second === undefined ? <SettingsScreen /> : null;
     case "agents": {
       if (second === undefined || !AGENT_ID.test(second)) return null;
-      if (rest.length === 0) return <AgentScreen agentId={second} />;
+      if (rest.length === 0)
+        return (
+          <WorkspaceGate api>
+            <AgentScreen agentId={second} />
+          </WorkspaceGate>
+        );
       if (rest.length === 1 && rest[0] === "kill-switch") return <StopRecordScreen kind="kill" targetId={second} />;
       if (rest.length === 1 && rest[0] === "release") return <StopRecordScreen kind="release" targetId={second} />;
       return null;
