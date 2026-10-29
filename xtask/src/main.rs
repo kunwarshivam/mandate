@@ -3265,6 +3265,14 @@ struct Selection {
     /// `fast`'s nor `full`'s `needs`, so nothing requires it, and while its gesture was failing on
     /// every run it made the whole `ci` run conclude `failure`, which is what the merge gate reads.
     cell_web: bool,
+    /// Whether the eight cell jobs a pull request withholds run (DEC-2649): `cell-demo`,
+    /// `cell-journal`, `cell-failover`, `cell-executor`, `cell-vault`, `cell-exchange`,
+    /// `cell-seeded` and `cell-upgrade`, which the diff selects as it does `cell`, but which only
+    /// `main`'s own runs and the nightly's dispatch start — they have no diff base, so this is
+    /// `true` there whatever the event does. A pull request's run clears it in [`selection_in`],
+    /// as DEC-2634 does `cell_web`, so the self-hosted runners serve a pull request's two cell
+    /// jobs (`cell` and `cell-kill-switch`) rather than all eleven.
+    cell_post_merge: bool,
 }
 
 impl Selection {
@@ -3279,6 +3287,7 @@ impl Selection {
             tofu: true,
             cell: true,
             cell_web: true,
+            cell_post_merge: true,
         }
     }
 
@@ -3315,8 +3324,8 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {} \
-             (tofu {}); schema-mutants {}; cell {}; cell-demo-web {}; lint, the spec guard and \
-             mutants run as always (DEC-1190)",
+             (tofu {}); schema-mutants {}; cell {}; cell-demo-web {}; the other cell jobs {} on \
+             main; lint, the spec guard and mutants run as always (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
@@ -3325,6 +3334,7 @@ impl Selection {
             yes(self.schema_mutants),
             yes(self.cell),
             yes(self.cell_web),
+            yes(self.cell_post_merge),
         )
     }
 
@@ -3333,7 +3343,7 @@ impl Selection {
     fn outputs(&self) -> String {
         format!(
             "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
-             cell={}\ncell_web={}\nreasons={}\n",
+             cell={}\ncell_web={}\ncell_post_merge={}\nreasons={}\n",
             self.tests(),
             self.python,
             self.runner(),
@@ -3342,6 +3352,7 @@ impl Selection {
             self.schema_mutants,
             self.cell,
             self.cell_web,
+            self.cell_post_merge,
             self.reasons(),
         )
     }
@@ -3441,6 +3452,7 @@ fn select(
         tofu,
         cell,
         cell_web: cell || web_changed,
+        cell_post_merge: cell,
     }
 }
 
@@ -3477,19 +3489,25 @@ fn selection_in(root: &Path, base: Option<&str>) -> Result<Selection> {
 /// The selection for this run, from the base [`base_ref`] chooses, said on stderr.
 fn selection() -> Result<Selection> {
     let mut selected = selection_in(Path::new("."), base_ref()?.as_deref())?;
-    withhold_web_demo(&mut selected, env::var("GITHUB_EVENT_NAME").ok().as_deref());
+    withhold_post_merge_jobs(&mut selected, env::var("GITHUB_EVENT_NAME").ok().as_deref());
     eprintln!("    select: {}", selected.reasons());
     Ok(selected)
 }
 
-/// DEC-2634: a pull request's run withholds `cell-demo-web`. The job is in neither `fast`'s nor
-/// `full`'s `needs`, so no aggregate requires it, yet its `web/` gesture had failed on every run
-/// since it merged and made the whole `ci` run conclude `failure` — which the merge gate reads as
-/// "not green", blocking every merge. `main`'s own push, the nightly's dispatch and a local run
-/// keep it, where a failure is a finding rather than a merge blocker.
-fn withhold_web_demo(selected: &mut Selection, event: Option<&str>) {
+/// DEC-2634, DEC-2649: a pull request's run withholds the cell jobs no aggregate requires.
+/// `cell-demo-web` (DEC-2634) is in neither `fast`'s nor `full`'s `needs`, yet while its `web/`
+/// gesture failed on every run it made the whole `ci` run conclude `failure` — which the merge
+/// gate reads as "not green", blocking every merge. DEC-2649 moves eight more off the per-PR path
+/// (`cell-demo`, `cell-journal`, `cell-failover`, `cell-executor`, `cell-vault`, `cell-exchange`,
+/// `cell-seeded`, `cell-upgrade`): a pull request's two cell jobs (`cell` and `cell-kill-switch`)
+/// already cover the cell's build, chart and kill switch, and the eight would hold the three
+/// self-hosted runners for some thirty minutes a pull request the founder declined to add runners
+/// for. `main`'s own push, the nightly's dispatch and a local run keep them, where a failure is a
+/// finding rather than a merge blocker, and where no diff base selects everything anyway.
+fn withhold_post_merge_jobs(selected: &mut Selection, event: Option<&str>) {
     if event == Some("pull_request") {
         selected.cell_web = false;
+        selected.cell_post_merge = false;
     }
 }
 
@@ -13141,7 +13159,7 @@ mod tests {
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
         SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, fuzz_seeds, infra_commands,
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
-        references_path, select, selection_in, source_references, tokens, withhold_web_demo,
+        references_path, select, selection_in, source_references, tokens, withhold_post_merge_jobs,
     };
     use super::{
         CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NEXTEST_RUNNER_ENV, NO_FAIL_FAST_ENV,
@@ -19022,7 +19040,7 @@ mod tests {
         );
         let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
                       github.event_name == 'push') && github.ref == 'refs/heads/main' && \
-                      (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
+                      contains(needs.*.result, 'failure') }}";
         const AGGREGATE_GUARD: &str = "if: ${{ ((github.event_name == 'pull_request' && always()) \
              || !cancelled()) && !github.event.pull_request.draft }}";
         for (job, guard) in [
@@ -19844,7 +19862,10 @@ mod tests {
         Ok(())
     }
 
-    /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
+    /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2). The eight
+    /// cell jobs DEC-2649 moves off the per-PR path start on `cell_post_merge`, which a pull
+    /// request's selection clears in `withhold_post_merge_jobs`, so `main`'s own runs and the
+    /// nightly's dispatch are what start them.
     const SELECT_GATES: [(&str, &str); 20] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
@@ -19856,16 +19877,16 @@ mod tests {
         ("full-checks-3", "full_checks"),
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
-        ("cell-seeded", "cell"),
-        ("cell-upgrade", "cell"),
-        ("cell-demo", "cell"),
+        ("cell-seeded", "cell_post_merge"),
+        ("cell-upgrade", "cell_post_merge"),
+        ("cell-demo", "cell_post_merge"),
         ("cell-demo-web", "cell_web"),
-        ("cell-journal", "cell"),
-        ("cell-failover", "cell"),
+        ("cell-journal", "cell_post_merge"),
+        ("cell-failover", "cell_post_merge"),
         ("cell-kill-switch", "cell"),
-        ("cell-executor", "cell"),
-        ("cell-vault", "cell"),
-        ("cell-exchange", "cell"),
+        ("cell-executor", "cell_post_merge"),
+        ("cell-vault", "cell_post_merge"),
+        ("cell-exchange", "cell_post_merge"),
     ];
 
     /// DEC-464, DEC-2641: CI's drill jobs, split into matrix shards, still run every drill of their
@@ -21345,7 +21366,7 @@ mod tests {
         let outputs = selected.outputs();
         let lines: Vec<&str> = outputs.lines().collect();
         assert_eq!(
-            lines.get(..8),
+            lines.get(..9),
             Some(
                 [
                     "tests=true",
@@ -21356,18 +21377,19 @@ mod tests {
                     "schema_mutants=false",
                     "cell=false",
                     "cell_web=false",
+                    "cell_post_merge=false",
                 ]
                 .as_slice()
             )
         );
-        let reasons = lines.get(8).copied().unwrap_or_default();
+        let reasons = lines.get(9).copied().unwrap_or_default();
         assert!(
             reasons.starts_with(
                 "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
             ),
             "{reasons}"
         );
-        assert_eq!(lines.len(), 9, "{outputs}");
+        assert_eq!(lines.len(), 10, "{outputs}");
     }
 
     /// DEC-2609 item 5: `cell-demo-web` starts whenever the cell jobs do, and also for a change
@@ -21391,10 +21413,12 @@ mod tests {
         assert!(everything.cell && everything.cell_web, "no base runs both");
     }
 
-    /// DEC-2634: a pull request's run withholds `cell-demo-web`, which no aggregate requires and
-    /// whose `web/` gesture had never passed; every other run keeps it.
+    /// DEC-2634 and DEC-2649: a pull request's run withholds the cell jobs no aggregate requires —
+    /// `cell-demo-web`, whose `web/` gesture had never passed, and the eight cell jobs moved off
+    /// the per-PR path (`cell-demo`, `cell-journal`, `cell-failover`, `cell-executor`,
+    /// `cell-vault`, `cell-exchange`, `cell-seeded`, `cell-upgrade`); every other run keeps them.
     #[test]
-    fn a_pull_request_withholds_the_web_demo_that_no_aggregate_requires() {
+    fn a_pull_request_withholds_the_cell_jobs_no_aggregate_requires() {
         let graph = sample_graph();
         let changed: Vec<String> = ["web/src/app/page.tsx"]
             .iter()
@@ -21405,12 +21429,27 @@ mod tests {
             diff.cell_web,
             "the diff alone still selects it, as DEC-2609 item 5 says"
         );
-
-        let mut pull_request = select(Some(&changed), &graph, &BTreeMap::new());
-        withhold_web_demo(&mut pull_request, Some("pull_request"));
+        let cell_diff: Vec<String> = ["deploy/cell/values.yaml"]
+            .iter()
+            .map(|p| (*p).to_owned())
+            .collect();
+        let selected = select(Some(&cell_diff), &graph, &BTreeMap::new());
         assert!(
-            !pull_request.cell_web,
-            "a pull request does not start it (DEC-2634)"
+            selected.cell && selected.cell_post_merge,
+            "the diff alone still selects every cell job, as DEC-2609 says"
+        );
+
+        let mut pull_request = select(Some(&cell_diff), &graph, &BTreeMap::new());
+        withhold_post_merge_jobs(&mut pull_request, Some("pull_request"));
+        assert!(
+            !pull_request.cell_web && !pull_request.cell_post_merge,
+            "a pull request starts neither the web demo (DEC-2634) nor the eight moved cell \
+             jobs (DEC-2649), but keeps `cell` for itself: {}",
+            pull_request.cell
+        );
+        assert!(
+            pull_request.cell,
+            "a pull request still runs `cell` and `cell-kill-switch` (DEC-2649)"
         );
 
         for event in [
@@ -21419,19 +21458,19 @@ mod tests {
             Some("workflow_dispatch"),
             Some("schedule"),
         ] {
-            let mut selected = select(Some(&changed), &graph, &BTreeMap::new());
-            withhold_web_demo(&mut selected, event);
+            let mut selected = select(Some(&cell_diff), &graph, &BTreeMap::new());
+            withhold_post_merge_jobs(&mut selected, event);
             assert!(
-                selected.cell_web,
-                "only a pull request withholds it, not {event:?}"
+                selected.cell_web && selected.cell_post_merge,
+                "only a pull request withholds them, not {event:?}"
             );
         }
 
         let mut everything = select(None, &graph, &BTreeMap::new());
-        withhold_web_demo(&mut everything, Some("push"));
+        withhold_post_merge_jobs(&mut everything, Some("push"));
         assert!(
-            everything.cell_web,
-            "main's own run selects everything including the web demo"
+            everything.cell_web && everything.cell_post_merge,
+            "main's own run selects everything including every cell job"
         );
     }
 
