@@ -1960,11 +1960,7 @@ pub fn run_in(name: &str) -> Result<String> {
     let (ran, job_took) = timed(|| run_job(objects));
     let warmed = match warming {
         Err(why) => WarmOutcome::NotRun(why),
-        Ok(handle) => match handle.join() {
-            Ok(Ok(warmed)) => WarmOutcome::Warmed(warmed),
-            Ok(Err(why)) => WarmOutcome::NotRun(format!("{why:#}")),
-            Err(_) => WarmOutcome::NotRun("the warm-up's thread panicked".to_owned()),
-        },
+        Ok(handle) => warm_outcome(handle.join()),
     };
     eprintln!("{}", warm_report(&warmed, job_took));
     let (succeeded, logs) = ran?;
@@ -2206,9 +2202,20 @@ pub enum WarmOutcome {
     NotRun(String),
 }
 
+/// What the warm-up's thread answered as a [`WarmOutcome`]: its pages, or why it did not run,
+/// a thread that panicked included.
+pub fn warm_outcome(joined: thread::Result<Result<web::Warmed>>) -> WarmOutcome {
+    match joined {
+        Ok(Ok(warmed)) => WarmOutcome::Warmed(warmed),
+        Ok(Err(why)) => WarmOutcome::NotRun(format!("{why:#}")),
+        Err(_) => WarmOutcome::NotRun("the warm-up's thread panicked".to_owned()),
+    }
+}
+
 /// The report's line for the warm-up, beside the gestures' Job's `job_took`: the warm-up's time and
-/// how many of its pages loaded, naming each that did not, or why it did not run. A warm-up never
-/// fails the run: it only saves the next run of `next dev` its first compiles.
+/// how many of the pages it was asked for loaded, naming each that did not, a page its result does
+/// not name read as not reached, or why it did not run. A warm-up never fails the run: it only
+/// saves the next run of `next dev` its first compiles.
 pub fn warm_report(warmed: &WarmOutcome, job_took: Duration) -> String {
     let job = format!(
         "    the gestures' Job took about {:.1}s",
@@ -2218,13 +2225,16 @@ pub fn warm_report(warmed: &WarmOutcome, job_took: Duration) -> String {
         WarmOutcome::NotRun(why) => format!("{job}; web/'s warm-up did not run: {why}"),
         WarmOutcome::Warmed(w) => {
             let missed: Vec<String> = w
-                .pages
+                .requested
                 .iter()
-                .filter(|(_, status)| !status.starts_with('2') && !status.starts_with('3'))
-                .map(|(page, status)| format!("{page} {status}"))
+                .filter_map(|page| match w.pages.get(page) {
+                    Some(status) if status.starts_with('2') || status.starts_with('3') => None,
+                    Some(status) => Some(format!("{page} {status}")),
+                    None => Some(format!("{page} not reached")),
+                })
                 .collect();
-            let loaded = w.pages.len() - missed.len();
-            let pages = w.pages.len();
+            let pages = w.requested.len();
+            let loaded = pages - missed.len();
             let line = format!(
                 "{job}; web/'s warm-up beside it took about {:.1}s, {loaded} of {pages} pages loaded",
                 w.seconds
@@ -4117,6 +4127,7 @@ mod tests {
         );
         let pages = |list: &[(&str, &str)]| {
             WarmOutcome::Warmed(web::Warmed {
+                requested: list.iter().map(|(p, _)| (*p).to_owned()).collect(),
                 pages: list
                     .iter()
                     .map(|(p, s)| ((*p).to_owned(), (*s).to_owned()))
@@ -4141,6 +4152,43 @@ mod tests {
             "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 41.2s, \
              1 of 3 pages loaded (not: /alerts not loaded: timeout, /positions 500)"
         );
+        let stopped = WarmOutcome::Warmed(web::Warmed {
+            requested: ["/", "/agents", "/alerts", "/positions"]
+                .map(str::to_owned)
+                .into(),
+            pages: [("/".to_owned(), "200".to_owned())].into(),
+            seconds: 150.0,
+        });
+        assert_eq!(
+            warm_report(&stopped, job),
+            "    the gestures' Job took about 312.4s; web/'s warm-up beside it took about 150.0s, \
+             1 of 4 pages loaded (not: /agents not reached, /alerts not reached, /positions not \
+             reached)",
+            "a run stopped part way reads as partial, every page it did not reach named"
+        );
+    }
+
+    /// The warm-up's thread reads as its pages, or as why it did not run: an error it answered, or
+    /// a panic.
+    #[test]
+    fn the_warm_up_s_thread_reads_as_its_outcome() {
+        let warmed = web::Warmed {
+            requested: vec!["/".to_owned()],
+            pages: [("/".to_owned(), "200".to_owned())].into(),
+            seconds: 1.0,
+        };
+        assert!(matches!(
+            warm_outcome(Ok(Ok(warmed))),
+            WarmOutcome::Warmed(w) if w.pages["/"] == "200"
+        ));
+        assert!(matches!(
+            warm_outcome(Ok(Err(anyhow::anyhow!("no npm")))),
+            WarmOutcome::NotRun(why) if why == "no npm"
+        ));
+        assert!(matches!(
+            warm_outcome(Err(Box::new("boom"))),
+            WarmOutcome::NotRun(why) if why == "the warm-up's thread panicked"
+        ));
     }
 
     /// Step 6 runs no gesture in the Job, since an owner's exit before the trade loop's fill sells

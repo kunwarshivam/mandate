@@ -623,10 +623,12 @@ pub fn warm_paths(agent: &str) -> Vec<String> {
     .collect()
 }
 
-/// What the warm-up did: each page's status, or why it did not load, and about how long the run
-/// took, counted in polls.
+/// What the warm-up did: the pages it was asked for, in order, each page's status or why it did
+/// not load as its result names them, and about how long the run took, counted in polls. A run
+/// stopped part way names fewer pages than it was asked for.
 #[derive(Debug)]
 pub struct Warmed {
+    pub requested: Vec<String>,
     pub pages: BTreeMap<String, String>,
     pub seconds: f64,
 }
@@ -639,11 +641,12 @@ pub struct Warmed {
 /// # Errors
 /// A missing tool, a run past [`WARM_POLLS`], or a run that wrote no result (its log is named).
 pub fn warm(workspace: &str, agent: &str) -> Result<Warmed> {
+    let requested = warm_paths(agent);
     let run = spec_run(
         workspace,
         &[
             ("OWLHEAD_CELL_SPEC", WARM_SPEC.to_owned()),
-            ("OWLHEAD_CELL_WARM_PATHS", warm_paths(agent).join(",")),
+            ("OWLHEAD_CELL_WARM_PATHS", requested.join(",")),
             ("OWLHEAD_CELL_TIMEOUT_MS", WARM_TIMEOUT_MS.to_owned()),
         ],
         "web-warm",
@@ -658,6 +661,7 @@ pub fn warm(workspace: &str, agent: &str) -> Result<Warmed> {
         );
     };
     Ok(Warmed {
+        requested,
         pages: serde_json::from_str(&text)
             .context("the warm-up's result is not a JSON object of strings")?,
         seconds: (POLL * run.polled).as_secs_f64(),
@@ -1455,6 +1459,16 @@ mod tests {
         let (w, o): (Vec<&str>, Vec<&str>) =
             (warm.split('/').collect(), opened.split('/').collect());
         w.len() == o.len() && w.iter().zip(&o).all(|(w, o)| *o == "*" || w == o)
+    }
+
+    /// The warm-up ends inside its 180 s beside the Job, and Playwright's own bound ends first, so
+    /// a run stopped part way still writes the pages it reached.
+    #[test]
+    fn the_warm_up_s_bounds_end_inside_its_three_minutes() {
+        let driver = POLL * WARM_POLLS;
+        assert!(driver <= Duration::from_secs(180), "{driver:?}");
+        let playwright = Duration::from_millis(WARM_TIMEOUT_MS.parse::<u64>().unwrap());
+        assert!(playwright < driver, "{playwright:?} against {driver:?}");
     }
 
     #[test]
