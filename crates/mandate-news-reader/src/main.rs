@@ -27,14 +27,14 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_journal::{ArtifactStore, Environment};
 use mandate_news_reader::parse_follows;
 use mandate_news_reader::reader::exit;
 use mandate_news_reader::recorded::{RecordedNews, admitted, recorded_key};
-use mandate_news_reader::{Config, KeyRefusal, NewsReader, vault_key};
+use mandate_news_reader::{Clock, Config, KeyRefusal, NewsReader, vault_key};
 use mandate_process::probe::{self, Probe, Status};
 use mandate_release::startup::TIER_VAR;
 use mandate_sources::allowlist::Allowlist;
@@ -91,6 +91,50 @@ fn host_now() -> UtcNanos {
         .unwrap_or_default();
     let secs = i64::try_from(since.as_secs()).unwrap_or(i64::MAX);
     UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
+}
+
+/// The trusted time of DEC-2289: the host clock read once, at the loop's start, plus a monotonic
+/// clock's elapsed time since, which a later step of the host clock cannot move.
+struct Trusted {
+    wall: UtcNanos,
+    since: Instant,
+}
+
+impl Trusted {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the binary's edge starts the monotonic clock the trusted time counts from (ES-05)"
+    )]
+    fn start() -> Self {
+        Self {
+            wall: host_now(),
+            since: Instant::now(),
+        }
+    }
+
+    /// A step's readings: the host clock now, and the trusted time.
+    fn clock(&self) -> Clock {
+        Clock {
+            now: host_now(),
+            trusted: after(self.wall, self.since.elapsed()),
+        }
+    }
+}
+
+/// `start` plus `elapsed`, or `start` itself past the representable range, so a trusted time
+/// that cannot be formed is the earliest it can be and refuses a round rather than admits one.
+fn after(start: UtcNanos, elapsed: Duration) -> UtcNanos {
+    let nanos = u64::from(start.nanos()).saturating_add(u64::from(elapsed.subsec_nanos()));
+    let carry = i64::from(nanos >= 1_000_000_000);
+    let secs = i64::try_from(elapsed.as_secs())
+        .ok()
+        .and_then(|secs| start.secs().checked_add(secs))
+        .and_then(|secs| secs.checked_add(carry));
+    secs.and_then(|secs| {
+        let nanos = u32::try_from(nanos.checked_rem(1_000_000_000)?).ok()?;
+        UtcNanos::from_parts(secs, nanos).ok()
+    })
+    .unwrap_or(start)
 }
 
 fn run(
@@ -179,6 +223,7 @@ fn serve<S: Store, A: ArtifactStore, T: Transport>(
     if let Some(code) = reader.not_ready() {
         eprintln!("{code}");
     }
+    let trusted = Trusted::start();
     loop {
         if let Some(stopped) = exit(&reader) {
             status.publish(reader.lifecycle().snapshot());
@@ -189,7 +234,10 @@ fn serve<S: Store, A: ArtifactStore, T: Transport>(
             reader.drain(host_now());
             continue;
         }
-        runtime.block_on(reader.step(host_now()));
+        runtime.block_on(reader.step(trusted.clock()));
+        for alert in reader.take_alerts() {
+            eprintln!("{alert}");
+        }
         status.publish(reader.lifecycle().snapshot());
         thread::sleep(STEP);
     }

@@ -1,0 +1,221 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "tests: a broken fixture or a wrong answer should stop the test"
+)]
+//! The receipt-lead bound (DEC-2289, DEC-2281 item 3): a round whose receipt, the host clock's
+//! reading, runs more than [`RECEIPT_LEAD_S`] ahead of the trusted time asks nothing and journals
+//! nothing, so no `knowledge_at` is ever set past the trusted time by more than the lead. The round
+//! is counted, the operator is alerted once an episode, and the reader pauses as after a failed
+//! round. The bound is judged against the trusted time alone, never the vendor's item times. The
+//! oracle reads the journal's own rows after every step.
+
+mod common;
+
+use mandate_news_reader::{RECEIPT_AHEAD, RECEIPT_LEAD_S};
+use mandate_process::State;
+use mandate_time::UtcNanos;
+use proptest::prelude::*;
+
+use common::*;
+
+fn ahead(trusted: UtcNanos, lead: i64) -> Clock {
+    Clock {
+        now: plus(trusted, lead),
+        trusted,
+    }
+}
+
+/// A ready reader following SPY, the vendor answering `pages` in turn.
+fn ready(pages: &[Vec<u8>]) -> (Journal, Recorded, Reader) {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let transport = Recorded::answering(pages);
+    let reader = started(&journal, &shelf, &transport, t0());
+    assert_eq!(reader.lifecycle().state(), State::Ready);
+    (journal, transport, reader)
+}
+
+fn one_item(id: u64) -> Vec<u8> {
+    page(
+        &[item(
+            id,
+            "2026-10-26T14:00:00Z",
+            "2026-10-26T14:00:00Z",
+            &["SPY"],
+        )],
+        None,
+    )
+}
+
+/// The latest `knowledge_at` the stream holds, if any.
+fn last_known(journal: &Journal) -> Option<UtcNanos> {
+    stored(journal)
+        .iter()
+        .map(|row| UtcNanos::parse(member(row, "knowledge_at").as_str().unwrap()).unwrap())
+        .max()
+}
+
+#[test]
+fn a_round_past_the_lead_asks_and_journals_nothing_and_is_counted_and_alerted() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000010)]);
+    block_on(reader.step(ahead(t0(), RECEIPT_LEAD_S + 1)));
+    assert!(transport.sent().is_empty(), "nothing asked");
+    assert!(journal.news().is_empty(), "nothing journaled");
+    assert_eq!(reader.counts().receipt_ahead, 1);
+    assert_eq!(reader.take_alerts(), vec![RECEIPT_AHEAD]);
+    assert_eq!(reader.take_alerts(), Vec::<&str>::new(), "taken once");
+    assert_eq!(
+        reader.not_ready(),
+        None,
+        "a held round is not a refusal of the reader"
+    );
+}
+
+#[test]
+fn at_the_lead_the_round_asks_and_journals_at_its_receipt() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000011)]);
+    block_on(reader.step(ahead(t0(), RECEIPT_LEAD_S)));
+    assert_eq!(transport.sent().len(), 1);
+    assert_eq!(stored(&journal).len(), 1);
+    assert_eq!(last_known(&journal), Some(plus(t0(), RECEIPT_LEAD_S)));
+    assert_eq!(reader.counts().receipt_ahead, 0);
+    assert!(reader.take_alerts().is_empty());
+}
+
+/// A host clock behind the trusted time holds nothing: it only stamps an earlier receipt.
+#[test]
+fn a_host_clock_behind_the_trusted_time_holds_nothing() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000012)]);
+    block_on(reader.step(Clock {
+        now: t0(),
+        trusted: plus(t0(), 3_600),
+    }));
+    assert_eq!(transport.sent().len(), 1);
+    assert_eq!(stored(&journal).len(), 1);
+    assert_eq!(reader.counts().receipt_ahead, 0);
+}
+
+/// The pause after a held round is the failed round's cooldown, by the host clock, so a clock
+/// stuck ahead is judged again once each cooldown and never spins; the episode alerts once, and a
+/// round within the bound ends it, so the next episode alerts again. The round that resumes asks
+/// from the stream's last `knowledge_at`, which no held round moved.
+#[test]
+fn an_episode_alerts_once_pauses_by_the_cooldown_and_ends_within_the_bound() {
+    let (journal, transport, mut reader) = ready(&[one_item(41000013), one_item(41000014)]);
+    let jump = RECEIPT_LEAD_S + 600;
+    block_on(reader.step(ahead(t0(), jump)));
+    for second in 1..30 {
+        block_on(reader.step(ahead(plus(t0(), second), jump)));
+    }
+    assert_eq!(reader.counts().receipt_ahead, 1, "paused for the cooldown");
+    block_on(reader.step(ahead(plus(t0(), 30), jump)));
+    assert_eq!(reader.counts().receipt_ahead, 2, "judged again after it");
+    assert_eq!(
+        reader.take_alerts(),
+        vec![RECEIPT_AHEAD],
+        "one alert an episode"
+    );
+    assert!(transport.sent().is_empty());
+
+    let resumed = plus(t0(), 100);
+    block_on(reader.step(Clock::agreed(resumed)));
+    assert_eq!(
+        transport.sent().len(),
+        1,
+        "the clock agreeing again, the round asks"
+    );
+    assert!(
+        transport.sent()[0].contains("start=2026-10-24T"),
+        "an empty stream still asks from 48 hours back: {:?}",
+        transport.sent()
+    );
+    assert_eq!(last_known(&journal), Some(resumed));
+    assert!(reader.take_alerts().is_empty(), "no alert within the bound");
+
+    block_on(reader.step(ahead(plus(t0(), 200), jump)));
+    assert_eq!(
+        reader.take_alerts(),
+        vec![RECEIPT_AHEAD],
+        "a new episode alerts again"
+    );
+    assert_eq!(
+        last_known(&journal),
+        Some(resumed),
+        "a held round moves nothing"
+    );
+}
+
+/// The bound reads the trusted time, never the vendor's item times: an item published two days
+/// before, on a first poll, is journaled.
+#[test]
+fn an_old_item_on_a_first_poll_is_journaled() {
+    let old = page(
+        &[item(
+            41000015,
+            "2026-10-24T16:00:00Z",
+            "2026-10-24T16:00:00Z",
+            &["SPY"],
+        )],
+        None,
+    );
+    let (journal, _, mut reader) = ready(&[old]);
+    block_on(reader.step(Clock::agreed(t0())));
+    assert_eq!(stored(&journal).len(), 1);
+    assert_eq!(reader.counts().receipt_ahead, 0);
+}
+
+/// The oracle: the journal's latest `knowledge_at` against the step's trusted time and the lead;
+/// `Some` names the breach.
+fn breach(journal: &Journal, clock: Clock) -> Option<String> {
+    let last = last_known(journal)?;
+    (last > plus(clock.trusted, RECEIPT_LEAD_S))
+        .then(|| format!("knowledge_at {last} past trusted {} + lead", clock.trusted))
+}
+
+/// The oracle fails on a journal holding an item known past the bound.
+#[test]
+fn the_oracle_catches_an_item_known_past_the_bound() {
+    let (journal, _, mut reader) = ready(&[one_item(41000016)]);
+    let at = plus(t0(), RECEIPT_LEAD_S);
+    block_on(reader.step(ahead(t0(), RECEIPT_LEAD_S)));
+    assert_eq!(breach(&journal, ahead(t0(), RECEIPT_LEAD_S)), None);
+    assert!(
+        breach(&journal, Clock::agreed(plus(at, -RECEIPT_LEAD_S - 1))).is_some(),
+        "a trusted time a second earlier puts the stored item past the bound"
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// Over any run of steps, the trusted time moving forward by up to two minutes a step and the
+    /// host clock anywhere from five minutes behind it to ten ahead, no stored `knowledge_at` ever
+    /// runs past the step's trusted time by more than the lead; and a host clock that never runs
+    /// past the lead holds no round and raises no alert.
+    #[test]
+    fn no_item_is_known_past_the_trusted_time_and_the_lead(
+        steps in prop::collection::vec((0i64..120, -300i64..600), 1..40),
+    ) {
+        let pages: Vec<Vec<u8>> = (0..steps.len())
+            .map(|n| page(&[item(41000100 + n as u64, "2026-10-26T10:00:00Z", "2026-10-26T10:00:00Z", &["SPY"])], None))
+            .collect();
+        let (journal, _, mut reader) = ready(&pages);
+        let mut trusted = t0();
+        let mut ever_ahead = false;
+        for (forward, offset) in steps {
+            trusted = plus(trusted, forward);
+            let clock = Clock { now: plus(trusted, offset), trusted };
+            ever_ahead |= offset > RECEIPT_LEAD_S;
+            block_on(reader.step(clock));
+            prop_assert_eq!(breach(&journal, clock), None);
+        }
+        if !ever_ahead {
+            prop_assert_eq!(reader.counts().receipt_ahead, 0);
+            prop_assert!(reader.take_alerts().is_empty());
+        }
+    }
+}

@@ -46,6 +46,30 @@ use crate::watch::followed;
 /// The news source the reader fetches (allowlist version 3, DEC-2276).
 pub const NEWS_SOURCE: &str = "alpaca.news";
 
+/// How far a round's receipt may run ahead of the trusted time before the round is refused
+/// (DEC-2289).
+pub const RECEIPT_LEAD_S: i64 = 60;
+
+/// The alert a reader raises once an episode of receipts past [`RECEIPT_LEAD_S`] begins.
+pub const RECEIPT_AHEAD: &str = "receipt_ahead";
+
+/// A step's two readings of the time (DEC-2289): `now`, the host clock, which stamps a receipt,
+/// and `trusted`, what the caller holds to be the time without that clock's word alone. The binary
+/// takes the host clock at start plus a monotonic clock's elapsed time since.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Clock {
+    pub now: UtcNanos,
+    pub trusted: UtcNanos,
+}
+
+impl Clock {
+    /// The two readings agreeing at `now`.
+    #[must_use]
+    pub fn agreed(now: UtcNanos) -> Self {
+        Self { now, trusted: now }
+    }
+}
+
 /// What a reader runs.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -79,6 +103,9 @@ pub struct Counts {
     pub fetch_failed: BTreeMap<&'static str, u64>,
     /// Chunks of a round that stopped at the page cap with a page still to follow.
     pub page_caps: u64,
+    /// Rounds refused because their receipt ran more than [`RECEIPT_LEAD_S`] ahead of the trusted
+    /// time (DEC-2289).
+    pub receipt_ahead: u64,
 }
 
 /// One workspace's news reader.
@@ -104,6 +131,8 @@ pub struct NewsReader<S, A, T> {
     pub(crate) pending: Option<Pending>,
     pub(crate) lifecycle: Lifecycle,
     pub(crate) counts: Counts,
+    /// The operator alerts raised and not yet taken, each a fixed code.
+    alerts: Vec<&'static str>,
 }
 
 impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
@@ -155,6 +184,7 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             pending: None,
             lifecycle: Lifecycle::new(Kind::Writer, config.liveness, now),
             counts: Counts::default(),
+            alerts: Vec::new(),
         };
         if config.environment != Environment::Paper || this.source.is_none() {
             this.lifecycle.observe(now, Input::Failed);
@@ -216,7 +246,8 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
     /// One step at the host clock's reading `now`: a retried batch first, then at most one page
     /// asked and its new items stored. Nothing is done once the reader has exited, and nothing but
     /// a heartbeat while it is not ready or paused.
-    pub async fn step(&mut self, now: UtcNanos) {
+    pub async fn step(&mut self, clock: Clock) {
+        let now = clock.now;
         if self.exited() {
             return;
         }
@@ -293,6 +324,11 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             Input::Failed
         };
         self.lifecycle.observe(now, last);
+    }
+
+    /// The operator alerts raised since the last take, each a fixed code, oldest first.
+    pub fn take_alerts(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.alerts)
     }
 
     pub fn lifecycle(&self) -> &Lifecycle {
