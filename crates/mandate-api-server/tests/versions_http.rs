@@ -2931,18 +2931,28 @@ fn seed_account(
     payload: &str,
     caused_by: Option<&str>,
 ) -> StoredEvent {
+    seed_stream(f, &account(), event_type, payload, caused_by)
+}
+
+/// [`seed_account`] on `stream`, which it opens if it holds no row yet.
+fn seed_stream(
+    f: &Fixture,
+    stream: &str,
+    event_type: &str,
+    payload: &str,
+    caused_by: Option<&str>,
+) -> StoredEvent {
     let mut streams = f.journal.streams.lock().expect("unpoisoned");
-    let rows = streams.get_mut(&account()).expect("funded");
+    let rows = streams.entry(stream.to_owned()).or_default();
     let seq = rows.last().map_or(1, |row| row.seq + 1);
     let n = u64::try_from(rows.len()).expect("a count");
     let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{:03}", 200 + n);
     let causation = caused_by.map_or("null".to_owned(), |id| format!(r#""{id}""#));
     let body = to_canonical(&json(&format!(
-        r#"{{"causation_id":{causation},"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{}"}}"#,
-        account()
+        r#"{{"causation_id":{causation},"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
     )));
     let added = StoredEvent {
-        stream_id: account(),
+        stream_id: stream.to_owned(),
         seq,
         event_id,
         event_type: event_type.to_owned(),
@@ -3685,6 +3695,26 @@ fn an_acknowledgments_status_follows_its_copy_to_the_lift() {
         Some(&copy.event_id),
     );
     assert_eq!(phase(), "applied");
+    seed_stream(
+        &w.f,
+        &format!("agent:{WORKSPACE}:agt_a"),
+        "AgentModeChanged",
+        "{}",
+        Some(&command),
+    );
+    let reply = get(&w.f, &ws(&format!("/commands/{command}")), &w.cookie);
+    let steps: Vec<String> = match self::body(&reply).get("steps") {
+        Some(Value::Array(steps)) => steps
+            .iter()
+            .map(|step| text(step, &["event_type"]).to_owned())
+            .collect(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        steps,
+        ["AgentModeChanged", "OwnerAcknowledged", "RiskLimitLifted"],
+        "in stream then seq order: the agent's stream before the account's (§3.11 item 12)"
+    );
 }
 
 /// A limit of another agent on the account blocks only that agent: the list for `agt_a` leaves it
