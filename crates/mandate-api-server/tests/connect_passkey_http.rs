@@ -714,6 +714,7 @@ fn without_the_waiver_a_fresh_passkeys_start_is_step_up_missing() {
     );
     assert!(w.appended().is_empty());
     assert!(w.held(&issued), "the challenge is kept");
+}
 
 #[test]
 #[ignore = "pending E9-4"]

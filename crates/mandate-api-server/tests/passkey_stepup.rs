@@ -932,6 +932,7 @@ fn only_a_cooling_passkey_under_the_waiver_is_waived() {
         panic!("the step-up counts, not {answer:?}");
     };
     assert_eq!(asserted.waived(), None);
+}
 
 /// DEC-2126 item 6: what [`passkey_held`] answers for the owner over `w`'s rows at `secs`.
 fn held_at(w: &World, secs: i64) -> Result<bool, Unanswered> {
