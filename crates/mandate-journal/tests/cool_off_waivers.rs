@@ -1,4 +1,4 @@
-//! Journal spec v0.113 §9.38 (DEC-2146): `StepUpCoolOffWaived` on the control stream at schema
+//! Journal spec v0.113 §9.38 (DEC-2146, and v0.116's `staging` tier, DEC-2150): `StepUpCoolOffWaived` on the control stream at schema
 //! version 1, with rule 316 at append and batch rule 317 after rule 253, through the journal's own
 //! checks against the vectors' `cool_off_waivers` section. Every base and valid draft parses; every
 //! invalid draft is refused with its reason at its path; every batch is judged by `check_batch` as
@@ -89,6 +89,39 @@ fn each_base_and_every_valid_step_up_cool_off_waived_draft_parse() {
         }
     }
     for case in list(&section, "valid_drafts") {
+        if in_staging(case) {
+            continue;
+        }
+        if let Err(e) = Draft::parse(&draft(&section, case)) {
+            failed.push(format!("valid {}: {e:?}", text(case, "name")));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// Whether a valid draft names `tier` `staging`, the tier journal spec v0.116 adds (DEC-2150):
+/// [`a_staging_cells_waiver_parses`] reads those.
+fn in_staging(case: &Value) -> bool {
+    text(case, "name").contains("_staging_")
+}
+
+/// v0.116 (DEC-2150): a staging cell's waiver, before its expiry, names `tier` `staging`. Before it
+/// the journal refuses that tier as `non_canonical`, so a staging cell's waived step-up never
+/// commits.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_staging_cells_waiver_parses() {
+    let section = section();
+    let cases: Vec<&Value> = list(&section, "valid_drafts")
+        .iter()
+        .filter(|case| in_staging(case))
+        .collect();
+    assert!(
+        !cases.is_empty(),
+        "the section names a staging cell's waiver"
+    );
+    let mut failed = Vec::new();
+    for case in cases {
         if let Err(e) = Draft::parse(&draft(&section, case)) {
             failed.push(format!("valid {}: {e:?}", text(case, "name")));
         }

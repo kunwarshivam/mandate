@@ -129,8 +129,8 @@ def invalid_drafts() -> list[dict]:
         path = f"payload.{member}"
         out.append(invalid(f"{member}.kind", "§9.38 types", [change(path, wrong_kind)], "schema", path))
         out.append(invalid(f"{member}.form", "§9.38 types", [change(path, wrong_form)], "non_canonical", path))
-    for name, value in (("staging", "staging"), ("production", "production"), ("capitalised", "CI")):
-        out.append(invalid(f"tier.{name}", "§9.38 `tier`: `dev` or `ci` only", [change("payload.tier", value)], "non_canonical", "payload.tier"))
+    for name, value in (("production", "production"), ("capitalised", "CI"), ("staging_capitalised", "Staging")):
+        out.append(invalid(f"tier.{name}", "§9.38 `tier`: `dev`, `ci` or `staging` only (DEC-2150)", [change("payload.tier", value)], "non_canonical", "payload.tier"))
     out.append(invalid("tier.kind", "§9.38 `tier`: text", [change("payload.tier", 7)], "schema", "payload.tier"))
     for member in NULLED:
         path = f"payload.{member}"
@@ -148,6 +148,7 @@ def valid_drafts() -> list[dict]:
     """The members no rule reads."""
     return [
         valid("in_a_dev_cell", "§9.38 `tier`: `dev`", [change("payload.tier", "dev")]),
+        valid("in_a_staging_cell", "§9.38 `tier`: `staging`, before its expiry (DEC-2150)", [change("payload.tier", "staging")]),
         valid("another_credential", "§9.38: any credential id", [change("payload.credential", OTHER_CREDENTIAL)]),
     ]
 
@@ -449,9 +450,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "invalid_drafts", "in_live")["expect"].update(path="actor.kind")),
         ),
         (
-            "a valid draft names a staging tier",
+            "a valid draft names a production tier",
             "valid_drafts",
-            mutated(lambda s: case(s, "valid_drafts", "in_a_dev_cell")["changes"].append(change("payload.tier", "staging"))),
+            mutated(lambda s: case(s, "valid_drafts", "in_a_dev_cell")["changes"].append(change("payload.tier", "production"))),
         ),
         (
             "a batch's expectation differs",
