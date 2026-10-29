@@ -1150,7 +1150,7 @@ impl Tools<'_> {
                     "record",
                     answer
                         .as_ref()
-                        .and_then(|a| a.get("event_id").cloned())
+                        .and_then(|a| a.get(command.id_member()).cloned())
                         .unwrap_or(Value::Null),
                 ),
                 (

@@ -1303,3 +1303,240 @@ fn the_owner_s_stop_ends_the_run_before_its_next_call() {
         "no call after the Stop: only the one held in flight, if the run had made it"
     );
 }
+
+const MSFT: &str = "5f1e4c2a-8d3b-4e7f-9a6c-2b1d0e9f8a7c";
+
+/// Stores `object` in the run's store and answers its reference.
+fn store(f: &Fixture, object: &str) -> String {
+    let objects = f.app.objects.as_ref().expect("the store");
+    let bytes = to_canonical(&parse(object.as_bytes()).expect("JSON"));
+    objects.put(&bytes).expect("stored").to_string()
+}
+
+/// AAPL, which `agt_a`'s mandate pins, and MSFT, which it does not, as registered snapshots; a
+/// thesis of the agent's; and two news items, AAPL's unlicensed with its headline stored and MSFT's
+/// licensed.
+fn seed_catalogue(f: &Fixture) {
+    let snapshot = |id: &str, symbol: &str| {
+        store(
+            f,
+            &format!(
+                r#"{{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"nasdaq","increment":"whole","instrument_id":"{id}","symbol":"{symbol}"}}"#
+            ),
+        )
+    };
+    let registered = |seq: u64, hash: &str| {
+        row(
+            seq,
+            "ConfigSnapshotRegistered",
+            &format!(
+                r#"{{"admits_instruments":null,"content_hash":"{hash}","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}}"#
+            ),
+        )
+    };
+    let aapl = snapshot(AAPL, "AAPL");
+    let msft = snapshot(MSFT, "MSFT");
+    push(
+        f,
+        &ctl(),
+        vec![registered(10, &aapl), registered(11, &msft)],
+    );
+    let agent = format!("agent:{WORKSPACE}:agt_a");
+    push(
+        f,
+        &agent,
+        vec![row_on(
+            &agent,
+            9,
+            "ThesisProposed",
+            r#"{"thesis_id":"th_1","text":"Apple's services keep growing."}"#,
+            "",
+        )],
+    );
+    let headline = store(f, r#"{"headline":"Apple ships a thing"}"#);
+    let news = format!("news:{WORKSPACE}");
+    push(
+        f,
+        &news,
+        vec![
+            row_on(
+                &news,
+                1,
+                "NewsItemStored",
+                &format!(
+                    r#"{{"item_id":"n_1","item_ref":"{headline}","licensed":false,"published_at":"2026-10-17T09:00:00Z","symbols":["AAPL"]}}"#
+                ),
+                "",
+            ),
+            row_on(
+                &news,
+                2,
+                "NewsItemStored",
+                &format!(
+                    r#"{{"item_id":"n_2","item_ref":"{headline}","licensed":true,"published_at":"2026-10-17T09:30:00Z","symbols":["MSFT"]}}"#
+                ),
+                "",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn the_catalogue_and_research_tools_answer_and_a_buy_is_checked_before_it_is_sent() {
+    let gateway = gateway_service(vec![
+        turn(
+            &[
+                (name::SEARCH, r#"{"query":"aa"}"#),
+                (name::SEARCH, r#"{"query":""}"#),
+                (name::SEARCH, r#"{"query":"zzz"}"#),
+                (name::PRICE, r#"{"symbol":"aapl"}"#),
+                (name::PRICE, r#"{"symbol":"ZZZ"}"#),
+                (name::BUY, r#"{"symbol":"zzz","quantity":"1"}"#),
+                (name::BUY, r#"{"symbol":"AAPL","quantity":"0"}"#),
+                (name::BUY, r#"{"symbol":"MSFT","quantity":"1"}"#),
+                (name::THESES, "{}"),
+                (name::NEWS, r#"{"symbol":"aapl"}"#),
+                (name::NEWS, r#"{"symbol":"TSLA"}"#),
+                (name::NEWS, r#"{"symbol":""}"#),
+                (name::SELL, r#"{"quantity":"all","symbol":"zzz"}"#),
+            ],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    seed_catalogue(&f);
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "look around").status, 202);
+    settled(&f, &cookie);
+    let found = results(&f);
+    let aapl = format!(r#"{{"asset_class":"us_equity","instrument_id":"{AAPL}","symbol":"AAPL"}}"#);
+    let msft = format!(r#"{{"asset_class":"us_equity","instrument_id":"{MSFT}","symbol":"MSFT"}}"#);
+    let thesis = event_id_at(&format!("agent:{WORKSPACE}:agt_a"), 9);
+    let apple = r#"{"headline":"Apple ships a thing","published_at":"2026-10-17T09:00:00Z","ref":"n_1","symbols":["AAPL"]}"#;
+    let expected: Vec<(&str, String)> = vec![
+        (
+            name::SEARCH,
+            format!(r#"{{"instruments":[{aapl}],"ok":true}}"#),
+        ),
+        (
+            name::SEARCH,
+            format!(r#"{{"instruments":[{aapl},{msft}],"ok":true}}"#),
+        ),
+        (name::SEARCH, r#"{"instruments":[],"ok":true}"#.to_owned()),
+        (
+            name::PRICE,
+            r#"{"ok":false,"refused":"no_store"}"#.to_owned(),
+        ),
+        (
+            name::PRICE,
+            r#"{"ok":false,"refused":"unknown_symbol"}"#.to_owned(),
+        ),
+        (
+            name::BUY,
+            r#"{"ok":false,"refused":"unknown_symbol"}"#.to_owned(),
+        ),
+        (
+            name::BUY,
+            r#"{"ok":false,"refused":"quantity_positive"}"#.to_owned(),
+        ),
+        (
+            name::BUY,
+            r#"{"ok":false,"refused":"not_in_mandate"}"#.to_owned(),
+        ),
+        (
+            name::THESES,
+            format!(
+                r#"{{"ok":true,"theses":[{{"payload":{{"text":"Apple's services keep growing.","thesis_id":"th_1"}},"record":"{thesis}","type":"ThesisProposed"}}],"untrusted":true}}"#
+            ),
+        ),
+        (
+            name::NEWS,
+            format!(r#"{{"news":[{apple}],"ok":true,"untrusted":true}}"#),
+        ),
+        (
+            name::NEWS,
+            r#"{"news":[],"ok":true,"untrusted":true}"#.to_owned(),
+        ),
+        (
+            name::NEWS,
+            format!(
+                r#"{{"news":[{{"headline":null,"published_at":"2026-10-17T09:30:00Z","ref":"n_2","symbols":["MSFT"]}},{apple}],"ok":true,"untrusted":true}}"#
+            ),
+        ),
+        (
+            name::SELL,
+            r#"{"ok":false,"refused":"unknown_symbol"}"#.to_owned(),
+        ),
+    ];
+    let expected: Vec<(String, String)> = expected
+        .into_iter()
+        .map(|(n, r)| (n.to_owned(), r))
+        .collect();
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn the_owner_s_actions_commit_through_the_owner_s_own_routes() {
+    let gateway = gateway_service(vec![
+        turn(
+            &[
+                (name::BUY, r#"{"quantity":"2","symbol":"aapl"}"#),
+                (name::SELL, r#"{"quantity":"all","symbol":"AAPL"}"#),
+                (name::RESUME, "{}"),
+            ],
+            None,
+        ),
+        turn(&[(name::STOP, "{}")], None),
+        turn(&[(name::KILL, "{}")], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    seed_catalogue(&f);
+    let cookie = signed_in(&f);
+    assert_eq!(
+        post_message(&f, &cookie, "buy 2 AAPL, then sell it all").status,
+        202
+    );
+    settled(&f, &cookie);
+    let recorded: BTreeMap<String, String> = f
+        .journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .values()
+        .flatten()
+        .map(|row| (row.event_id.clone(), row.event_type.clone()))
+        .collect();
+    let found = results(&f);
+    let names: Vec<&str> = found.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [name::BUY, name::SELL, name::RESUME, name::STOP, name::KILL]
+    );
+    let prefix = r#"{"accepted":true,"note":"Recorded. The platform sizes, checks and places it; watch the order card for the result.","ok":true,"record":""#;
+    for ((tool, result), journaled) in found.iter().zip([
+        "OwnerRequestSubmitted",
+        "OwnerCommandIssued",
+        "OwnerCommandIssued",
+        "OwnerCommandIssued",
+        "OwnerCommandIssued",
+    ]) {
+        let record = result
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.split('"').next())
+            .unwrap_or_default();
+        assert_eq!(
+            recorded.get(record).map(String::as_str),
+            Some(journaled),
+            "{tool}: {result}"
+        );
+    }
+    assert!(
+        found[1]
+            .1
+            .ends_with("\nNote: a sale exits the whole position in AAPL."),
+        "{}",
+        found[1].1
+    );
+}
