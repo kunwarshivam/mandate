@@ -157,6 +157,7 @@ fn fixture() -> Fixture {
         connect: None,
         reduction: Arc::default(),
         folds: Arc::default(),
+        bars: None,
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

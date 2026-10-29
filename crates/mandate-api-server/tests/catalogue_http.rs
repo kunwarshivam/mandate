@@ -54,6 +54,10 @@ const INSTRUMENTS_EXAMPLE: &str =
     include_str!("../../../schemas/workspace-api/examples/read-models.instruments.json");
 const INSTRUMENTS_VALID: &str =
     include_str!("../../../schemas/workspace-api/examples/read-models.instruments.valid.json");
+const PRICE_SCHEMA: &str =
+    include_str!("../../../schemas/workspace-api/read-models/instrument-price.schema.json");
+const PRICE_EXAMPLE: &str =
+    include_str!("../../../schemas/workspace-api/examples/read-models.instrument-price.json");
 const MODELS_EXAMPLE: &str =
     include_str!("../../../schemas/workspace-api/examples/read-models.signal-models.json");
 const MODELS_VALID: &str =
@@ -75,6 +79,11 @@ fn fixture() -> Fixture {
 }
 
 fn built(with_store: bool) -> Fixture {
+    built_with(with_store, None)
+}
+
+/// [`built`], the price read given `bars` as its `MANDATE_BARS` root.
+fn built_with(with_store: bool, bars: Option<std::path::PathBuf>) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::env::temp_dir().join(format!(
@@ -121,6 +130,7 @@ fn built(with_store: bool) -> Fixture {
         connect: None,
         reduction: Arc::default(),
         folds: Arc::default(),
+        bars,
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),
@@ -1620,5 +1630,426 @@ mod published_examples {
             assert_eq!(fixed(&body), fixed(&example), "{label}");
             conforms(&body, MODELS_SCHEMA, "models", "Model", &control);
         }
+    }
+}
+
+/// The price read (§3.11 item 11, DEC-2152): an instrument's last trusted daily close from the bars
+/// root the process is given, or `reported` `false` with why, never a stub. The oracle for the close
+/// is the test's own list of the sessions it stored, never the server's reader: the clock `T0` falls
+/// on Saturday 2026-10-03, so the last completed regular session is Friday 2026-10-02.
+mod price_read {
+    use super::*;
+    use mandate_canon::DecStr;
+    use mandate_marketdata::actions::{RecordedActions, write_actions};
+    use mandate_marketdata::dataset::Store;
+    use mandate_marketdata::model::{
+        AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
+        SplitRatio, Symbol,
+    };
+    use mandate_time::{Date, ExchangeCalendar, new_york_midnight};
+
+    /// The last completed regular session at `T0`.
+    const LAST: (u16, u8, u8) = (2026, 10, 2);
+
+    fn last() -> Date {
+        Date::new(LAST.0, LAST.1, LAST.2).expect("a date")
+    }
+
+    /// A fresh directory for one test's bars, its last component `name`.
+    fn bars_dir(test: &str, name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "mandate-api-server-price-{test}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join(name)
+    }
+
+    /// The 30 trading days ending on `through`, oldest first.
+    fn sessions_to(through: Date) -> Vec<Date> {
+        let calendar = ExchangeCalendar::us_equities().expect("the calendar");
+        let mut d = Date::new(2026, 8, 1).expect("a date");
+        let mut days = Vec::new();
+        while d <= through {
+            if calendar.is_trading_day(d).expect("a day") {
+                days.push(d);
+            }
+            d = d.next().expect("a next day");
+        }
+        days.split_off(days.len() - 30)
+    }
+
+    /// Session `n`'s close as the test stores it.
+    fn close_of(n: usize) -> String {
+        format!("{}.25", 400 + n % 11)
+    }
+
+    fn dataset(symbol: &str, timeframe: &str) -> DatasetId {
+        DatasetId::new(
+            AssetClass::UsEquity,
+            Feed::Iex,
+            Kind::Bars(timeframe.parse().expect("a timeframe")),
+            Symbol::parse(symbol).expect("a symbol"),
+        )
+        .expect("a dataset")
+    }
+
+    fn bar_at(start: UtcNanos, close: &str) -> Bar {
+        let price = DecStr::parse(close).expect("a price");
+        Bar {
+            start,
+            open: price.clone(),
+            high: price.clone(),
+            low: price.clone(),
+            close: price.clone(),
+            volume: DecStr::parse("1000000").expect("a volume"),
+            vwap: price,
+            trade_count: 10,
+        }
+    }
+
+    /// Stores `symbol`'s 30 daily bars ending on `through` under `root`; answers each session with
+    /// the close stored for it.
+    fn daily(root: &std::path::Path, symbol: &str, through: Date) -> Vec<(Date, String)> {
+        daily_skipping(root, symbol, through, None)
+    }
+
+    /// [`daily`], leaving out the session at index `skip` of the 30 when it names one.
+    fn daily_skipping(
+        root: &std::path::Path,
+        symbol: &str,
+        through: Date,
+        skip: Option<usize>,
+    ) -> Vec<(Date, String)> {
+        let store = Store::new(root);
+        let id = dataset(symbol, "1Day");
+        let mut stored = Vec::new();
+        for (n, d) in sessions_to(through).into_iter().enumerate() {
+            if Some(n) == skip {
+                continue;
+            }
+            let bar = bar_at(new_york_midnight(d).expect("a start"), &close_of(n));
+            store
+                .put_day(&id, d, &Records::Bars(vec![bar]))
+                .expect("stored");
+            stored.push((d, close_of(n)));
+        }
+        stored
+    }
+
+    /// A fixture whose control stream registers QQQ (an equity) and BTCUSD (crypto), with `bars`
+    /// as the price read's root.
+    fn registered(bars: Option<std::path::PathBuf>) -> (Fixture, Vec<StoredEvent>) {
+        let f = built_with(true, bars);
+        let qqq = stored(&f, &snapshot_object(QQQ_ID, "QQQ", "us_equity"));
+        let btc = stored(&f, &snapshot_object(BTC_ID, "BTCUSD", "crypto"));
+        let control = seed(
+            &f,
+            &[
+                ("ConfigSnapshotRegistered", snapshot_payload(&qqq)),
+                ("ConfigSnapshotRegistered", snapshot_payload(&btc)),
+            ],
+        );
+        (f, control)
+    }
+
+    const BTC_ID: &str = "00000000-0000-4000-8000-000000000001";
+
+    fn price_of(f: &Fixture, id: &str) -> Reply {
+        let alice = signed_in(f, ALICE);
+        get(f, &ws(&format!("/instruments/{id}/price")), Some(&alice))
+    }
+
+    /// The body's members against the schema's: the envelope's and the read's required members,
+    /// nothing either does not list, and `as_of` naming the control stream's last row.
+    fn shaped(body: &Json, control: &[StoredEvent]) {
+        let schema: Json = serde_json::from_str(PRICE_SCHEMA).expect("the schema");
+        let envelope: Json = serde_json::from_str(ENVELOPE_SCHEMA).expect("the envelope");
+        let mut required = listed(&envelope["$defs"]["Envelope"]["required"]);
+        required.extend(listed(&schema["required"]));
+        let mut allowed = names(&envelope["$defs"]["Envelope"]["properties"]);
+        allowed.extend(names(&schema["properties"]));
+        let served = names(body);
+        assert!(required.is_subset(&served), "{required:?} in {served:?}");
+        assert!(served.is_subset(&allowed), "{served:?} within {allowed:?}");
+        assert_eq!(body["served_at"], "2026-10-03T04:00:00.000000000Z");
+        let last = control.last().expect("a row");
+        assert_eq!(
+            body["as_of"],
+            serde_json::json!([{
+                "stream_id": last.stream_id,
+                "seq": last.seq,
+                "hash": format!("sha256:{}", last.hash),
+                "recorded_at": last.recorded_at,
+            }])
+        );
+    }
+
+    /// An unreported body: the instrument, `reported` `false`, `reason`, and no bar member.
+    fn unreported(reply: &Reply, control: &[StoredEvent], id: &str, symbol: &str, reason: &str) {
+        let body = ok(reply);
+        shaped(&body, control);
+        let mut members = names(&body);
+        for envelope in ["api_version", "build", "served_at", "as_of"] {
+            members.remove(envelope);
+        }
+        assert_eq!(
+            members,
+            ["instrument_id", "symbol", "reported", "reason"]
+                .map(str::to_owned)
+                .into(),
+            "never a stub: {body}"
+        );
+        assert_eq!(body["instrument_id"], id);
+        assert_eq!(body["symbol"], symbol);
+        assert_eq!(body["reported"], false);
+        assert_eq!(body["reason"], reason, "{body}");
+    }
+
+    #[test]
+    fn the_last_trusted_session_s_close_is_served_from_the_recording() {
+        let root = bars_dir("recorded", "cell-recorded");
+        let stored_closes = daily(&root, "QQQ", last());
+        let (f, control) = registered(Some(root));
+        let body = ok(&price_of(&f, QQQ_ID));
+        shaped(&body, &control);
+        let (session, close) = stored_closes.last().expect("a session");
+        assert_eq!(*session, last());
+        assert_eq!(body["instrument_id"], QQQ_ID);
+        assert_eq!(body["symbol"], "QQQ");
+        assert_eq!(body["reported"], true);
+        assert_eq!(body["close"], close.as_str());
+        assert_eq!(
+            body["bar_start"],
+            new_york_midnight(last()).expect("a start").to_string()
+        );
+        assert_eq!(body["timeframe"], "1Day");
+        assert_eq!(body["source"], "recorded");
+        assert!(body.get("reason").is_none());
+        let example: Json = serde_json::from_str(PRICE_EXAMPLE).expect("the example");
+        assert_eq!(
+            names(&body),
+            names(&example),
+            "a reported body has the published example's members"
+        );
+    }
+
+    #[test]
+    fn a_generations_root_reads_its_session_s_generation_and_names_alpaca_iex() {
+        let root = bars_dir("generations", "alpaca-iex");
+        let generation = root.join("daily").join(last().to_string());
+        let stored_closes = daily(&generation, "QQQ", last());
+        let (f, control) = registered(Some(root));
+        let body = ok(&price_of(&f, QQQ_ID));
+        shaped(&body, &control);
+        assert_eq!(body["source"], "alpaca-iex");
+        assert_eq!(
+            body["close"],
+            stored_closes.last().expect("a session").1.as_str()
+        );
+    }
+
+    #[test]
+    fn no_root_or_a_missing_root_is_no_store() {
+        for bars in [None, Some(bars_dir("missing", "cell-recorded"))] {
+            let (f, control) = registered(bars);
+            unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "no_store");
+        }
+    }
+
+    #[test]
+    fn a_crypto_instrument_is_not_covered_even_with_bars_stored() {
+        let root = bars_dir("crypto", "cell-recorded");
+        daily(&root, "QQQ", last());
+        let (f, control) = registered(Some(root));
+        unreported(
+            &price_of(&f, BTC_ID),
+            &control,
+            BTC_ID,
+            "BTCUSD",
+            "not_covered",
+        );
+    }
+
+    #[test]
+    fn the_store_is_checked_before_the_asset_class() {
+        let (f, control) = registered(None);
+        unreported(
+            &price_of(&f, BTC_ID),
+            &control,
+            BTC_ID,
+            "BTCUSD",
+            "no_store",
+        );
+    }
+
+    #[test]
+    fn a_root_with_no_dataset_for_the_symbol_is_no_bars() {
+        let root = bars_dir("nobars", "cell-recorded");
+        daily(&root, "SPY", last());
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "no_bars");
+    }
+
+    #[test]
+    fn a_generations_root_without_the_session_s_generation_is_no_bars() {
+        let root = bars_dir("nogeneration", "alpaca-iex");
+        let earlier = Date::new(2026, 10, 1).expect("a date");
+        daily(
+            &root.join("daily").join(earlier.to_string()),
+            "QQQ",
+            earlier,
+        );
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "no_bars");
+    }
+
+    #[test]
+    fn bars_that_stop_before_the_last_session_are_untrusted_never_a_stale_close() {
+        let root = bars_dir("stale", "cell-recorded");
+        daily(&root, "QQQ", Date::new(2026, 10, 1).expect("a date"));
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    fn a_trading_day_missing_inside_the_span_is_untrusted() {
+        let root = bars_dir("hole", "cell-recorded");
+        let stored = daily_skipping(&root, "QQQ", last(), Some(15));
+        assert_eq!(stored.len(), 29, "one session of the 30 left out");
+        assert_eq!(stored.last().expect("a session").0, last());
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    fn a_split_inside_the_span_is_untrusted() {
+        let root = bars_dir("split", "cell-recorded");
+        let stored = daily(&root, "QQQ", last());
+        let (first, ex_date) = (stored[0].0, stored[10].0);
+        let dir = mandate_bars::daily_dir(&root, "QQQ").expect("the layout");
+        write_actions(
+            &dir,
+            &RecordedActions {
+                range: DayRange::new(first, last()).expect("a range"),
+                actions: CorporateActions {
+                    splits: vec![Split {
+                        id: "split".to_owned(),
+                        ex_date,
+                        ratio: SplitRatio::new(4, 1).expect("a ratio"),
+                    }],
+                    ..CorporateActions::none(Symbol::parse("QQQ").expect("a symbol"))
+                },
+            },
+        )
+        .expect("the actions");
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    fn two_bars_sharing_a_start_are_untrusted() {
+        let root = bars_dir("duplicate", "cell-recorded");
+        let stored = daily_skipping(&root, "QQQ", last(), Some(29));
+        assert_eq!(
+            stored.len(),
+            29,
+            "every session but the last, which is written below"
+        );
+        let start = new_york_midnight(last()).expect("a start");
+        Store::new(&root)
+            .put_day(
+                &dataset("QQQ", "1Day"),
+                last(),
+                &Records::Bars(vec![bar_at(start, "500.25"), bar_at(start, "501.25")]),
+            )
+            .expect("stored");
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    fn another_symbol_s_or_a_minute_dataset_at_the_symbol_s_path_is_untrusted() {
+        for (case, from_symbol, timeframe) in [("other", "SPY", "1Day"), ("minute", "QQQ", "1Min")]
+        {
+            let root = bars_dir(case, "cell-recorded");
+            let source = root.join("source");
+            let store = Store::new(&source);
+            let id = dataset(from_symbol, timeframe);
+            for d in sessions_to(last()) {
+                let bar = bar_at(new_york_midnight(d).expect("a start"), "400.25");
+                store
+                    .put_day(&id, d, &Records::Bars(vec![bar]))
+                    .expect("stored");
+            }
+            let from = source.join(id.relative_dir());
+            let to = mandate_bars::daily_dir(&root, "QQQ").expect("the layout");
+            std::fs::create_dir_all(to.parent().expect("a parent")).expect("the layout's parent");
+            std::fs::rename(&from, &to).expect("moved to QQQ's daily path");
+            let (f, control) = registered(Some(root));
+            unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+        }
+    }
+
+    #[test]
+    fn a_corrupt_partition_is_untrusted() {
+        let root = bars_dir("corrupt", "cell-recorded");
+        daily(&root, "QQQ", last());
+        let dir = mandate_bars::daily_dir(&root, "QQQ").expect("the layout");
+        std::fs::write(dir.join(format!("{}.parquet", last())), b"not parquet").expect("written");
+        let (f, control) = registered(Some(root));
+        unreported(&price_of(&f, QQQ_ID), &control, QQQ_ID, "QQQ", "untrusted");
+    }
+
+    #[test]
+    fn an_id_the_catalogue_does_not_list_is_the_one_404() {
+        let root = bars_dir("unlisted", "cell-recorded");
+        daily(&root, "SPY", last());
+        let (f, _) = registered(Some(root));
+        refused(&price_of(&f, SPY_ID), 404, ProblemCode::NotFound);
+        refused(&price_of(&f, "not-an-id"), 404, ProblemCode::NotFound);
+    }
+
+    #[test]
+    fn it_is_authorized_as_the_catalogue_is() {
+        let (f, _) = registered(None);
+        let path = ws(&format!("/instruments/{QQQ_ID}/price"));
+        refused(&get(&f, &path, None), 401, ProblemCode::Unauthenticated);
+        let bob = signed_in(&f, BOB);
+        refused(&get(&f, &path, Some(&bob)), 403, ProblemCode::Forbidden);
+        let carol = signed_in(&f, CAROL);
+        refused(&get(&f, &path, Some(&carol)), 404, ProblemCode::NotFound);
+        let alice = signed_in(&f, ALICE);
+        let other = format!("/v1/workspaces/{OTHER_WORKSPACE}/instruments/{QQQ_ID}/price");
+        refused(&get(&f, &other, Some(&alice)), 404, ProblemCode::NotFound);
+    }
+
+    #[test]
+    fn an_unreadable_snapshot_is_journal_unavailable_as_the_catalogue_answers() {
+        let f = built_with(true, None);
+        let missing = reference(b"never stored");
+        seed(
+            &f,
+            &[("ConfigSnapshotRegistered", snapshot_payload(&missing))],
+        );
+        let alice = signed_in(&f, ALICE);
+        let path = ws(&format!("/instruments/{QQQ_ID}/price"));
+        refused(
+            &get(&f, &path, Some(&alice)),
+            503,
+            ProblemCode::JournalUnavailable,
+        );
+        refused(
+            &get(&f, &ws("/instruments"), Some(&alice)),
+            503,
+            ProblemCode::JournalUnavailable,
+        );
+    }
+
+    #[test]
+    fn a_deployment_with_no_store_is_journal_unavailable() {
+        let f = built_with(false, None);
+        seed(&f, &[]);
+        refused(&price_of(&f, QQQ_ID), 503, ProblemCode::JournalUnavailable);
     }
 }

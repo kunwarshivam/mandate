@@ -401,3 +401,16 @@ pub fn check_internal_paper(
         _ => Err(StartRefusal::InternalWorkspaceNotPaper),
     }
 }
+
+/// The setting that names the stored bars root the price read reads (DEC-2152 item 5), the one the
+/// chart gives the runtime and the executor.
+pub const BARS: &str = "MANDATE_BARS";
+
+/// The bars root `value` names: `None` when it is unset or empty, and the read then answers
+/// `no_store`. A root that does not exist is not refused at start, since the data process may write
+/// it later; the read answers `no_store` until it does.
+pub fn bars_root(value: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+    value
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+}

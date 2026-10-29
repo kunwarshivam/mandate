@@ -398,8 +398,9 @@ local cell serves the recorded bundle alone and names no registry; a hosted cell
   value: {{ include "mandate.researchArtifactsPath" . | quote }}
 {{- end }}
 {{- /* The stored bars' root the runtime's dry run and the executor's binding gate read their
-liquidity figures from (DEC-2274), only where the data process stores them. */}}
-{{- if and (has .p.name (list "runtime" "executor")) .root.Values.images.data (include "mandate.artifactsAccess" .) }}
+liquidity figures from (DEC-2274), and the API's price read its last trusted close from (DEC-2152),
+only where the data process stores them. */}}
+{{- if and (has .p.name (list "runtime" "executor" "api")) .root.Values.images.data (include "mandate.artifactsAccess" .) }}
 - name: MANDATE_BARS
   value: {{ printf "%s/datasets/%s" (include "mandate.artifactsPath" .) (ternary "alpaca-iex" "cell-recorded" (eq .root.Values.data.source "alpaca-iex")) | quote }}
 {{- end }}

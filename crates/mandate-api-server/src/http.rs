@@ -99,6 +99,9 @@ pub struct App {
     pub reduction: Arc<Reduction>,
     /// The account reads' folds, resumed past the rows they folded (DEC-2145 item 10).
     pub folds: Arc<Folds>,
+    /// The stored bars root the price read reads (`MANDATE_BARS`, DEC-2152); `None` when the
+    /// deployment names none, and the read answers `no_store`.
+    pub bars: Option<std::path::PathBuf>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -213,6 +216,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/instruments",
             get(catalogue::instruments).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/instruments/{instrument}/price",
+            get(catalogue::price).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/signal-models",

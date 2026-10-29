@@ -60,6 +60,7 @@ fn app() -> App {
         connect: None,
         reduction: Arc::default(),
         folds: Arc::default(),
+        bars: None,
     }
 }
 

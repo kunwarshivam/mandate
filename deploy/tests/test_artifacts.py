@@ -179,11 +179,12 @@ def bars_roots(docs: list[dict]) -> dict[str, str]:
     return roots
 
 
-def test_only_the_gates_read_the_bars_and_only_where_they_are_stored():
+def test_only_the_gates_and_the_price_read_read_the_bars_and_only_where_they_are_stored():
     """The runtime's dry run and the executor's binding gate are handed the data process's bars
-    root, which they mount read-only, and no other process is (DEC-2274). Without the data process
-    nothing names one, so both checks stay deferred and the binding gate refuses an opening."""
-    assert bars_roots(render_all()) == {"runtime": BARS, "executor": BARS}
+    root, which they mount read-only (DEC-2274), and so is the API's price read (DEC-2152); no
+    other process is. Without the data process nothing names one, so both checks stay deferred, the
+    binding gate refuses an opening, and the price read answers `no_store`."""
+    assert bars_roots(render_all()) == {"runtime": BARS, "executor": BARS, "api": BARS}
     assert bars_roots(render_all("--set", "images.data=")) == {}
     assert bars_roots(render_all("--set", "images.api=")) == {}
 

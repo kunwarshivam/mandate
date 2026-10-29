@@ -728,3 +728,26 @@ fn the_waivers_name_passes_the_secret_name_check() {
         Ok(())
     );
 }
+
+/// The price read's bars root (DEC-2152 item 5): unset or empty names none, which the read answers
+/// `no_store`; any other value is the root, even one that does not exist yet, since the data
+/// process may write it after the API starts.
+#[test]
+fn the_bars_root_is_optional_and_never_refused_at_start() {
+    use mandate_api_server::config::{BARS, bars_root};
+    assert_eq!(BARS, "MANDATE_BARS");
+    assert_eq!(bars_root(None), None);
+    assert_eq!(bars_root(Some(OsStr::new(""))), None);
+    assert_eq!(
+        bars_root(Some(OsStr::new(
+            "/var/lib/mandate/artifacts/datasets/alpaca-iex"
+        ))),
+        Some(PathBuf::from(
+            "/var/lib/mandate/artifacts/datasets/alpaca-iex"
+        ))
+    );
+    assert_eq!(
+        bars_root(Some(OsStr::new("/nowhere"))),
+        Some(PathBuf::from("/nowhere"))
+    );
+}
