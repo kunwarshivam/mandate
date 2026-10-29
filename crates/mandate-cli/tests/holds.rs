@@ -529,41 +529,42 @@ fn the_independence_line_says_it_is_advisory_until_e9_6() {
     }
 }
 
+/// What a listing's stream holds before it is listed.
+type Raise = fn(&mut Fixture);
+
 /// Every listing opens with the advisory line, whichever holds stand: a limit, a reconciliation
 /// hold, a restriction, or none, under a policy that requires independence and one that does not.
 #[test]
 #[ignore = "pending E7-4b"]
 fn every_listing_opens_with_the_advisory_independence_line() {
-    let restriction = |fx: &mut Fixture| {
-        fx.append_in(
-            "paper",
-            ACCOUNT_STREAM,
-            "AccountRestrictionChanged",
-            None,
-            object(&[
-                ("cause", text("broker_notice")),
-                ("restriction", text("blocked")),
-            ]),
-        );
-    };
-    let none = |fx: &mut Fixture| {
-        fx.append_in(
-            "paper",
-            ACCOUNT_STREAM,
-            "StreamOpened",
-            None,
-            object(&[("stream_type", text("account"))]),
-        );
-    };
-    let kinds: [(&str, &dyn Fn(&mut Fixture)); 4] = [
-        ("limit", &|fx: &mut Fixture| {
+    let kinds: [(&str, Raise); 4] = [
+        ("limit", |fx| {
             trigger(fx, AGENT, "max_daily_loss");
         }),
-        ("reconciliation", &|fx: &mut Fixture| {
+        ("reconciliation", |fx| {
             hold(fx, "*", "reconciliation:incomplete", "exits_only");
         }),
-        ("restriction", &restriction),
-        ("none", &none),
+        ("restriction", |fx| {
+            fx.append_in(
+                "paper",
+                ACCOUNT_STREAM,
+                "AccountRestrictionChanged",
+                None,
+                object(&[
+                    ("cause", text("broker_notice")),
+                    ("restriction", text("blocked")),
+                ]),
+            );
+        }),
+        ("none", |fx| {
+            fx.append_in(
+                "paper",
+                ACCOUNT_STREAM,
+                "StreamOpened",
+                None,
+                object(&[("stream_type", text("account"))]),
+            );
+        }),
     ];
     for independent in [true, false] {
         let expected = independence_line(independent).unwrap_or_else(|e| panic!("{e}"));
