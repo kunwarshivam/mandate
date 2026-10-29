@@ -19072,6 +19072,36 @@ mod tests {
         Ok(())
     }
 
+    /// Closing a pull request cancels its `ci` run: `ci-closed` runs only on `closed`, joins the
+    /// group a pull request's `ci` run is in, `ci-` and its ref, and cancels what is in progress
+    /// there. Renaming `ci`'s group without this one would leave a closed pull request's mutation
+    /// shards running to the end, as two did for up to ten hours on 2026-10-29.
+    #[test]
+    fn closing_a_pull_request_cancels_its_ci_run() -> Result<()> {
+        let root = repo_root()?;
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
+        let closed = fs::read_to_string(root.join(".github/workflows/ci-closed.yml"))?;
+        assert!(
+            ci.contains("  group: ci-${{ github.event_name == 'workflow_dispatch' && !inputs.post_merge && github.run_id || github.ref }}\n"),
+            "a pull request's ci run is in the group `ci-` and its ref"
+        );
+        assert!(
+            closed.contains("on:\n  pull_request:\n    types: [closed]\n\n"),
+            "ci-closed runs when a pull request closes, and on nothing else"
+        );
+        assert!(
+            closed.contains(
+                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+            ),
+            "ci-closed joins the closed pull request's ci group and cancels the run in it"
+        );
+        assert!(
+            !closed.contains("refs/heads/main"),
+            "ci-closed never names main's group, so it cancels no post-merge run"
+        );
+        Ok(())
+    }
+
     /// The keys of `workflow`'s jobs, two spaces in under `jobs:`, in file order.
     fn workflow_jobs(workflow: &str) -> Vec<&str> {
         workflow
