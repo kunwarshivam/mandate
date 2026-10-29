@@ -18,6 +18,7 @@ use mandate_canon::Value;
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 use tokio::runtime::Handle;
+use tokio::sync::watch::Receiver;
 
 use crate::chat_run::{self, Start, Thread, append_system};
 use crate::http::App;
@@ -37,16 +38,19 @@ const EVENT_REF: &str = "ev:";
 /// The `sources` label of the daily note's marker, `brief:{date}`.
 const BRIEF_REF: &str = "brief:";
 
-/// Runs a pass every [`PASS`] until the process ends.
-pub async fn watch(app: Arc<App>) {
-    loop {
+/// Runs a pass every [`PASS`], the first one [`PASS`] after the start, and starts none once `stop`
+/// turns true, so a draining process starts no pass.
+pub async fn watch(app: Arc<App>, mut stop: Receiver<bool>) {
+    while tokio::time::timeout(PASS, stop.wait_for(|stopped| *stopped))
+        .await
+        .is_err()
+    {
         let pass = Arc::clone(&app);
         let _ = tokio::task::spawn_blocking(move || {
             let handle = Handle::current();
             pass_once(&pass, &handle)
         })
         .await;
-        tokio::time::sleep(PASS).await;
     }
 }
 

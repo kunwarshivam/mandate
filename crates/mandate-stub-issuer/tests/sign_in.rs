@@ -131,6 +131,7 @@ fn api(
         reduction: Arc::new(Reduction::new(Vec::new(), Box::new(OsRandom::new()))),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let addr = listener.local_addr().expect("its address");
