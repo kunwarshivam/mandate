@@ -161,7 +161,7 @@ and actions.
    - a `terraform_data` for the budget.
 
    Nothing is destroyed.
-   - If it fails with "DOKS does not offer 1.35.9-do.1; it offers: …", tell lane IAC the list.
+   - If it fails with "DOKS does not offer 1.35.9-do.2; it offers: …", tell lane IAC the list.
      The pin changes in a one-line pull request.
    - If `apply` fails with "region has insufficient capacity", or the plan says DigitalOcean does
      not offer the node size in the region, tell lane IAC: staging's region is one line

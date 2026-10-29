@@ -960,12 +960,13 @@ forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-
 # (DEC-2277, DEC-2283 item 2), fetches through mandate-sources' allowlisted fetcher alone, and reads
 # the agent, account and control streams only to choose what to poll. It may never reach the runner,
 # the shell, the CLI, a broker connector, the executor or its process, the runtime or its process,
-# the agent process, the builder: news only ever leads to an opinion, never an order.
+# the agent process, the builder: news only ever leads to an opinion, never an order. tokio drives
+# the SIGTERM listener and the vault login alone.
 [crates.mandate-news-reader]
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["secrecy"]
+allowed_external = ["secrecy", "tokio"]
 forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-executord", "mandate-runtime", "mandate-daemon", "mandate-agentd", "mandate-builder", "mandate-spec"]
 
 # The workspace data process in the local cell (E21-29 lane SC): the deployed instrument's daily

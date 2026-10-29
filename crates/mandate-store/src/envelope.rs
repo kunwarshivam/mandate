@@ -52,6 +52,42 @@ pub fn draft_bytes_with_pii(
     fields: &Fields<'_>,
     pii_refs: &[&str],
 ) -> Option<Vec<u8>> {
+    body_bytes(envelope, fields, pii_refs, ClockSource::Scheduler)
+}
+
+/// The clock a writer times its records by, as journal spec §3's `clock_source` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClockSource {
+    /// The scheduler's ticks, which every long-running writer but the news reader times by.
+    Scheduler,
+    /// The host clock: the news reader times each record by its receipt of the item (DEC-2278).
+    Local,
+}
+
+impl ClockSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Scheduler => "scheduler",
+            Self::Local => "local",
+        }
+    }
+}
+
+/// [`draft_bytes`] for a writer that times its records by `clock_source`.
+pub fn draft_bytes_with_clock(
+    envelope: &Envelope<'_>,
+    fields: &Fields<'_>,
+    clock_source: ClockSource,
+) -> Option<Vec<u8>> {
+    body_bytes(envelope, fields, &[], clock_source)
+}
+
+fn body_bytes(
+    envelope: &Envelope<'_>,
+    fields: &Fields<'_>,
+    pii_refs: &[&str],
+    clock_source: ClockSource,
+) -> Option<Vec<u8>> {
     let pii: BTreeSet<&str> = pii_refs.iter().copied().collect();
     let build = format!("sha256:{}", Digest::of(envelope.build.as_bytes()).to_hex());
     let actor = object(vec![
@@ -72,7 +108,7 @@ pub fn draft_bytes_with_pii(
             "causation_id",
             fields.causation_id.map_or(Value::Null, text),
         ),
-        ("clock_source", text("scheduler")),
+        ("clock_source", text(clock_source.as_str())),
         ("config_refs", Value::Object(fields.config_refs.clone())),
         (
             "correlation_id",
