@@ -117,7 +117,10 @@ jobs:
       # repository's branches (DEC-2075). A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
       # runners. A fork's pull request brings its own workflow, so this keeps honest runs off them;
       # what stops a fork is the approval setting and the runners' own job-started hook.
-      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
+      # DEC-2087: and only while CI_RUNNER_POLICY_ENFORCED is `true`, which the founder sets once the
+      # self-hosted runners enforce the cell's NetworkPolicy; until then every cell job's workspace
+      # pods refuse to start there (their egress gate), so the cell jobs run on GitHub's runners.
+      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER_POLICY_ENFORCED == 'true' && vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

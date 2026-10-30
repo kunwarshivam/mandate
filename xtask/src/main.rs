@@ -19724,12 +19724,14 @@ mod tests {
 
     /// The one expression that may hand a job the self-hosted runners (DEC-2065, DEC-2075): their
     /// label only for a pull request whose head is this repository, or a push or dispatch on
-    /// `main`. A fork's pull request, `pull_request_target`, a schedule, any other ref, and any run
-    /// while the variable is unset take `ubuntu-24.04`.
+    /// `main`, and only while `CI_RUNNER_POLICY_ENFORCED` is `true` (DEC-2087). A fork's pull
+    /// request, `pull_request_target`, a schedule, any other ref, and any run while either variable
+    /// is unset take `ubuntu-24.04`.
     const RUNNER_GUARD: &str = "${{ ((github.event_name == 'pull_request' && \
         github.event.pull_request.head.repo.full_name == github.repository) || \
         ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == \
-        'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}";
+        'refs/heads/main')) && vars.CI_RUNNER_POLICY_ENFORCED == 'true' && vars.CI_RUNNER || \
+        'ubuntu-24.04' }}";
 
     /// DEC-2078's canary reaches the runner label before `CI_RUNNER` is set, but only from the
     /// founder-dispatched smoke on `main`; every other ref fails closed on a hosted runner.
