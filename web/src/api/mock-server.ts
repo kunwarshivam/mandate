@@ -273,14 +273,16 @@ export function createMockServer(options: MockServerOptions): MockServer {
   /** `read-models/equity-history`: the fixture account line (the agents' equity and what no agent manages), the last point of each bucket in the range. */
   function historyAccounts(range: HistoryRange) {
     const served = Date.parse(workspace.now) / 1000;
-    const unmanaged = Number(toFixed(sub(dec(workspace.connection.account_equity), add(...workspace.agents.map((a) => dec(a.state.equity)))), 2));
+    const unmanaged = sub(dec(workspace.connection.account_equity), add(...workspace.agents.map((a) => dec(a.state.equity))));
     const width = BUCKET_SECONDS[range];
     const last = new Map<number, { time: number; value: number }>();
     for (const p of workspace.agents.length > 0 ? buildMarket(workspace).account : []) {
       if (p.time > served || served - p.time > RANGE_SECONDS[range]) continue;
       last.set(Math.floor(p.time / width), p);
     }
-    const points = [...last.values()].map((p) => ({ at: canonical(new Date(p.time * 1000).toISOString()), equity: toDecimalString(dec((p.value + unmanaged).toFixed(2))) }));
+    /** The fixture market draws in numbers; each is read once, to the cent, as a decimal, and every sum after is fixed point. */
+    const drawnCents = (value: number) => dec(value.toFixed(2));
+    const points = [...last.values()].map((p) => ({ at: canonical(new Date(p.time * 1000).toISOString()), equity: toDecimalString(dec(toFixed(add(drawnCents(p.value), unmanaged), 2))) }));
     return [{ account_ref: workspace.connection.connection_id, points }];
   }
 

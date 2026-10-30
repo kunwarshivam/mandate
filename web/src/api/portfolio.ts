@@ -100,25 +100,46 @@ const snapshot = object<AccountSnapshot>({
   observed_at: timestamp,
 });
 
-/** `read-models/dashboard`: the agents as `GET /agents` lists them, and every account with its latest snapshot or `null`. */
+/** Each account once (§4.7 follows each account stream once): a repeated `account_ref` is refused, so no account is summed twice. */
+function distinctAccounts<T extends { account_ref: string }>(accounts: Decoder<T[]>): Decoder<T[]> {
+  return (value, path) => {
+    const read = accounts(value, path);
+    if (!read.ok) return read;
+    const seen = new Set<string>();
+    for (const [i, a] of read.value.entries()) {
+      if (seen.has(a.account_ref)) return fail(`${path}/${i}/account_ref`, "not_canonical", a.account_ref);
+      seen.add(a.account_ref);
+    }
+    return read;
+  };
+}
+
+/** `read-models/dashboard`: the agents as `GET /agents` lists them, and every account once with its latest snapshot or `null`. */
 export const dashboardRead: Decoder<Dashboard> = object<Dashboard>({
   agents: array(agentRow),
-  accounts: array(object<DashboardAccount>({ account_ref: id, snapshot: nullable(snapshot) })),
+  accounts: distinctAccounts(array(object<DashboardAccount>({ account_ref: id, snapshot: nullable(snapshot) }))),
 });
 
 const point = object<EquityPoint>({ at: timestamp, equity: decimal });
 
-/** Points oldest first, each in a later bucket than the one before: a timestamp's fixed width orders as its time does. */
-const points: Decoder<EquityPoint[]> = (value, path) => {
-  const read = array(point)(value, path);
-  if (!read.ok) return read;
-  const back = read.value.findIndex((p, i) => i > 0 && p.at <= read.value[i - 1].at);
-  return back === -1 ? read : fail(`${path}/${back}/at`, "not_canonical", read.value[back].at);
-};
+/** A timestamp's bucket for the range (§4.7): whole buckets of the range's width, counted from the Unix epoch. */
+export function bucketOf(at: Timestamp, range: HistoryRange): number {
+  return Math.floor(Date.parse(`${at.slice(0, 19)}Z`) / 1000 / BUCKET_SECONDS[range]);
+}
+
+/** Points oldest first, one per bucket of the range (§4.7): a point in the same bucket as the one before, or earlier, is refused. */
+function points(range: HistoryRange): Decoder<EquityPoint[]> {
+  return (value, path) => {
+    const read = array(point)(value, path);
+    if (!read.ok) return read;
+    const back = read.value.findIndex((p, i) => i > 0 && (p.at <= read.value[i - 1].at || bucketOf(p.at, range) === bucketOf(read.value[i - 1].at, range)));
+    return back === -1 ? read : fail(`${path}/${back}/at`, "not_canonical", read.value[back].at);
+  };
+}
 
 /** `read-models/equity-history` for the range asked: an answer for another range is refused, so a chart never draws one range as another. */
 export function historyRead(range: HistoryRange): Decoder<EquityHistory> {
-  const body = object<EquityHistory>({ range: closedEnum(HISTORY_RANGES), accounts: array(object<HistoryAccount>({ account_ref: id, points })) });
+  const body = object<EquityHistory>({ range: closedEnum(HISTORY_RANGES), accounts: distinctAccounts(array(object<HistoryAccount>({ account_ref: id, points: points(range) }))) });
   return (value, path) => {
     const read = body(value, path);
     if (!read.ok) return read;
@@ -138,12 +159,41 @@ const pnlBody = object<AgentPnl>({
   unrealized_pnl: nullable(decimal),
 });
 
-/** `read-models/pnl` for the agent asked: an answer naming another agent is refused, so one agent's P&L is never shown as another's. */
+/** A canonical decimal (journal spec §4.6, at most 28 places) as an integer of 10^-28 units: exact, so a sum is compared without rounding. */
+const UNITS = 28;
+function units(text: Decimal): bigint {
+  const negative = text.startsWith("-");
+  const [whole, fraction = ""] = text.replace(/^-/, "").split(".");
+  const scaled = BigInt(whole) * 10n ** BigInt(UNITS) + BigInt(fraction.padEnd(UNITS, "0"));
+  return negative ? -scaled : scaled;
+}
+
+/** The instruments' exact sum, or `null` when any one is `null` (§4.7). An empty list sums to zero. */
+function exactSum(values: ReadonlyArray<Decimal | null>): bigint | null {
+  return values.some((v) => v === null) ? null : (values as Decimal[]).reduce((sum, v) => sum + units(v), 0n);
+}
+
+/** A top-level figure that is not its instruments' sum: `null` exactly when any instrument's is, and otherwise equal to their sum. */
+function sumMismatch(total: Decimal | null, parts: ReadonlyArray<Decimal | null>): boolean {
+  const sum = exactSum(parts);
+  return sum === null ? total !== null : total === null || units(total) !== sum;
+}
+
+/**
+ * `read-models/pnl` for the agent asked: an answer naming another agent is refused, so one agent's
+ * P&L is never shown as another's, and so is one whose top-level `realized_gross` or
+ * `unrealized_pnl` is not its instruments' sum (§4.7), so the page never shows a total its own
+ * parts contradict.
+ */
 export function pnlRead(agentId: string): Decoder<AgentPnl> {
   return (value, path) => {
     if (!isRecord(value)) return fail(path, "wrong_type");
     const read = pnlBody(value, path);
     if (!read.ok) return read;
-    return read.value.agent_id === agentId ? read : fail(`${path}/agent_id`, "not_canonical", read.value.agent_id);
+    const p = read.value;
+    if (p.agent_id !== agentId) return fail(`${path}/agent_id`, "not_canonical", p.agent_id);
+    if (sumMismatch(p.realized_gross, p.instruments.map((i) => i.realized_gross))) return fail(`${path}/realized_gross`, "not_canonical", p.realized_gross);
+    if (sumMismatch(p.unrealized_pnl, p.instruments.map((i) => i.unrealized_pnl))) return fail(`${path}/unrealized_pnl`, "not_canonical", p.unrealized_pnl);
+    return read;
   };
 }
