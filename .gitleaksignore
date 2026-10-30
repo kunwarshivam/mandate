@@ -19,3 +19,6 @@
 # PEM), handed to a stand-in cosign, and the test's assertion that stderr never shows it.
 1c96b0288f5d14abb688e1b3d8b2d18ac570307b:xtask/src/release.rs:generic-api-key:1976
 1c96b0288f5d14abb688e1b3d8b2d18ac570307b:xtask/src/release.rs:generic-api-key:1997
+# The chart test of the news reader's guards: a placeholder local image tag set as `images.api`,
+# twelve hex digits counting up, on the closed #2921's branches only.
+a2b4ee0d2236de1f857ce22fc462a735e8f7648b:deploy/tests/test_cell.py:generic-api-key:1283
