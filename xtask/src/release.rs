@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt as _;
@@ -930,10 +930,12 @@ fn push_image(
     let digest = image::push(layout, &dir, REGISTRY, &repository, tag, Some(&bearer))?;
     let reference = format!("{REGISTRY_HOST}/{repository}@{digest}");
     sign_keyless(&tools.join("cosign"), &reference, SIGN_RETRY_WAIT)?;
-    run(Command::new(tools.join("cosign"))
-        .args(["attest", "--yes", "--type", "cyclonedx", "--predicate"])
-        .arg(dist.join("sbom").join(format!("{name}.cdx.json")))
-        .arg(&reference))?;
+    attest_sbom(
+        &tools.join("cosign"),
+        &dist.join("sbom").join(format!("{name}.cdx.json")),
+        &reference,
+        SIGN_RETRY_WAIT,
+    )?;
     Ok(format!("{reference}  {name}  {}\n", arch.oci()))
 }
 
@@ -1358,28 +1360,53 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
         .to_owned())
 }
 
-/// How many times [`sign_keyless`] runs `cosign sign` before the release fails.
+/// How many times [`logged`] runs a cosign command before the release fails.
 const SIGN_ATTEMPTS: u32 = 3;
-/// The pause between two of [`sign_keyless`]'s attempts.
+/// The pause between two of [`logged`]'s attempts.
 const SIGN_RETRY_WAIT: Duration = Duration::from_secs(10);
 
-/// Signs `reference` keyless with `cosign` (the run's OIDC identity), trying [`SIGN_ATTEMPTS`]
-/// times with `wait` between them. The transparency log can take long enough to answer that cosign
-/// sends its upload again and the log refuses the copy (`409 createLogEntryConflict`), failing the
-/// sign though the first upload landed; each attempt makes fresh ephemeral keys, so a later one is a
-/// new entry, and a digest signed twice only carries two signatures. Every attempt failing fails it.
+/// Signs `reference` keyless with `cosign` (the run's OIDC identity), through [`logged`].
 fn sign_keyless(cosign: &Path, reference: &str, wait: Duration) -> Result<()> {
+    logged(
+        cosign,
+        &["sign".as_ref(), "--yes".as_ref(), reference.as_ref()],
+        wait,
+    )
+}
+
+/// Attests `reference` with the CycloneDX SBOM `predicate`, keyless, through [`logged`].
+fn attest_sbom(cosign: &Path, predicate: &Path, reference: &str, wait: Duration) -> Result<()> {
+    logged(
+        cosign,
+        &[
+            "attest".as_ref(),
+            "--yes".as_ref(),
+            "--type".as_ref(),
+            "cyclonedx".as_ref(),
+            "--predicate".as_ref(),
+            predicate.as_os_str(),
+            reference.as_ref(),
+        ],
+        wait,
+    )
+}
+
+/// Runs `cosign` with `args`, a keyless sign or attest that writes a transparency-log entry, trying
+/// [`SIGN_ATTEMPTS`] times with `wait` between them. The log can take long enough to answer that
+/// cosign sends its upload again and the log refuses the copy (`409 createLogEntryConflict`),
+/// failing the command though the first upload landed; each attempt makes fresh ephemeral keys, so
+/// a later one is a new entry, and a digest signed or attested twice only carries two signatures or
+/// attestations. Every attempt failing fails it.
+fn logged(cosign: &Path, args: &[&OsStr], wait: Duration) -> Result<()> {
     let mut attempt = 1;
     loop {
-        match run(Command::new(cosign).args(["sign", "--yes", reference])) {
+        match run(Command::new(cosign).args(args)) {
             Ok(()) => return Ok(()),
             Err(error) if attempt >= SIGN_ATTEMPTS => {
-                return Err(error.context(format!(
-                    "signing {reference}, attempt {attempt} of {SIGN_ATTEMPTS}"
-                )));
+                return Err(error.context(format!("attempt {attempt} of {SIGN_ATTEMPTS}")));
             }
             Err(error) => {
-                eprintln!("    cosign sign, attempt {attempt} of {SIGN_ATTEMPTS}: {error:#}");
+                eprintln!("    cosign, attempt {attempt} of {SIGN_ATTEMPTS}: {error:#}");
                 thread::sleep(wait);
                 attempt += 1;
             }
@@ -1471,6 +1498,23 @@ mod tests {
             "exactly SIGN_ATTEMPTS runs"
         );
         assert!(format!("{error:#}").contains("attempt 3 of 3"), "{error:#}");
+        Ok(())
+    }
+
+    #[test]
+    fn an_attest_the_log_refuses_once_is_tried_again_and_attests() -> Result<()> {
+        let (cosign, count) = flaky_cosign("attest-once", 1)?;
+        attest_sbom(
+            &cosign,
+            Path::new("dist/sbom/x.cdx.json"),
+            "ghcr.io/x/y@sha256:dd",
+            Duration::ZERO,
+        )?;
+        assert_eq!(
+            fs::read_to_string(&count)?,
+            "attest --yes --type cyclonedx --predicate dist/sbom/x.cdx.json ghcr.io/x/y@sha256:dd\n".repeat(2),
+            "the second attempt attests the same digest with the same SBOM"
+        );
         Ok(())
     }
 
