@@ -342,29 +342,23 @@ async fn posted(
         Err(refusal) => return refusal.response(),
     };
     let run = run_for(&id);
-    match replayed(&reader, (&id, &draft)) {
-        Some(Ok(stored)) => return message_accepted(&thread, &stored, &run, reader.now),
-        Some(Err(conflict)) => return *conflict,
-        None => {}
-    }
     if !app.chat.claim(&thread.key(), &run) {
-        return problem_conflict();
+        return match replayed(&reader.control, (&id, &draft)) {
+            Some(Ok(stored)) => message_accepted(&thread, &stored, &run, reader.now),
+            Some(Err(conflict)) => *conflict,
+            None => problem_conflict(),
+        };
     }
-    let latest = app
-        .journal
-        .rows(&format!("ctl:{}", reader.workspace))
-        .await
-        .unwrap_or_default();
-    match repeated(&latest, &id, &draft) {
-        Some(Settled::Stored(stored)) => {
-            app.chat.release(&thread.key());
-            return message_accepted(&thread, &stored, &run, reader.now);
-        }
-        Some(_) => {
-            app.chat.release(&thread.key());
-            return idempotency_conflict();
-        }
-        None => {}
+    let Ok(latest) = app.journal.rows(&format!("ctl:{}", reader.workspace)).await else {
+        app.chat.release(&thread.key());
+        return Refused::JournalUnavailable.response();
+    };
+    if let Some(answer) = replayed(&latest, (&id, &draft)) {
+        app.chat.release(&thread.key());
+        return match answer {
+            Ok(stored) => message_accepted(&thread, &stored, &run, reader.now),
+            Err(conflict) => *conflict,
+        };
     }
     let stored = match stored_owner(&app, &gate, &reader, (&id, &draft)).await {
         Ok(stored) => stored,
@@ -536,7 +530,7 @@ pub async fn stop_run(
             vec![("run_id", string(&run))],
         )
     };
-    match replayed(&reader, (&id, &draft)) {
+    match replayed(&reader.control, (&id, &draft)) {
         Some(Ok(_)) => return stopped(),
         Some(Err(conflict)) => return *conflict,
         None => {}
@@ -917,13 +911,13 @@ async fn stored_owner(
     }
 }
 
-/// What a repeat under the key finds before anything else runs: the stored record, replayed, or
-/// a conflict; `None` when the key is new.
+/// What a repeat under the key finds in `rows`: the stored record, replayed, or a conflict; `None`
+/// when the key is new.
 fn replayed(
-    reader: &Reader,
+    rows: &[StoredEvent],
     (id, draft): (&str, &[u8]),
 ) -> Option<Result<StoredEvent, Box<Response>>> {
-    repeated(&reader.control, id, draft).map(|settled| match settled {
+    repeated(rows, id, draft).map(|settled| match settled {
         Settled::Stored(row) => Ok(*row),
         _ => Err(Box::new(idempotency_conflict())),
     })

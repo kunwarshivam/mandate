@@ -1344,7 +1344,24 @@ fn the_owner_s_stop_ends_the_run_before_its_next_call() {
     release.send(()).expect("the gateway waits");
     let body = settled(&f, &cookie);
     assert_eq!(texts(&body).last().map(|t| t.1.as_str()), Some("Stopped."));
+    assert_eq!(
+        stop(&run, KEY).status,
+        202,
+        "a Stop retried after its run ended replays its answer"
+    );
+    assert_eq!(
+        stop(&run, "k1Z-9_eeeeeeeeee").status,
+        404,
+        "a new Stop of an ended run finds no run"
+    );
     let rows = chat_rows(&f);
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.event_type == "ChatRunStopRequested")
+            .count(),
+        1,
+        "the retried Stop is the one record"
+    );
     assert!(
         rows.iter().any(|r| r.event_type == "ChatRunStopRequested"),
         "the Stop is its own record though it reuses the message's key"
@@ -2727,4 +2744,72 @@ fn a_cap_with_more_than_six_digits_after_its_point_is_refused() {
         let (found, answer) = put_settings(&f, &cookie, "agt_a", body.as_bytes(), &key);
         assert_eq!(found, status, "{cap}: {answer:?}");
     }
+}
+
+#[test]
+fn a_message_retried_while_its_run_is_in_flight_replays_and_another_is_refused() {
+    let (release, held) = std::sync::mpsc::channel();
+    let gateway = gateway_service_gated(
+        vec![turn(
+            &[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)],
+            None,
+        )],
+        Some(held),
+    );
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    let first = post_keyed(&f, &cookie, "hi", KEY);
+    assert_eq!(first.status, 202);
+    let again = post_keyed(&f, &cookie, "hi", KEY);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(accepted_ids(&again), accepted_ids(&first));
+    assert_eq!(
+        post_keyed(&f, &cookie, "not hi", KEY).status,
+        409,
+        "other content under the key"
+    );
+    assert_eq!(
+        post_keyed(&f, &cookie, "hi again", "k1Z-9_gggggggggg").status,
+        429,
+        "a new message while the run is in flight"
+    );
+    release.send(()).expect("the gateway answers");
+    settled(&f, &cookie);
+    let ended = chat_rows(&f)
+        .iter()
+        .filter(|row| row.event_type == "ChatRunEnded")
+        .count();
+    assert_eq!(ended, 1, "one run");
+}
+
+#[test]
+fn settings_under_a_used_key_replay_the_same_body_and_refuse_another() {
+    let f = fixture(Some(gateway_service(Vec::new())));
+    let cookie = signed_in(&f);
+    let body = |cap: &str| format!(r#"{{"chat_model":"llm.chat_sonnet","daily_cap_usd":"{cap}"}}"#);
+    let key = "k1Z-9_hhhhhhhhhh";
+    assert_eq!(
+        put_settings(&f, &cookie, "agt_a", body("1").as_bytes(), key).0,
+        200
+    );
+    assert_eq!(
+        put_settings(&f, &cookie, "agt_a", body("1").as_bytes(), key).0,
+        200
+    );
+    let (status, answer) = put_settings(&f, &cookie, "agt_a", body("2").as_bytes(), key);
+    assert_eq!(status, 409);
+    assert_eq!(
+        member_text(&answer, &["code"]),
+        Some("idempotency_conflict")
+    );
+    let changes = chat_rows(&f)
+        .iter()
+        .filter(|row| row.event_type == "ChatSettingsChanged")
+        .count();
+    assert_eq!(changes, 1);
 }
