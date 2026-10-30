@@ -1661,12 +1661,14 @@ fn import_images(images: &[&String]) -> Result<()> {
     if images.is_empty() {
         return Ok(());
     }
+    node_takes_images()?;
     let mut args = vec!["image", "import", "--cluster", CLUSTER];
     args.extend(images.iter().map(|image| image.as_str()));
     if sh("k3d", &args).is_err() {
         eprintln!(
             "xtask: the batched image import failed; importing what the node lacks one by one"
         );
+        node_diagnosis();
     }
     api_server_ready()?;
     for image in images {
@@ -1704,6 +1706,29 @@ fn api_server_ready() -> Result<()> {
     }
     node_diagnosis();
     bail!("the cell's API server never became ready")
+}
+
+/// Waits until the node is Ready and its containerd answers on its socket, the two things an
+/// import needs: the API server answers before k3s's containerd does, and an import that starts
+/// in between finds no socket (`ctr: cannot access socket`), which k3d logs and then reports as
+/// imported.
+fn node_takes_images() -> Result<()> {
+    for _ in 0..POLLS {
+        let ready = kubectl(&["get", "nodes", "--no-headers"])
+            .is_ok_and(|nodes| nodes.split_whitespace().nth(1) == Some("Ready"));
+        if ready
+            && output(
+                "docker",
+                &["exec", NODE, "ctr", "--namespace", "k8s.io", "version"],
+            )
+            .is_ok()
+        {
+            return Ok(());
+        }
+        sleep(Duration::from_secs(2));
+    }
+    node_diagnosis();
+    bail!("the cell's node never became ready to take images")
 }
 
 /// The cell node container's state and the last lines of its log, each printed or its error.
