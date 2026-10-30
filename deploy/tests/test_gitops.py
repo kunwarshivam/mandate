@@ -170,23 +170,81 @@ def release_values(docs: list[dict], release: dict) -> dict:
     return merge(values, release["spec"].get("values") or {})
 
 
-def render(release: dict, values: dict, tmp: Path) -> list[dict]:
-    """One of the repository's own charts, rendered from its directory with the release's values."""
+def helm_template(release: dict, values: dict, tmp: Path, charts: Path = CHARTS) -> subprocess.CompletedProcess:
+    """`helm template` of one of the repository's own charts, from its directory under `charts`,
+    with the release's values."""
     chart = OWN_CHARTS[release["spec"]["chartRef"]["name"]]
     values_file = tmp / f"{release['metadata']['name']}-values.yaml"
     values_file.write_text(yaml.safe_dump(values))
     extra = KUBE_API if chart in ("journal-db", "vault") else []
-    done = subprocess.run(
+    return subprocess.run(
         [
-            *("helm", "template", release["spec"]["releaseName"], str(CHARTS / chart)),
+            *("helm", "template", release["spec"]["releaseName"], str(charts / chart)),
             *("--namespace", release["spec"]["targetNamespace"], "-f", str(values_file), *extra),
         ],
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def render(release: dict, values: dict, tmp: Path) -> list[dict]:
+    """One of the repository's own charts, rendered from its directory with the release's values."""
+    done = helm_template(release, values, tmp)
     assert done.returncode == 0, done.stderr
     return [d for d in yaml.safe_load_all(done.stdout) if d]
+
+
+# Each of an overlay's own OCIRepositories names the chart version its digest was published as
+# (`cargo xtask gitops promote` writes it from the release run's CHARTS), whose `+g` suffix is the
+# commit `release publish-charts` packaged the chart from. Values on main reach the cluster at once,
+# a chart only by promotion, so each release is also rendered against that commit's chart: the one
+# Flux installs. The paths are the charts' and those their symlinks reach.
+CHART_VERSION = "mandate.dev/chart-version"
+CHART_VERSION_FORM = re.compile(r"^\d+\.\d+\.\d+\+g([0-9a-f]{12})$")
+CHART_SOURCES = ("deploy/cell/charts", "config/sources", "migrations")
+
+
+def pinned_chart_sources(commit: str, tmp: Path) -> Path | None:
+    """The charts' directory as `commit` held it, extracted under `tmp`, or None if the commit is
+    not in this clone."""
+    out = tmp / f"charts-at-{commit}"
+    if not out.is_dir():
+        if subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"], cwd=ROOT, check=False, capture_output=True
+        ).returncode:
+            return None
+        out.mkdir(parents=True)
+        archive = subprocess.run(
+            ["git", "archive", "--format=tar", commit, *CHART_SOURCES], cwd=ROOT, check=True, capture_output=True
+        )
+        subprocess.run(["tar", "-x", "-C", str(out)], input=archive.stdout, check=True)
+    return out / "deploy" / "cell" / "charts"
+
+
+def pinned_chart_renders(docs: list[dict], tmp: Path) -> list[str]:
+    """Each release of the repository's own charts renders, with the values main gives it, against
+    the chart its OCIRepository pins: the commit its `mandate.dev/chart-version` names."""
+    problems = []
+    sources = of_kind(docs, "OCIRepository")
+    for name, release in sorted(of_kind(docs, "HelmRelease").items()):
+        source = release["spec"].get("chartRef", {}).get("name")
+        if source not in OWN_CHARTS:
+            continue
+        version = ((sources.get(source) or {}).get("metadata", {}).get("annotations") or {}).get(CHART_VERSION)
+        form = CHART_VERSION_FORM.match(version or "")
+        if not form:
+            problems.append(f"{source}: no {CHART_VERSION} naming the commit its digest was packaged from: {version}")
+            continue
+        charts = pinned_chart_sources(form.group(1), tmp)
+        if charts is None:
+            problems.append(f"{source}: {version} names a commit this clone does not have")
+            continue
+        done = helm_template(release, release_values(docs, release), tmp, charts)
+        if done.returncode:
+            refused = " ".join(line.strip() for line in done.stderr.splitlines() if "level=INFO" not in line)
+            problems.append(f"{name}: the chart it pins ({version}) refuses main's values: {refused}")
+    return problems
 
 
 def sources_pinned(docs: list[dict], environment: str = "staging") -> list[str]:
@@ -863,6 +921,55 @@ def test_each_api_settings_bug_is_caught(overlay, api):
     assert api_settings(values) == []
     values["workspace"] = merge(values["workspace"], {"api": api})
     assert api_settings(values), f"api_settings missed {api}"
+
+
+# The real overlays, whose digests were published; the fixture's are made up.
+REAL_OVERLAYS = [o for o in OVERLAYS if o[1] != FIXTURE]
+
+
+@pytest.mark.parametrize("environment,directory", REAL_OVERLAYS, ids=[o[0] for o in REAL_OVERLAYS])
+def test_each_release_renders_against_the_chart_it_pins(environment, directory, tmp_path):
+    docs = build(environment, directory, tmp_path)
+    assert pinned_chart_renders(docs, tmp_path) == []
+
+
+# The chart staging pinned when #2992 set the cool-off waiver in its values: 74bf6557's, whose schema
+# has no such keys though main's has (#2968), so the workspace release failed values-schema.
+SCHEMA_DRIFT_CHART = "0.1.0+g74bf65579dbf"
+SCHEMA_DRIFT_API = {"stepUpCoolOffWaiver": True, "stepUpCoolOffWaiverUntil": "2026-11-05T00:00:00Z"}
+
+
+def staging_docs_pinned_at(version: str | None, tmp: Path) -> list[dict]:
+    docs = build("staging", GITOPS / "clusters" / "staging", tmp)
+    source = of_kind(docs, "OCIRepository")["mandate-workspace"]
+    annotations = source["metadata"].setdefault("annotations", {})
+    if version is None:
+        annotations.pop(CHART_VERSION, None)
+    else:
+        annotations[CHART_VERSION] = version
+    return docs
+
+
+def test_values_main_accepts_but_the_pinned_chart_refuses_are_caught(tmp_path):
+    docs = staging_docs_pinned_at(SCHEMA_DRIFT_CHART, tmp_path)
+    release = of_kind(docs, "HelmRelease")["workspace"]
+    api = release["spec"]["values"]["api"]
+    for key in SCHEMA_DRIFT_API:
+        api.pop(key, None)
+    without = pinned_chart_renders(docs, tmp_path)
+    api.update(SCHEMA_DRIFT_API)
+    assert helm_template(release, release_values(docs, release), tmp_path).returncode == 0, (
+        "main's chart accepts the waiver"
+    )
+    caught = pinned_chart_renders(docs, tmp_path)
+    assert "stepUpCoolOffWaiver" not in str(without), without
+    assert any(p.startswith("workspace: ") and "stepUpCoolOffWaiver" in p for p in caught), caught
+
+
+@pytest.mark.parametrize("version", [None, "0.1.0", "0.1.0+g74bf65579db", "0.1.0+g000000000000"])
+def test_a_chart_pin_that_names_no_known_commit_is_caught(version, tmp_path):
+    problems = pinned_chart_renders(staging_docs_pinned_at(version, tmp_path), tmp_path)
+    assert len(problems) == 1 and problems[0].startswith("mandate-workspace: "), problems
 
 
 def test_values_policy(overlay):
