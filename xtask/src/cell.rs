@@ -399,7 +399,9 @@ pub fn tools_missing() -> Option<String> {
 
 /// `cargo xtask ci cell`: the chart checks, then the cell itself and every drill; the drills with
 /// their bugs planted are `ci cell-seeded`'s, and the upgrade in place is `ci cell-upgrade`'s.
-/// Skipped without docker, k3d and helm unless CI requires it.
+/// The charts' invariant tests run while the cell comes up, since neither reads the other and the
+/// two in turn came within seconds of the job's ten minutes (DEC-464); the drills start only once
+/// both passed. Skipped without docker, k3d and helm unless CI requires it.
 pub fn ci() -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -408,8 +410,12 @@ pub fn ci() -> Result<()> {
         eprintln!("    cell: {reason}; skipping (see deploy/cell/README.md)");
         return Ok(());
     }
-    chart_checks()?;
-    up()?;
+    chart_renders()?;
+    let tests = ChartTests::start()?;
+    let brought_up = up();
+    let tested = tests.finish();
+    brought_up?;
+    tested?;
     drill(&DRILLS, false)
 }
 
@@ -517,9 +523,9 @@ const KUBE_API_RENDERED: &str = r#"kubeApi={"cidrs":["10.43.0.1/32"],"ports":[44
 const KUBE_API_RENDERED_KEYS: [&str; 2] =
     [r#"kubeApi.cidrs=["10.43.0.1/32"]"#, "kubeApi.ports=[443]"];
 
-/// helm lint and a strict schema check of every rendering of every chart, then the charts'
-/// invariant tests, which render them themselves (deploy/tests/).
-pub fn chart_checks() -> Result<()> {
+/// helm lint and a strict schema check of every rendering of every chart. The charts' invariant
+/// tests, which render them themselves, are [`ChartTests`].
+fn chart_renders() -> Result<()> {
     for (chart, values, namespace) in [
         (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml", NAMESPACE),
         (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml", NAMESPACE),
@@ -561,23 +567,57 @@ pub fn chart_checks() -> Result<()> {
         let named = if values.is_empty() { chart } else { values };
         no_live_host_allowed(named, &parse_documents(&rendered)?, &live_addresses()?)?;
     }
-    let status = Command::new("uv")
-        .args([
-            "run",
-            "--locked",
-            "--directory",
-            "python",
-            "pytest",
-            "-q",
-            "../deploy/tests",
-        ])
-        .env("MANDATE_CELL_HELM_REQUIRED", "1")
-        .status()
-        .context("starting pytest")?;
-    if !status.success() {
-        bail!("the chart's invariant tests failed with {status}");
-    }
     Ok(())
+}
+
+/// Where [`ChartTests`] writes pytest's output while the cell comes up, so it never interleaves
+/// with `up`'s and is printed whole once the tests end.
+const CHART_TESTS_LOG: &str = "target/cell/chart-tests.log";
+
+/// The charts' invariant tests (deploy/tests/), with helm required, running as a child process.
+struct ChartTests(std::process::Child);
+
+impl ChartTests {
+    fn start() -> Result<Self> {
+        fs::create_dir_all(STATE).with_context(|| format!("creating {STATE}"))?;
+        let log = fs::File::create(CHART_TESTS_LOG)
+            .with_context(|| format!("creating {CHART_TESTS_LOG}"))?;
+        let errors = log
+            .try_clone()
+            .with_context(|| format!("opening {CHART_TESTS_LOG} twice"))?;
+        eprintln!(
+            "    $ uv run --locked --directory python pytest -q ../deploy/tests (in the background)"
+        );
+        let child = Command::new("uv")
+            .args([
+                "run",
+                "--locked",
+                "--directory",
+                "python",
+                "pytest",
+                "-q",
+                "../deploy/tests",
+            ])
+            .env("MANDATE_CELL_HELM_REQUIRED", "1")
+            .stdin(Stdio::null())
+            .stdout(log)
+            .stderr(errors)
+            .spawn()
+            .context("starting pytest")?;
+        Ok(Self(child))
+    }
+
+    /// Waits for the tests, prints their output, and fails unless they passed.
+    fn finish(mut self) -> Result<()> {
+        let status = self.0.wait().context("waiting for pytest")?;
+        let output = fs::read_to_string(CHART_TESTS_LOG)
+            .with_context(|| format!("reading {CHART_TESTS_LOG}"))?;
+        eprintln!("==> the charts' invariant tests\n{output}");
+        if !status.success() {
+            bail!("the chart's invariant tests failed with {status}");
+        }
+        Ok(())
+    }
 }
 
 /// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` and
