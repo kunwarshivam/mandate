@@ -21,6 +21,8 @@ use std::io;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -927,7 +929,7 @@ fn push_image(
     let dir = out.join("images").join(name);
     let digest = image::push(layout, &dir, REGISTRY, &repository, tag, Some(&bearer))?;
     let reference = format!("{REGISTRY_HOST}/{repository}@{digest}");
-    run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+    sign_keyless(&tools.join("cosign"), &reference, SIGN_RETRY_WAIT)?;
     run(Command::new(tools.join("cosign"))
         .args(["attest", "--yes", "--type", "cyclonedx", "--predicate"])
         .arg(dist.join("sbom").join(format!("{name}.cdx.json")))
@@ -993,7 +995,7 @@ fn push_indexes(
             Some(&bearer),
         )?;
         let reference = format!("{REGISTRY_HOST}/{repository}@{reported}");
-        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+        sign_keyless(&tools.join("cosign"), &reference, SIGN_RETRY_WAIT)?;
         published.push_str(&format!("{reference}  {name}\n"));
     }
     registry.sign_out()?;
@@ -1174,7 +1176,7 @@ pub(crate) fn publish_charts(root: &Path, out: &Path) -> Result<()> {
         ensure!(pushed.status.success(), "helm push of {name} failed");
         let digest = pushed_digest(&printed)?;
         let reference = format!("{REGISTRY_HOST}/{REPOSITORY}/charts/{name}@{digest}");
-        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+        sign_keyless(&tools.join("cosign"), &reference, SIGN_RETRY_WAIT)?;
         charts.push_str(&format!("{reference}  {name}  {version}\n"));
     }
     registry.sign_out()?;
@@ -1356,6 +1358,35 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
         .to_owned())
 }
 
+/// How many times [`sign_keyless`] runs `cosign sign` before the release fails.
+const SIGN_ATTEMPTS: u32 = 3;
+/// The pause between two of [`sign_keyless`]'s attempts.
+const SIGN_RETRY_WAIT: Duration = Duration::from_secs(10);
+
+/// Signs `reference` keyless with `cosign` (the run's OIDC identity), trying [`SIGN_ATTEMPTS`]
+/// times with `wait` between them. The transparency log can take long enough to answer that cosign
+/// sends its upload again and the log refuses the copy (`409 createLogEntryConflict`), failing the
+/// sign though the first upload landed; each attempt makes fresh ephemeral keys, so a later one is a
+/// new entry, and a digest signed twice only carries two signatures. Every attempt failing fails it.
+fn sign_keyless(cosign: &Path, reference: &str, wait: Duration) -> Result<()> {
+    let mut attempt = 1;
+    loop {
+        match run(Command::new(cosign).args(["sign", "--yes", reference])) {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt >= SIGN_ATTEMPTS => {
+                return Err(error.context(format!(
+                    "signing {reference}, attempt {attempt} of {SIGN_ATTEMPTS}"
+                )));
+            }
+            Err(error) => {
+                eprintln!("    cosign sign, attempt {attempt} of {SIGN_ATTEMPTS}: {error:#}");
+                thread::sleep(wait);
+                attempt += 1;
+            }
+        }
+    }
+}
+
 /// Runs `command` with its stdout sent to stderr, so the build's stdout holds only its
 /// `digest=` line for `$GITHUB_OUTPUT`. It prints the program and its arguments only, never the
 /// variables set on it, which `Command`'s `Debug` would print with their values.
@@ -1396,6 +1427,60 @@ mod tests {
 
     use super::*;
     use crate::repo_root;
+
+    /// A stand-in cosign that fails its first `fails` runs and then succeeds, counting every run in
+    /// `count` beside it.
+    fn flaky_cosign(name: &str, fails: u32) -> Result<(PathBuf, PathBuf)> {
+        let dir = env::temp_dir().join(format!("mandate-release-{name}-{}", std::process::id()));
+        fs::create_dir_all(&dir)?;
+        let count = dir.join("count");
+        fs::write(&count, "")?;
+        let cosign = dir.join("cosign");
+        fs::write(
+            &cosign,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{count}'\n[ \"$(wc -l < '{count}')\" -gt {fails} ]\n",
+                count = count.display()
+            ),
+        )?;
+        fs::set_permissions(&cosign, fs::Permissions::from_mode(0o755))?;
+        Ok((cosign, count))
+    }
+
+    #[test]
+    fn a_sign_the_log_refuses_once_is_tried_again_and_signs() -> Result<()> {
+        let (cosign, count) = flaky_cosign("sign-once", 1)?;
+        sign_keyless(&cosign, "ghcr.io/x/y@sha256:aa", Duration::ZERO)?;
+        assert_eq!(
+            fs::read_to_string(&count)?,
+            "sign --yes ghcr.io/x/y@sha256:aa\nsign --yes ghcr.io/x/y@sha256:aa\n",
+            "the second attempt signs the same digest, and nothing runs after it succeeds"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_sign_that_fails_every_attempt_fails_the_release_after_three() -> Result<()> {
+        let (cosign, count) = flaky_cosign("sign-never", u32::MAX)?;
+        let error = sign_keyless(&cosign, "ghcr.io/x/y@sha256:bb", Duration::ZERO)
+            .err()
+            .context("a cosign that always fails must fail the sign")?;
+        assert_eq!(
+            fs::read_to_string(&count)?.lines().count(),
+            3,
+            "exactly SIGN_ATTEMPTS runs"
+        );
+        assert!(format!("{error:#}").contains("attempt 3 of 3"), "{error:#}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_sign_that_succeeds_first_runs_once() -> Result<()> {
+        let (cosign, count) = flaky_cosign("sign-first", 0)?;
+        sign_keyless(&cosign, "ghcr.io/x/y@sha256:cc", Duration::ZERO)?;
+        assert_eq!(fs::read_to_string(&count)?.lines().count(), 1);
+        Ok(())
+    }
 
     fn paths() -> Paths {
         Paths {
