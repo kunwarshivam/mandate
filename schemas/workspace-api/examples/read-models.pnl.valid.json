@@ -27,6 +27,7 @@
     "label": "a live agent with a loss",
     "set": {
       "/environment": "live",
+      "/instruments/1/realized_gross": "-43.5",
       "/realized_gross": "-3.5"
     }
   }
