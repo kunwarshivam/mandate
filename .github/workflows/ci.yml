@@ -235,7 +235,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fast-test
-          save-if: ${{ matrix.shard == '1/6' }}
+          # Each shard builds only its own packages (DEC-871), so each keeps the dependency
+          # cache of its own build.
+          key: ${{ strategy.job-index }}
       - run: cargo xtask ci test-nextest
         env:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
