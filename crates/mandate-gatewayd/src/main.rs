@@ -21,7 +21,11 @@
 //! the vault as the model gateway with the credentials mounted in `<dir>`, reads the provider key
 //! once, builds the HTTPS transport, and serves the founder's vetted entries, none offered until a
 //! gate passes (`mandate_gatewayd::live`). `mandate-gatewayd probe livez|readyz --probe <socket>` is
-//! its `exec` probe (DEC-994 item 5). Every refusal exits 2 with its code alone on stderr.
+//! its `exec` probe (DEC-994 item 5). `mandate-gatewayd gate <model_id> --probe <socket>` asks the
+//! running live service to run the chat gate on one chat entry of its registry file, over the gate
+//! socket beside the probe socket, prints the service's one-line answer, and exits 0 only when the
+//! gate passed (DEC-2294, `mandate_gatewayd::gate_socket`). Every refusal exits 2 with its code
+//! alone on stderr.
 
 use std::collections::BTreeSet;
 use std::net::TcpListener;
@@ -37,12 +41,14 @@ use mandate_gateway::wire::PutRefusal;
 use mandate_gateway_http::{HttpsTransport, SystemClock, TlsRoots};
 use mandate_gatewayd::config::Config;
 use mandate_gatewayd::control::StoreControl;
+use mandate_gatewayd::gate::Reports;
+use mandate_gatewayd::gate_socket::{self, Desk};
 use mandate_gatewayd::key::HeldKey;
-use mandate_gatewayd::live::{self, ChatLive, live_service_with_chat};
+use mandate_gatewayd::live::{self, ChatLive, ChatStart, LiveHandler, live_service_with_chat};
 use mandate_gatewayd::recorded::Replies;
 use mandate_gatewayd::run::{
     self, Command, LiveArgs, Parts, RunArgs, WriteLog, answer_recorded, heartbeat, host_now,
-    observe, recorded_service,
+    observe, recorded_service, started_ids,
 };
 use mandate_gatewayd::serve::{Limits, Server};
 use mandate_gatewayd::writer::ArtifactWriter;
@@ -64,12 +70,25 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 const IO_TIMEOUT: Duration = Duration::from_secs(120);
 /// The most calls served at once: one runtime's turns, with room for its restarts.
 const MAX_CONNECTIONS: usize = 16;
+/// How long `gate` waits for the service's answer: a gate's runs at their bounds, with room.
+const GATE_WAIT: Duration = Duration::from_secs(14_400);
+/// The lane of the ids the gate's calls draw from, beside the start's identity probes' (2).
+const GATE_LANE: u8 = 3;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run::command(&args) {
         Ok(Command::Probe { asked, socket }) => {
             ExitCode::from(probe::query(&socket, asked).map_or(1, |a| a.exit_status()))
+        }
+        Ok(Command::Gate { model_id, socket }) => {
+            match gate_socket::ask(&gate_socket::path(&socket), &model_id, GATE_WAIT) {
+                Ok(answer) => {
+                    println!("{answer}");
+                    ExitCode::from(if answer.starts_with("passed ") { 0 } else { 1 })
+                }
+                Err(_) => refuse("gate_socket_unavailable"),
+            }
         }
         Ok(Command::Run(args)) => {
             match serve(&args.probe, |started, lifecycle, status| {
@@ -190,23 +209,41 @@ fn serve_live(
     let key = read_key(&args.vault_address, &args.vault_dir, &entries, &chats)?;
     let transport = HttpsTransport::new(TlsRoots::Platform).map_err(|_| "https_unavailable")?;
     let (parts, writer) = parts(&config, started)?;
-    let (mut service, refused) =
-        live_service_with_chat(&config, &entries, &chats, parts, transport, Box::new(key))
-            .map_err(|e| e.code())?;
+    let ChatStart {
+        service,
+        refused,
+        withheld,
+    } = live_service_with_chat(
+        &config,
+        &entries,
+        &chats,
+        parts,
+        transport,
+        Box::new(key),
+        writer.as_ref().map(|w| -> &dyn Reports { w }),
+    )
+    .map_err(|e| e.code())?;
     for refusal in &refused {
         eprintln!("registry_refused {} {:?}", refusal.model_id, refusal.error);
     }
+    for held in &withheld {
+        eprintln!("chat_withheld {} {}", held.model_id, held.reason.code());
+    }
     let listener = TcpListener::bind(args.listen).map_err(|_| "listen_unavailable")?;
-    let mut writer = writer;
+    let server = server(listener);
+    gate_socket::serve(&gate_socket::path(&args.probe), server.side())
+        .map_err(|_| "gate_socket_unavailable")?;
+    let mut live = LiveHandler {
+        service,
+        writer,
+        desk: Desk::new(
+            &config.workspace,
+            chats,
+            Box::new(started_ids(started, GATE_LANE)),
+        ),
+    };
     observe(lifecycle, status, host_now(), Input::StartupPassed);
-    server(listener).run_storing(
-        |request| service.answer(&request),
-        |put| {
-            writer
-                .as_mut()
-                .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
-        },
-    );
+    server.run_handling(&mut live);
     Err("listener_stopped")
 }
 

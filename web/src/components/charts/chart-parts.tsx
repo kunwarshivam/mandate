@@ -10,7 +10,8 @@ import { type ChartLevel, usdLabel } from "./options";
 
 /**
  * The seeded fixture market the charts draw, or `null` over the workspace API (DEC-975): the API serves
- * no price or equity history yet, and seeded bars beside a deployment's figures would read as a record.
+ * no price history or agent equity yet, and seeded bars beside a deployment's figures would read as a
+ * record. The account's own equity history is served (DEC-2413) and drawn by `ApiAccountChart`.
  */
 export function useMarket(): Market | null {
   const { ws, source } = useRuntime();

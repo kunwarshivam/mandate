@@ -214,6 +214,18 @@ pub fn api_shared(app: Arc<App>, drain: Arc<Drain>) -> Router {
             get(routes::agent_positions_read).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/pnl",
+            get(crate::portfolio::agent_pnl).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/dashboard",
+            get(crate::portfolio::dashboard).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/dashboard/history",
+            get(crate::portfolio::history).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/alerts",
             get(routes::list_alerts).fallback(otherwise.clone()),
         )

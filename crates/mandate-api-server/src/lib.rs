@@ -52,6 +52,8 @@
 //! - [`connections`]: the connections read's fold, references only (DEC-2620).
 //! - [`reduction`]: route 2's challenge route, its store and request keys, and the address and
 //!   device its limits count against (DEC-2117, DEC-2119).
+//! - [`portfolio`]: the Portfolio page's reads, the dashboard's account snapshots, the account
+//!   equity history, and an agent's P&L (DEC-2413).
 //! - [`mandate_versions`]: an agent's mandate versions and the one in effect, read-only (§4.7,
 //!   DEC-2147).
 //! - [`owner_requests`]: an owner's request for an order, recorded for the runtime's builder,
@@ -100,6 +102,7 @@ pub mod opening;
 pub mod operator;
 pub mod owner_requests;
 pub mod passkeys;
+pub mod portfolio;
 pub mod prices;
 pub mod reads;
 pub mod real_money;

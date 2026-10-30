@@ -1,0 +1,44 @@
+[
+  {
+    "label": "range 1d",
+    "set": {
+      "/range": "1d"
+    }
+  },
+  {
+    "label": "range 1m",
+    "set": {
+      "/range": "1m"
+    }
+  },
+  {
+    "label": "range 3m",
+    "set": {
+      "/range": "3m"
+    }
+  },
+  {
+    "label": "range 1y",
+    "set": {
+      "/range": "1y"
+    }
+  },
+  {
+    "label": "range all",
+    "set": {
+      "/range": "all"
+    }
+  },
+  {
+    "label": "no point in the range",
+    "set": {
+      "/accounts/0/points": []
+    }
+  },
+  {
+    "label": "no account",
+    "set": {
+      "/accounts": []
+    }
+  }
+]

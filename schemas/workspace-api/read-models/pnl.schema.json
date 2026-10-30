@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/pnl.schema.json",
+  "description": "GET /agents/{id}/pnl (§4.7, DEC-2413): the agent sub-ledger's gross realized and unrealized P&L (trading spec §8.1, §8.2), folded from the account stream of the connection the deployed document names, as GET /agents/{id}/positions folds it. No net realized or total P&L: the journal attributes fees and income to no agent. as_of names the control stream and the account stream read.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "agent_id",
+    "environment",
+    "account_ref",
+    "instruments",
+    "realized_gross",
+    "unrealized_pnl"
+  ],
+  "properties": {
+    "agent_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "environment": {
+      "enum": [
+        "paper",
+        "live"
+      ]
+    },
+    "account_ref": {
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "instruments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Instrument"
+      }
+    },
+    "realized_gross": {
+      "description": "The sum of the instruments' realized_gross; null when any one is.",
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unrealized_pnl": {
+      "description": "The sum of the instruments' unrealized_pnl; null when any one is.",
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Instrument": {
+      "description": "One instrument the agent's own fills touched, a closed position included, in instrument order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "filled_qty",
+        "realized_gross",
+        "unrealized_pnl"
+      ],
+      "properties": {
+        "instrument_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "filled_qty": {
+          "description": "The net quantity of the agent's own fills; 0 for a closed position.",
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "realized_gross": {
+          "description": "Trading spec §8.1's realized column summed over the agent's fills, fees not taken off; null where the positions read's cost_basis is.",
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unrealized_pnl": {
+          "description": "§8.2's at the positions read's risk mark, as that read serves it, or 0 for a flat position; null where the basis or a sane mark is not served.",
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

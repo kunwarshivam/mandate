@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::Position;
-use mandate_num::{Price, Qty, SignedQty};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
 
 use crate::{Payload, Row, TERMINAL, Unreadable, stamp};
@@ -159,6 +159,7 @@ pub struct Positions {
     orders: BTreeMap<String, Order>,
     fills: BTreeSet<String>,
     ledgers: BTreeMap<String, Position>,
+    realized: BTreeMap<String, Usd>,
     filled: BTreeMap<String, SignedQty>,
     unreported: BTreeSet<String>,
     marks: BTreeMap<String, RiskMark>,
@@ -179,6 +180,7 @@ impl Positions {
             orders: BTreeMap::new(),
             fills: BTreeSet::new(),
             ledgers: BTreeMap::new(),
+            realized: BTreeMap::new(),
             filled: BTreeMap::new(),
             unreported: BTreeSet::new(),
             marks: BTreeMap::new(),
@@ -255,6 +257,22 @@ impl Positions {
             return None;
         }
         self.ledgers.get(instrument).copied()
+    }
+
+    /// The agent sub-ledger's gross realized P&L in `instrument`: the sum of trading spec §8.1's
+    /// realized column over the agent's own fills, as [`Position::after_fill`] answers it, fees
+    /// not taken off. `None` exactly when [`Self::cost_basis`] is: no fill of the agent's in it,
+    /// or a release, a corporate action, or a fee in the asset leaves the sub-ledger for the
+    /// accounting fold to say.
+    pub fn realized(&self, instrument: &str) -> Option<Usd> {
+        self.cost_basis(instrument)?;
+        self.realized.get(instrument).copied()
+    }
+
+    /// Every instrument the agent's own fills touched, in instrument order, a closed position's
+    /// included: what [`Self::realized`] answers for.
+    pub fn traded(&self) -> impl Iterator<Item = &str> {
+        self.ledgers.keys().map(String::as_str)
     }
 
     /// The net quantity of the agent's own fills per instrument, in instrument order, leaving out an
@@ -397,9 +415,17 @@ impl Positions {
             .get(&instrument)
             .copied()
             .unwrap_or(Position::FLAT);
-        let (after, _) = held
+        let (after, realized) = held
             .after_fill(signed, price)
             .map_err(|_| (payload.refused)("qty_gross"))?;
+        let total = self
+            .realized
+            .get(&instrument)
+            .copied()
+            .unwrap_or(Usd::ZERO)
+            .checked_add(realized)
+            .map_err(|_| (payload.refused)("price"))?;
+        self.realized.insert(instrument.clone(), total);
         self.ledgers.insert(instrument, after);
         Ok(())
     }

@@ -1,0 +1,35 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acct_1",
+      "seq": 90,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "range": "1w",
+  "accounts": [
+    {
+      "account_ref": "acct_1",
+      "points": [
+        {
+          "at": "2026-10-07T20:59:50.000000000Z",
+          "equity": "10000"
+        },
+        {
+          "at": "2026-10-08T14:29:50.000000000Z",
+          "equity": "10069.97"
+        }
+      ]
+    }
+  ]
+}

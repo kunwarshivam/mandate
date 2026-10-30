@@ -53,6 +53,12 @@ impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
         &self.gateway
     }
 
+    /// The gateway itself, for the evaluation gate and the start's identity probes, which call it
+    /// with purpose `evaluation` and no agent, so no research cap applies (DEC-2216 item 1).
+    pub fn gateway_mut(&mut self) -> &mut Gateway<T, S, C> {
+        &mut self.gateway
+    }
+
     /// The gateway's transport, for a recorded service to prime with each call's reply.
     pub fn transport_mut(&mut self) -> &mut T {
         self.gateway.transport_mut()

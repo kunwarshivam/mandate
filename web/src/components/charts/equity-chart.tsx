@@ -1,18 +1,20 @@
 "use client";
 
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { UTCTimestamp } from "lightweight-charts";
+import type { EquityHistory, HistoryRange } from "@/api/portfolio";
 import { AsOf } from "@/components/domain/as-of";
 import { HeroFigure, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import type { Market, Point } from "@/fixtures/market";
-import type { Workspace } from "@/fixtures/types";
-import { add, dec, sub, toFixed } from "@/lib/decimal";
-import { type Direction, direction, usd } from "@/lib/format";
+import type { ShownEnvironment, Workspace } from "@/fixtures/types";
+import { ZERO, abs, add, dec, div, sub, toFixed } from "@/lib/decimal";
+import { type Direction, direction, directionWord, percent, usd } from "@/lib/format";
 import { EQUITY_RANGES, type EquityRange, equityWindow, rangeStart } from "@/lib/chart-data";
 import { useRuntime } from "@/lib/mock-runtime";
+import { type AccountPoint, HISTORY_RANGE_OF, type ServedRead, accountLine, lineChange } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
-import { ChartCredit, RangePicker, useMarket } from "./chart-parts";
+import { ChartCredit, ChartSkeleton, RangePicker, useMarket } from "./chart-parts";
 import { formatTime, usdLabel } from "./options";
 import { type ChartSeries, type ScrubPoint, TimeChart } from "./time-chart";
 
@@ -164,12 +166,139 @@ function EquityHero({
 /**
  * The account as one line, on paper: every agent's equity together, plus what no agent manages. The
  * fixture holds that part flat, so the chart ends at the broker's figure and moves with the agents.
- * Over the workspace API there is no equity history to draw (`useMarket` is `null`), so it renders
- * nothing and the page says the history is not reported.
+ * Over the workspace API there is no fixture market (`useMarket` is `null`), so it renders nothing
+ * and the page draws the served history with `ApiAccountChart` instead.
  */
 export function AccountEquityChart() {
   const market = useMarket();
   return market ? <AccountEquityChartDrawn market={market} /> : null;
+}
+
+/**
+ * Over the API a range reaches back from `served_at` (§4.7): `1d` is the past 24 hours, not the
+ * session, so it is never called "today" beside the snapshot's change since the prior close.
+ */
+const API_RANGE_WORDS: Partial<Record<EquityRange, string>> = { "1D": "past 24 hours", All: "since the account's first snapshot" };
+
+/** How often the account's history is read again over the API while the page is open: its finest bucket is five minutes. */
+const HISTORY_POLL_MS = 60_000;
+
+/** The change from the range's first point, as a signed percentage of it in fixed point; `null` from a zero start. */
+function changePercent(change: string, first: AccountPoint): string | null {
+  const base = dec(first.equity);
+  if (base === ZERO) return null;
+  const share = div(dec(change), base);
+  const text = percent(share, 2);
+  return share > ZERO && text !== "0%" ? `+${text}` : text;
+}
+
+/** The line in words, from its exact decimals: what a screen reader hears in place of the drawing. */
+function describeLine(line: readonly AccountPoint[], words: string, environment: ShownEnvironment): string {
+  const first = line[0];
+  const last = line.at(-1);
+  const funds = environment === "paper" ? " Simulated funds." : "";
+  if (!first || !last) return `No account value recorded ${words}.`;
+  const change = lineChange(line);
+  if (change === null) return `One account value recorded ${words}: ${usd(first.equity)}, so no change to measure.${funds}`;
+  const moved = direction(change) === "flat" ? "no change" : `a ${directionWord(change)} of ${usd(abs(dec(change)))}`;
+  return `Account value ${words}: from ${usd(first.equity)} to ${usd(last.equity)}, ${moved}.${funds}`;
+}
+
+/**
+ * The account's value over the workspace API (DEC-2413): the broker's equity from the dashboard's
+ * snapshots, over a line from `GET /dashboard/history` for the range picked. Every money figure here
+ * is the decimal the API served or a fixed-point sum of them; the line's numbers are drawing values
+ * only. Holding the line shows that point's equity and its change from the range's first point. A
+ * history that is not reported says so with its reason, as a holding's read does, and a range with
+ * no snapshot says none was recorded. With an account in another environment than the page shows
+ * (`agree` false), no line is drawn: paper and live are never one line under one label.
+ */
+export function ApiAccountChart({ total, observedAt, environment, agree = true }: { total: string | null; observedAt: string | null; environment: ShownEnvironment; agree?: boolean }) {
+  const { portfolio, now } = useRuntime();
+  const [range, setRange] = useState<EquityRange>(ACCOUNT_RANGE);
+  const asked = HISTORY_RANGE_OF[range];
+  const [answer, setAnswer] = useState<{ range: HistoryRange; read: ServedRead<EquityHistory> } | null>(null);
+  useEffect(() => {
+    if (!portfolio) return;
+    let live = true;
+    const load = () => {
+      void portfolio.history(asked).then((read) => {
+        if (live) setAnswer({ range: asked, read });
+      });
+    };
+    load();
+    const poll = window.setInterval(load, HISTORY_POLL_MS);
+    return () => {
+      live = false;
+      window.clearInterval(poll);
+    };
+  }, [portfolio, asked]);
+  const read = answer?.range === asked ? answer.read : undefined;
+  const drawn = useMemo(() => (read?.ok ? accountLine(read.value) : null), [read]);
+  const line = drawn?.ok && agree ? drawn.points : null;
+  const points = useMemo<Point[]>(() => (line ?? []).map((p) => ({ time: p.time, value: Number(p.equity) })), [line]);
+  const [scrub, setScrub] = useState<ScrubPoint>(null);
+  const onScrub = useCallback((p: ScrubPoint) => setScrub(p), []);
+  const scrubbed = scrub && line ? (line.find((p) => p.time === scrub.time) ?? null) : null;
+  const figure = scrubbed ? scrubbed.equity : total;
+  const change = line ? lineChange(line, scrubbed) : null;
+  const words = API_RANGE_WORDS[range] ?? RANGE_WORDS[range];
+  const lineMove = line ? lineChange(line) : null;
+  /** A line with fewer than two points has no direction: drawn neutral, never as "no change". */
+  const trend: Direction = lineMove === null ? "flat" : direction(lineMove);
+  const series = useMemo<ChartSeries>(() => ({ kind: "area", tone: "account", points, trend }), [points, trend]);
+  const pct = change !== null && line?.[0] ? changePercent(change, line[0]) : null;
+  const unreported = read === undefined ? null : !read.ok ? read.reason : environment === "unknown" ? "the account's environment is not reported" : !agree ? "your accounts are not all in this environment" : drawn && !drawn.ok ? drawn.reason : null;
+
+  let plot: ReactNode;
+  if (read === undefined) plot = <ChartSkeleton height={ACCOUNT_HEIGHT} label="Loading the account's history" />;
+  else if (unreported !== null || line === null)
+    plot = (
+      <p className="max-w-measure text-sm text-pretty text-muted-foreground" data-slot="history-not-reported">
+        Not reported: {unreported ?? "no account"}.
+      </p>
+    );
+  else if (line.length === 0)
+    plot = (
+      <p className="text-sm text-muted-foreground" data-slot="history-empty">
+        No account value recorded {words}.
+      </p>
+    );
+  else plot = <TimeChart label={`Account value, ${words}`} summary={describeLine(line, words, environment)} series={series} axis={false} onScrub={onScrub} height={ACCOUNT_HEIGHT} phoneHeight={ACCOUNT_PHONE_HEIGHT} className="-mx-1" />;
+
+  return (
+    <section aria-labelledby="account-equity-title" data-slot="account-equity" data-scrubbing={scrubbed ? "" : undefined} className="@container grid content-start gap-5">
+      <div className="grid gap-1.5">
+        <h2 id="account-equity-title" className="text-sm font-medium text-muted-foreground">
+          Account value
+        </h2>
+        <p className={cn(figure === null ? "text-h1 text-muted-foreground" : "text-display proportional-nums lining-nums")} data-slot="account-equity-value">
+          {figure === null ? "Not reported" : <HeroFigure value={usd(figure)} instant={scrubbed !== null} />}
+        </p>
+        {change !== null ? (
+          <p className="flex items-baseline gap-2 pt-1 text-sm">
+            <span data-slot="hero-change" data-tone={direction(change)} className={cn("inline-flex w-fit min-w-0 max-w-full flex-wrap items-baseline gap-x-2 rounded-full px-3 py-1 font-medium", PILL[direction(change)])}>
+              <SignedMoney value={change} instant={scrubbed !== null} />
+              {pct ? <span className="font-mono tabular">({pct})</span> : null}
+              <span className="text-muted-foreground tabular" data-slot="hero-when">
+                {scrubbed ? formatTime(scrubbed.time as UTCTimestamp) : words}
+              </span>
+            </span>
+            <Placeholder name="performance" className="shrink-0" />
+          </p>
+        ) : (
+          <Placeholder name="performance" className="w-fit" />
+        )}
+      </div>
+      {plot}
+      <RangePicker label="Account value range" value={range} options={EQUITY_RANGES} onChange={setRange} />
+      <div className="text-caption leading-6 text-muted-foreground *:mr-1.5 *:align-middle">
+        {environment === "paper" ? <span>Simulated funds on paper.</span> : null}
+        <AsOf at={observedAt} now={now} />
+        <ChartCredit className="mt-1" />
+      </div>
+    </section>
+  );
 }
 
 function AccountEquityChartDrawn({ market }: { market: Market }) {

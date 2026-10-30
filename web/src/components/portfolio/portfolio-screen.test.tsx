@@ -92,22 +92,34 @@ describe("the Portfolio page over the fixtures (DEC-2413)", () => {
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
 
-/** The mock API, with one agent's positions served in full and one agent's read failing. */
-function mountApi() {
+type Body = Record<string, unknown>;
+const unavailable = () => new Response(JSON.stringify({ code: "unavailable", effect: "none", retryable: true }), { status: 503, headers: { "content-type": "application/json" } });
+
+/**
+ * The mock API, with one agent's positions served in full and one agent's read failing. `rewrite`
+ * changes a read's body by its path, and `fail` answers a path `unavailable`; every request is kept.
+ */
+function mountApi({ rewrite, fail }: { rewrite?: (path: string, body: Body) => Body; fail?: (path: string) => boolean } = {}) {
   const server = createMockServer({ workspaceId: WS, scenario: "normal" });
+  const requests: string[] = [];
   const fetch: Fetch = async (input, init) => {
-    const path = new URL(input).pathname;
-    if (path.endsWith(`/agents/${AGENT_IDS.swing}/positions`)) return new Response(JSON.stringify({ code: "unavailable", effect: "none", retryable: true }), { status: 503, headers: { "content-type": "application/json" } });
+    const url = new URL(input);
+    const path = url.pathname;
+    requests.push(`${path}${url.search}`);
+    if (path.endsWith(`/agents/${AGENT_IDS.swing}/positions`) || fail?.(path)) return unavailable();
     const answer = await server.fetch(input, init);
-    if (!path.endsWith(`/agents/${AGENT_IDS.btc}/positions`)) return answer;
-    const body = (await answer.json()) as { positions: Array<Record<string, unknown>> };
-    body.positions = body.positions.map((p) => ({
-      ...p,
-      cost_basis: { qty: "0.12", basis: "6666.666" },
-      risk_mark: { bid: "56789.01", sane: true, session: "crypto", marked_at: "2026-10-30T14:00:00.000000000Z" },
-      market_value: "6814.6812",
-      unrealized_pnl: "148.0152",
-    }));
+    if (!answer.ok) return answer;
+    let body = (await answer.json()) as Body;
+    if (path.endsWith(`/agents/${AGENT_IDS.btc}/positions`)) {
+      body.positions = (body.positions as Body[]).map((p) => ({
+        ...p,
+        cost_basis: { qty: "0.12", basis: "6666.666" },
+        risk_mark: { bid: "56789.01", sane: true, session: "crypto", marked_at: "2026-10-30T14:00:00.000000000Z" },
+        market_value: "6814.6812",
+        unrealized_pnl: "148.0152",
+      }));
+    }
+    if (rewrite) body = rewrite(path, body);
     return new Response(JSON.stringify(body), { status: 200, headers: answer.headers });
   };
   render(
@@ -117,7 +129,15 @@ function mountApi() {
       </ApiRuntimeProvider>
     </RoleProvider>,
   );
+  return { requests };
 }
+
+const figure = (label: string) => within(section("Account figures")).getByText(label).nextElementSibling;
+/** The account value the hero shows: its one plain copy, or the words for none. */
+const heroValue = () => {
+  const value = section("Account value").querySelector("[data-slot=account-equity-value]");
+  return value?.querySelector("[data-slot=figure] > .sr-only")?.textContent ?? value?.textContent;
+};
 
 describe("the Portfolio page over the workspace API (DEC-2413 item 3)", () => {
   it("shows what the reads serve, and names as not reported what they do not, never a fixture figure", async () => {
@@ -125,17 +145,106 @@ describe("the Portfolio page over the workspace API (DEC-2413 item 3)", () => {
     const table = await screen.findByRole("table", { name: "Holdings" });
     await waitFor(() => expect(within(table).getByText("BTC/USD")).toBeInTheDocument());
     expect(screen.queryByText("Fixture data")).toBeNull();
-    expect(within(section("Account value")).getByText("Not reported")).toBeInTheDocument();
-    expect(document.querySelector("[data-slot=history-not-reported]")).not.toBeNull();
-    expect(screen.queryByRole("group", { name: "Account value range" })).toBeNull();
 
     const btc = within(table).getByText("BTC/USD").closest("tr") as HTMLElement;
     const cells = within(btc).getAllByRole("cell");
     expect(cells.slice(0, 5).map((c) => c.textContent)).toEqual(["btc-accumulator", "0.12", "$55,555.5500", expect.stringContaining("$56,789.01"), "$6,814.68"]);
     expect(cells[5].querySelector(".sr-only")?.textContent).toBe("+$148.02");
 
-    const figures = section("Account figures");
-    for (const label of ["Agents' cash", "Today", "Total P&L"]) expect(within(figures).getByText(label).nextElementSibling?.textContent).toBe("not reported");
+    // The dashboard's snapshot: the broker's equity and cash, and the agents' day as its change.
+    await waitFor(() => expect(heroValue()).toBe("$28,478.36"));
+    await waitFor(() => expect(spoken(figure("Cash"))).toBe("$20,045.59"));
+    await waitFor(() => expect(spoken(figure("Today"))).toBe("+$55.56 gain"));
+    // Each agent's realized gross plus unrealized: (−24.56 + 148.01) + (−72.18 + 9.84 − 5.55) + 10.
+    await waitFor(() => expect(spoken(figure("Total P&L, gross"))).toBe("+$65.56 gain"));
+    expect(document.querySelector("[data-slot=pnl-gross]")).toHaveTextContent("Gross: before fees, which aren't attributed to each agent.");
+    expect(within(section("Account figures")).queryByText("Total P&L")).toBeNull();
+
+    // No read serves an agent's equity, so its cash and what no agent manages stay not reported.
+    expect(figure("Agents' cash")?.textContent).toBe("not reported");
+    expect(rows(breakdown("cash-invested-title"))).toContain("Not managed by an agentnot reported—");
+  });
+
+  it("draws the served history for the range picked, reading it again for each range", async () => {
+    const { requests } = mountApi();
+    const hero = await screen.findByRole("region", { name: "Account value" });
+    const picker = within(hero).getByRole("group", { name: "Account value range" });
+    expect(within(picker).getAllByRole("button").map((b) => b.textContent)).toEqual(["1D", "1W", "1M", "3M", "1Y", "All"]);
+    await waitFor(() => expect(within(hero).getByRole("img", { name: "Account value, past 24 hours" })).toBeInTheDocument());
+    expect(requests).toContain(`/v1/workspaces/${WS}/dashboard/history?range=1d`);
+    within(picker).getByRole("button", { name: "1W" }).click();
+    await waitFor(() => expect(requests).toContain(`/v1/workspaces/${WS}/dashboard/history?range=1w`));
+    await waitFor(() => expect(within(hero).getByRole("img", { name: "Account value, past week" })).toBeInTheDocument());
+    expect(within(hero).getByText("past week")).toBeInTheDocument();
+  });
+
+  it("never reads a missing snapshot, a version 1 snapshot's day or a null P&L as zero", async () => {
+    mountApi({
+      rewrite: (path, body) => {
+        if (path.endsWith("/dashboard")) return { ...body, accounts: [...(body.accounts as Body[]), { account_ref: "acct_2", snapshot: null }] };
+        if (path.endsWith(`/agents/${AGENT_IDS.lmn}/pnl`)) return { ...body, realized_gross: null };
+        return body;
+      },
+    });
+    await screen.findByRole("table", { name: "Holdings" });
+    await waitFor(() => expect(heroValue()).toBe("Not reported"));
+    for (const label of ["Cash", "Today", "Total P&L, gross"]) await waitFor(() => expect(figure(label)?.textContent, label).toBe("not reported"));
+  });
+
+  it("says so when the account's history cannot be read, and keeps the snapshot's value", async () => {
+    mountApi({ fail: (path) => path.endsWith("/dashboard/history") });
+    const hero = await screen.findByRole("region", { name: "Account value" });
+    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent(/^Not reported: unavailable\.$/));
+    await waitFor(() => expect(heroValue()).toBe("$28,478.36"));
+    expect(within(hero).queryByRole("img")).toBeNull();
+  });
+
+  it("never sums or labels a live account as the paper workspace's: its value, cash, change and line are not reported", async () => {
+    mountApi({
+      rewrite: (path, body) => {
+        if (!path.endsWith("/dashboard")) return body;
+        const [paper] = body.accounts as Body[];
+        const live = { account_ref: "acct_live", snapshot: { ...(paper.snapshot as Body), environment: "live" } };
+        return { ...body, accounts: [paper, live] };
+      },
+    });
+    await screen.findByRole("table", { name: "Holdings" });
+    await waitFor(() => expect(heroValue()).toBe("Not reported"));
+    for (const label of ["Cash", "Today"]) expect(figure(label)?.textContent, label).toBe("not reported");
+    const hero = section("Account value");
+    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent("Not reported: your accounts are not all in this environment."));
+    expect(within(hero).queryByRole("img")).toBeNull();
+  });
+
+  it("draws no line and claims no paper funds when the workspace's environment is not known", async () => {
+    mountApi({
+      rewrite: (path, body) =>
+        path.endsWith("/connections") ? { ...body, connections: [] } : path.endsWith(`/agents/${AGENT_IDS.btc}`) ? { ...body, agent: { ...(body.agent as Body), environment: "live" } } : body,
+    });
+    const hero = await screen.findByRole("region", { name: "Account value" });
+    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent("Not reported: the account's environment is not reported."));
+    expect(within(hero).queryByRole("img")).toBeNull();
+    expect(hero.textContent).not.toMatch(/Simulated funds on paper/);
+  });
+
+  it("draws a one-point line with no direction, and says one value was recorded, never no change", async () => {
+    mountApi({
+      rewrite: (path, body) => {
+        if (!path.endsWith("/dashboard/history")) return body;
+        const [account] = body.accounts as Array<{ points: Body[] }>;
+        return { ...body, accounts: [{ ...account, points: account.points.slice(-1) }] };
+      },
+    });
+    await screen.findByRole("img", { name: "Account value, past 24 hours" });
+    expect(section("Account value").textContent).toMatch(/One account value recorded past 24 hours: \$[\d,]+\.\d\d, so no change to measure\. Simulated funds\./);
+    expect(document.querySelector("[data-slot=hero-change]")).toBeNull();
+  });
+
+  it("names every figure not reported when the dashboard and P&L reads fail", async () => {
+    mountApi({ fail: (path) => path.endsWith("/dashboard") || path.endsWith("/pnl") });
+    await screen.findByRole("table", { name: "Holdings" });
+    await waitFor(() => expect(heroValue()).toBe("Not reported"));
+    for (const label of ["Cash", "Agents' cash", "Today", "Total P&L, gross"]) expect(figure(label)?.textContent, label).toBe("not reported");
   });
 
   it("says an agent's holdings were not reported when its read fails, and so shows no share", async () => {

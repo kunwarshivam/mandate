@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/equity-history.schema.json",
+  "description": "GET /dashboard/history?range= (§4.7, DEC-2413): each account's equity over the range, one point per bucket that holds a snapshot, the last AccountSnapshotRecorded in it. as_of names the control stream and each account stream read that holds a row.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "range",
+    "accounts"
+  ],
+  "properties": {
+    "range": {
+      "enum": [
+        "1d",
+        "1w",
+        "1m",
+        "3m",
+        "1y",
+        "all"
+      ]
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Account"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_ref",
+        "points"
+      ],
+      "properties": {
+        "account_ref": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "points": {
+          "description": "Oldest first; empty when no snapshot falls in the range.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point"
+          }
+        }
+      }
+    },
+    "Point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "equity"
+      ],
+      "properties": {
+        "at": {
+          "description": "The snapshot row's recorded_at.",
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "equity": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        }
+      }
+    }
+  }
+}

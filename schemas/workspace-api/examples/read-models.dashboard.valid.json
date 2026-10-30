@@ -1,0 +1,28 @@
+[
+  {
+    "label": "no agent and no account",
+    "set": {
+      "/agents": [],
+      "/accounts": []
+    }
+  },
+  {
+    "label": "a version 1 snapshot: no prior close",
+    "set": {
+      "/accounts/0/snapshot/last_equity": null,
+      "/accounts/0/snapshot/day_change": null
+    }
+  },
+  {
+    "label": "a loss on the day",
+    "set": {
+      "/accounts/0/snapshot/day_change": "-12.5"
+    }
+  },
+  {
+    "label": "a live account",
+    "set": {
+      "/accounts/0/snapshot/environment": "live"
+    }
+  }
+]

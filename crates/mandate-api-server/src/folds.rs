@@ -161,6 +161,14 @@ impl Folds {
             .finish()
     }
 
+    /// [`PositionsFold::pnl`] of `rows` for `agent`, from the same held fold as
+    /// [`Self::positions`].
+    pub fn pnl(&self, rows: &[StoredEvent], agent: &str) -> Option<Vec<(&'static str, Value)>> {
+        self.positions
+            .read(rows, agent, || PositionsFold::new(agent))?
+            .pnl()
+    }
+
     /// [`crate::reads::account_positions`] of `rows`.
     pub fn holdings(&self, rows: &[StoredEvent]) -> Vec<Value> {
         self.holdings
