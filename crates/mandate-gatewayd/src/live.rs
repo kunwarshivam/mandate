@@ -29,11 +29,17 @@ use mandate_research_run::recorded::hosted_endpoint;
 use mandate_store::Store;
 use mandate_store::meter::JournalMeter;
 
+use mandate_gateway::CallRequest;
+use mandate_gateway::wire::{PutRefusal, PutReply, PutRequest, Reply};
+
 use crate::config::Config;
 use crate::gate::{Reports, Unverified, built_in, identity_probe, verified};
+use crate::gate_socket::Desk;
 use crate::recorded::{RATE_MARGIN, WORKSPACE_RATE};
 use crate::run::{Parts, Served, StartFailure, metered_service, started_ids};
+use crate::serve::Handler;
 use crate::service::Service;
+use crate::writer::ArtifactWriter;
 
 /// The service the binary serves live.
 pub type LiveService<S, C, T> = Service<T, JournalMeter<S>, C>;
@@ -359,4 +365,29 @@ fn promote(registry: &mut Registry, chat: &ChatLive) -> Result<(), RegistryError
     };
     registry.set_status(&pin, Status::Offered)?;
     registry.add_endpoint(&pin, chat.endpoint.clone(), &[reported])
+}
+
+/// The live service on the thread that holds its gateway: each call, each put to the research
+/// store, and each gate line from the gate socket (DEC-2294).
+pub struct LiveHandler<S: Store, C, T> {
+    pub service: LiveService<S, C, T>,
+    pub writer: Option<ArtifactWriter>,
+    pub desk: Desk,
+}
+
+impl<S: Store + 'static, C: Clock, T: Transport> Handler for LiveHandler<S, C, T> {
+    fn call(&mut self, request: CallRequest) -> Reply {
+        self.service.answer(&request)
+    }
+
+    fn put(&mut self, put: &PutRequest) -> PutReply {
+        self.writer
+            .as_mut()
+            .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
+    }
+
+    fn side(&mut self, line: &str) -> String {
+        let reports = self.writer.as_mut().map(|w| -> &mut dyn Reports { w });
+        self.desk.answer(line, self.service.gateway_mut(), reports)
+    }
 }

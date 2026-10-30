@@ -683,10 +683,9 @@ fn a_buy_of_other_than_the_owner_named_fails_its_check_and_the_report_does_not_v
 }
 
 /// DEC-2294: each behaviour fails its own check. An invented figure, an injected instruction
-/// obeyed, an unnamed source, a missed pause, and a proposal of other than the owner's goal each
-/// fail exactly the check that names them.
-#[test]
-fn each_misbehaviour_fails_its_own_check() {
+/// obeyed, an unnamed source, a missed pause, a proposal of other than the owner's goal, and a run
+/// that never replies each fail exactly the checks that name them; case `n` of them is run alone.
+fn misbehaviour_fails_its_own_check(n: usize) {
     let cases: Vec<(&'static str, Turns, Vec<&str>)> = vec![
         (
             "c02_price",
@@ -747,16 +746,45 @@ fn each_misbehaviour_fails_its_own_check() {
             vec!["calls", "replies"],
         ),
     ];
-    for (run, turns, expected) in cases {
-        let (_, end, shelf) = failing(run, turns);
-        assert_eq!(end.stopped, Some(Stopped::ChecksFailed), "{run}");
-        let failed = failed_checks(&shelf, &end);
-        let want: Vec<(String, String)> = expected
-            .iter()
-            .map(|c| (run.to_owned(), (*c).to_owned()))
-            .collect();
-        assert_eq!(failed, want, "{run}");
-    }
+    let (run, turns, expected) = cases.into_iter().nth(n).unwrap();
+    let (_, end, shelf) = failing(run, turns);
+    assert_eq!(end.stopped, Some(Stopped::ChecksFailed), "{run}");
+    let failed = failed_checks(&shelf, &end);
+    let want: Vec<(String, String)> = expected
+        .iter()
+        .map(|c| (run.to_owned(), (*c).to_owned()))
+        .collect();
+    assert_eq!(failed, want, "{run}");
+}
+
+#[test]
+fn an_invented_figure_fails_figures() {
+    misbehaviour_fails_its_own_check(0);
+}
+
+#[test]
+fn obeying_injected_news_fails_never_calls() {
+    misbehaviour_fails_its_own_check(1);
+}
+
+#[test]
+fn a_source_outside_the_run_fails_sources_within() {
+    misbehaviour_fails_its_own_check(2);
+}
+
+#[test]
+fn a_missed_pause_fails_calls() {
+    misbehaviour_fails_its_own_check(3);
+}
+
+#[test]
+fn a_proposal_off_the_owners_goal_fails_calls_with() {
+    misbehaviour_fails_its_own_check(4);
+}
+
+#[test]
+fn a_run_that_never_reads_or_replies_fails_calls_and_replies() {
+    misbehaviour_fails_its_own_check(5);
 }
 
 /// DEC-2294: a reply that is not the summary schema, or a run that never answers within its turns,
@@ -1161,6 +1189,7 @@ fn the_desk_answers_in_codes_and_remembers_what_it_wrote() {
 #[test]
 fn a_request_line_names_one_model_id() {
     assert_eq!(parse_line("gate llm.chat_sonnet"), Some("llm.chat_sonnet"));
+    assert_eq!(parse_line("gate llm.chat_v2"), Some("llm.chat_v2"));
     for line in [
         "",
         "gate",
@@ -1562,56 +1591,107 @@ proptest! {
         prop_assert_eq!(figures(&plain).len(), 1);
     }
 
-    /// DEC-2294 item 2, a "never": an entry whose named report fails any one binding, or does not
-    /// pass, is never offered, and is offered when every binding holds and the probe passes. The
-    /// oracle is the choice of what to break, independent of the verifier.
+    /// DEC-2294 item 2, a "never": a report that breaks any one binding, or does not pass, never
+    /// verifies, and one that breaks none does. The oracle is the choice of what to break,
+    /// independent of the verifier.
+    #[test]
+    fn a_report_that_breaks_any_binding_never_verifies(
+        breaks in proptest::collection::vec(0usize..BREAKS, 0..4),
+    ) {
+        let (shelf, reference) = crafted(&breaks);
+        let (_, digest) = built_in().unwrap();
+        prop_assert_eq!(
+            verified(&shelf, &reference, &sonnet(), digest).is_ok(),
+            breaks.is_empty(),
+            "{:?}", breaks
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(12))]
+
+    /// DEC-2294 item 2, a "never": an entry whose named report does not verify is never offered at
+    /// start, and one whose report verifies and whose probe passes is.
     #[test]
     fn an_entry_with_a_report_that_does_not_verify_is_never_offered(
-        breaks in proptest::collection::vec(0usize..7, 0..3),
+        breaks in proptest::collection::vec(0usize..BREAKS, 0..3),
     ) {
-        let chat = sonnet();
-        let (set, digest) = built_in().unwrap();
-        let pin = chat.entry.content().model_ref();
-        let mut members = BTreeMap::from([
-            ("kind", format!("\"{}\"", gate::REPORT_KIND)),
-            ("version", "1".to_owned()),
-            ("pin", format!(
-                r#"{{"content_hash":"{}","model_id":"{}","model_version":"{}"}}"#,
-                gate::digest_ref(pin.content_hash), pin.model_id, pin.model_version
-            )),
-            ("probe_set", format!("\"{}\"", gate::digest_ref(digest))),
-            ("endpoint", format!("\"{}\"", chat.endpoint.id)),
-            ("price_table", format!("\"{}\"", gate::digest_ref(chat.endpoint.prices.version()))),
-            ("passed", "true".to_owned()),
-            ("stopped", "null".to_owned()),
-        ]);
-        let wrong = [
-            ("kind", "\"other\"".to_owned()),
-            ("pin", r#"{"content_hash":"sha256:00","model_id":"x","model_version":"1"}"#.to_owned()),
-            ("probe_set", format!("\"{}\"", gate::digest_ref(Digest::of(b"set")))),
-            ("endpoint", "\"elsewhere\"".to_owned()),
-            ("price_table", format!("\"{}\"", gate::digest_ref(Digest::of(b"prices")))),
-            ("passed", "false".to_owned()),
-            ("stopped", "\"checks_failed\"".to_owned()),
-        ];
-        for b in &breaks {
-            let (member, value) = &wrong[*b];
-            members.insert(member, value.clone());
-        }
-        let body = members
-            .iter()
-            .map(|(k, v)| format!("\"{k}\":{v}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let mut shelf = Shelf::default();
-        let reference = shelf.write(format!("{{{body}}}").as_bytes()).unwrap();
-        let named = ChatLive { gate_report: Some(reference), ..chat };
+        let (shelf, reference) = crafted(&breaks);
+        let named = ChatLive { gate_report: Some(reference), ..sonnet() };
         let mut transport = RecordedTransport::new();
         transport.script(vec![reply(&[], Some(FINAL), &reported(&named))]);
-        let started = start(std::slice::from_ref(&named), &shelf, &MemoryStore::default(), ("50", "20"), transport);
+        let started = start(
+            std::slice::from_ref(&named),
+            &shelf,
+            &MemoryStore::default(),
+            ("50", "20"),
+            transport,
+        );
         let offered = status(&started, &named) == Some((Status::Offered, 1));
         prop_assert_eq!(offered, breaks.is_empty(), "{:?}", breaks);
         prop_assert_eq!(started.withheld.is_empty(), breaks.is_empty());
-        let _ = set;
     }
+}
+
+/// How many single bindings [`crafted`] can break.
+const BREAKS: usize = 11;
+
+/// A report on Sonnet with every binding right but the ones `breaks` names, stored in a fresh
+/// store, and its reference.
+fn crafted(breaks: &[usize]) -> (Shelf, ArtifactRef) {
+    let chat = sonnet();
+    let (_, digest) = built_in().unwrap();
+    let pin = chat.entry.content().model_ref();
+    let quoted = |text: &str| format!("\"{text}\"");
+    let mut members = BTreeMap::from([
+        ("kind", quoted(gate::REPORT_KIND)),
+        ("version", "1".to_owned()),
+        ("pin_hash", quoted(&gate::digest_ref(pin.content_hash))),
+        ("pin_id", quoted(&pin.model_id)),
+        ("pin_version", quoted(&pin.model_version)),
+        ("probe_set", quoted(&gate::digest_ref(digest))),
+        ("endpoint", quoted(&chat.endpoint.id)),
+        (
+            "price_table",
+            quoted(&gate::digest_ref(chat.endpoint.prices.version())),
+        ),
+        ("passed", "true".to_owned()),
+        ("stopped", "null".to_owned()),
+    ]);
+    let wrong = [
+        ("kind", quoted("research_gate_report")),
+        ("version", "2".to_owned()),
+        ("pin_hash", quoted(&gate::digest_ref(Digest::of(b"hash")))),
+        ("pin_id", quoted("llm.chat_haiku")),
+        ("pin_version", quoted("1.1.0")),
+        ("probe_set", quoted(&gate::digest_ref(Digest::of(b"set")))),
+        ("endpoint", quoted("elsewhere")),
+        (
+            "price_table",
+            quoted(&gate::digest_ref(Digest::of(b"prices"))),
+        ),
+        ("passed", "false".to_owned()),
+        ("stopped", quoted("checks_failed")),
+        ("passed", quoted("true")),
+    ];
+    assert_eq!(wrong.len(), BREAKS);
+    for b in breaks {
+        let (member, value) = &wrong[*b];
+        members.insert(member, value.clone());
+    }
+    let pinned = format!(
+        r#"{{"content_hash":{},"model_id":{},"model_version":{}}}"#,
+        members["pin_hash"], members["pin_id"], members["pin_version"]
+    );
+    let body = members
+        .iter()
+        .filter(|(k, _)| !k.starts_with("pin_"))
+        .map(|(k, v)| format!("\"{k}\":{v}"))
+        .chain([format!("\"pin\":{pinned}")])
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut shelf = Shelf::default();
+    let reference = shelf.write(format!("{{{body}}}").as_bytes()).unwrap();
+    (shelf, reference)
 }

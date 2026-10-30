@@ -37,21 +37,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_gateway::CallRequest;
-use mandate_gateway::wire::{PutRefusal, PutReply, PutRequest, Reply};
+use mandate_gateway::wire::PutRefusal;
 use mandate_gateway_http::{HttpsTransport, SystemClock, TlsRoots};
 use mandate_gatewayd::config::Config;
 use mandate_gatewayd::control::StoreControl;
 use mandate_gatewayd::gate::Reports;
 use mandate_gatewayd::gate_socket::{self, Desk};
 use mandate_gatewayd::key::HeldKey;
-use mandate_gatewayd::live::{self, ChatLive, ChatStart, LiveService, live_service_with_chat};
+use mandate_gatewayd::live::{self, ChatLive, ChatStart, LiveHandler, live_service_with_chat};
 use mandate_gatewayd::recorded::Replies;
 use mandate_gatewayd::run::{
     self, Command, LiveArgs, Parts, RunArgs, WriteLog, answer_recorded, heartbeat, host_now,
     observe, recorded_service, started_ids,
 };
-use mandate_gatewayd::serve::{Handler, Limits, Server};
+use mandate_gatewayd::serve::{Limits, Server};
 use mandate_gatewayd::writer::ArtifactWriter;
 use mandate_process::lifecycle::{Input, Kind, Lifecycle};
 use mandate_process::probe::{self, Status};
@@ -72,7 +71,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(120);
 /// The most calls served at once: one runtime's turns, with room for its restarts.
 const MAX_CONNECTIONS: usize = 16;
 /// How long `gate` waits for the service's answer: a gate's runs at their bounds, with room.
-const GATE_WAIT: Duration = Duration::from_secs(4 * 3_600);
+const GATE_WAIT: Duration = Duration::from_secs(14_400);
 /// The lane of the ids the gate's calls draw from, beside the start's identity probes' (2).
 const GATE_LANE: u8 = 3;
 
@@ -234,7 +233,7 @@ fn serve_live(
     let server = server(listener);
     gate_socket::serve(&gate_socket::path(&args.probe), server.side())
         .map_err(|_| "gate_socket_unavailable")?;
-    let mut live = Live {
+    let mut live = LiveHandler {
         service,
         writer,
         desk: Desk::new(
@@ -246,31 +245,6 @@ fn serve_live(
     observe(lifecycle, status, host_now(), Input::StartupPassed);
     server.run_handling(&mut live);
     Err("listener_stopped")
-}
-
-/// The live service on the thread that holds its gateway: each call, each put to the research
-/// store, and each gate line from the gate socket.
-struct Live {
-    service: LiveService<PgStore, SystemClock, HttpsTransport>,
-    writer: Option<ArtifactWriter>,
-    desk: Desk,
-}
-
-impl Handler for Live {
-    fn call(&mut self, request: CallRequest) -> Reply {
-        self.service.answer(&request)
-    }
-
-    fn put(&mut self, put: &PutRequest) -> PutReply {
-        self.writer
-            .as_mut()
-            .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
-    }
-
-    fn side(&mut self, line: &str) -> String {
-        let reports = self.writer.as_mut().map(|w| -> &mut dyn Reports { w });
-        self.desk.answer(line, self.service.gateway_mut(), reports)
-    }
 }
 
 /// The provider key, read once through a vault session as the model gateway (DEC-2020 items 3

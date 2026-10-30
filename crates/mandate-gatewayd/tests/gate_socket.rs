@@ -156,6 +156,11 @@ fn the_gate_socket_runs_one_gate_at_a_time_and_refuses_malformed_lines() {
     gate_socket::serve(&path, side).unwrap();
     stopper.stop();
     serving.join().unwrap();
+    assert_eq!(
+        gate_socket::ask(&path, "llm.chat_haiku", Duration::from_secs(5)).unwrap(),
+        "refused stopping",
+        "a stopped service answers no gate"
+    );
 }
 
 /// A file at the gate socket's path that is not a socket is never replaced.
