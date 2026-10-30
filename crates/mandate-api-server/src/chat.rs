@@ -47,6 +47,9 @@ pub const MAX_MESSAGE_CHARS: usize = 4_000;
 /// The daily model spending cap of an agent with no settings of its own (DEC-2293 item 6), in USD.
 pub const DEFAULT_DAILY_CAP_USD: &str = "5";
 
+/// The most messages one read of a thread serves.
+pub const PAGE_MESSAGES: usize = 200;
+
 /// The actor id of the chat's own records, which the system writes.
 pub const CHAT_ACTOR: &str = "chat";
 
@@ -59,11 +62,24 @@ pub struct Chat {
     /// The chat entries the gateway offers, from the registry file both read; the first is the
     /// default.
     pub models: Vec<ChatModel>,
-    /// The runs the owner asked to stop.
+    /// The runs in flight the owner asked to stop; a run's flag goes when its thread is released,
+    /// so the set holds at most one per run in flight.
     stops: Mutex<BTreeSet<String>>,
     /// The run in flight per thread, so a thread runs one at a time.
     running: Mutex<BTreeMap<String, String>>,
     ids: AtomicU64,
+}
+
+/// A thread a run holds, released when this is dropped ([`Chat::held`]).
+pub struct Held<'a> {
+    chat: &'a Chat,
+    thread: String,
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        self.chat.release(&self.thread);
+    }
 }
 
 /// One chat model the owner may choose, with its price per million tokens.
@@ -94,11 +110,19 @@ impl Chat {
         encode_ulid((millis << 80).saturating_add(count))
     }
 
-    pub fn stop(&self, run: &str) {
+    /// Asks `run` to stop, when it is the run `thread` holds; `false`, with nothing asked, when it
+    /// is not. The check and the flag are one step under the threads' lock, so a run that ends
+    /// meanwhile leaves no flag behind.
+    pub fn stop(&self, thread: &str, run: &str) -> bool {
+        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        if running.get(thread).map(String::as_str) != Some(run) {
+            return false;
+        }
         self.stops
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(run.to_owned());
+        true
     }
 
     pub fn stopped(&self, run: &str) -> bool {
@@ -118,11 +142,24 @@ impl Chat {
         true
     }
 
+    /// Frees `thread`, and forgets any Stop of the run that held it.
     pub fn release(&self, thread: &str) {
-        self.running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(thread);
+        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(run) = running.remove(thread) {
+            self.stops
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&run);
+        }
+    }
+
+    /// A guard that releases `thread` when it is dropped, so a run that ends any way, a panic's
+    /// unwinding included, frees its thread.
+    pub fn held(&self, thread: &str) -> Held<'_> {
+        Held {
+            chat: self,
+            thread: thread.to_owned(),
+        }
     }
 
     /// The run `thread` holds, if any.
@@ -435,24 +472,26 @@ pub async fn get_setup(
 
 fn thread_response(app: &App, reader: &Reader, thread: &Thread, query: Option<&str>) -> Response {
     let after = match query {
-        None => 0,
+        None => None,
         Some(q) => match q.strip_prefix("after=").and_then(|n| n.parse::<u64>().ok()) {
-            Some(n) => n,
+            Some(n) => Some(n),
             None => return Refused::Invalid.response(),
         },
     };
-    let messages: Vec<Value> = reader
+    let held: Vec<(&StoredEvent, Value)> = reader
         .control
         .iter()
-        .filter(|row| row.seq > after && row.event_type == "ChatMessagePosted")
+        .filter(|row| row.seq > after.unwrap_or(0) && row.event_type == "ChatMessagePosted")
         .filter_map(|row| Some((row, envelope(row)?)))
         .filter(|(_, e)| thread.holds(e.get("payload")) && !marker(e))
-        .map(|(row, e)| message_value(row, &e))
         .collect();
-    let cursor = reader
+    let tail = reader
         .control
         .last()
-        .map_or(after, |row| row.seq.max(after));
+        .map_or(0, |row| row.seq)
+        .max(after.unwrap_or(0));
+    let (page, cursor) = paged(&held, after.is_some(), tail);
+    let messages: Vec<Value> = page.iter().map(|(row, e)| message_value(row, e)).collect();
     let running = app.chat.running(&thread.key());
     let mut members = thread.id_members();
     members.extend([
@@ -462,6 +501,27 @@ fn thread_response(app: &App, reader: &Reader, thread: &Thread, query: Option<&s
         ("cursor", int(cursor)),
     ]);
     served(reader, &[], members)
+}
+
+/// One page of a thread's `held` messages, oldest first, and the cursor to pass next. After a
+/// cursor (`forward`), the oldest [`PAGE_MESSAGES`], and when more remain the cursor is the last
+/// one's seq, so the next read continues there; without one, the newest [`PAGE_MESSAGES`]. When
+/// nothing remains past the page, the cursor is the stream's `tail`.
+fn paged<'a, 'r, T>(
+    held: &'a [(&'r StoredEvent, T)],
+    forward: bool,
+    tail: u64,
+) -> (&'a [(&'r StoredEvent, T)], u64) {
+    if !forward {
+        let skip = held.len().saturating_sub(PAGE_MESSAGES);
+        return (held.get(skip..).unwrap_or_default(), tail);
+    }
+    match held.get(..PAGE_MESSAGES) {
+        Some(page) if held.len() > PAGE_MESSAGES => {
+            (page, page.last().map_or(tail, |(row, _)| row.seq))
+        }
+        _ => (held, tail),
+    }
 }
 
 /// Whether a message is the daily note's marker, which says nothing (`chat_watch`).
@@ -535,10 +595,9 @@ pub async fn stop_run(
         Some(Err(conflict)) => return *conflict,
         None => {}
     }
-    if app.chat.running(&thread.key()).as_deref() != Some(run.as_str()) {
+    if !app.chat.stop(&thread.key(), &run) {
         return Refused::NotFound.response();
     }
-    app.chat.stop(&run);
     match stored_owner(&app, &gate, &reader, (&id, &draft)).await {
         Ok(_) => stopped(),
         Err(refusal) => *refusal,
@@ -945,13 +1004,14 @@ fn run_for(message: &str) -> String {
 mod pure {
     //! The chat's small readers, each against the inputs on both sides of its every condition.
 
-    use mandate_canon::parse;
+    use mandate_canon::{Digest, parse};
     use mandate_chat::ChatEntry;
     use mandate_gateway::registry::{Identity, Snapshot};
+    use mandate_journal::StoredEvent;
 
     use super::{
-        Chat, ChatModel, MAX_MESSAGE_CHARS, chat_from, decode_message, ident, marker,
-        positive_decimal,
+        Chat, ChatModel, MAX_MESSAGE_CHARS, PAGE_MESSAGES, chat_from, decode_message, ident,
+        marker, paged, positive_decimal,
     };
 
     const REGISTRY: &str = include_str!("../../../deploy/cell/model-gateway/registry.json");
@@ -1044,12 +1104,122 @@ mod pure {
         assert!(!chat.claim("t", "run_2"));
         assert_eq!(chat.running("t").as_deref(), Some("run_1"));
         assert_eq!(chat.running("u"), None);
+        assert!(!chat.stopped("run_1"));
+        assert!(
+            !chat.stop("t", "run_2"),
+            "only the run the thread holds stops"
+        );
+        assert!(!chat.stop("u", "run_1"), "nor a run of another thread");
+        assert!(!chat.stopped("run_2"));
+        assert!(chat.stop("t", "run_1"));
+        assert!(chat.stopped("run_1"));
         chat.release("t");
         assert_eq!(chat.running("t"), None);
+        assert!(!chat.stopped("run_1"), "a released run's Stop is forgotten");
+        assert!(!chat.stop("t", "run_1"), "an ended run stops no more");
         assert!(!chat.stopped("run_1"));
-        chat.stop("run_1");
-        assert!(chat.stopped("run_1"));
-        assert!(!chat.stopped("run_2"));
+    }
+
+    fn at_seq(seq: u64) -> StoredEvent {
+        StoredEvent {
+            stream_id: "ctl:w".to_owned(),
+            seq,
+            event_id: format!("e{seq}"),
+            event_type: "ChatMessagePosted".to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: String::new(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::ZERO,
+            body: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_page_is_at_most_its_size_and_its_cursor_continues_where_it_stopped() {
+        let seqs = |page: &[(&StoredEvent, ())]| -> Vec<u64> {
+            page.iter().map(|(row, ())| row.seq).collect()
+        };
+        let rows: Vec<StoredEvent> = (1..=u64::try_from(PAGE_MESSAGES + 5).unwrap_or_default())
+            .map(at_seq)
+            .collect();
+        let held: Vec<(&StoredEvent, ())> = rows.iter().map(|row| (row, ())).collect();
+        let size = u64::try_from(PAGE_MESSAGES).unwrap_or_default();
+        let (page, cursor) = paged(&held, true, 999);
+        assert_eq!(
+            seqs(page),
+            (1..=size).collect::<Vec<_>>(),
+            "the oldest page"
+        );
+        assert_eq!(cursor, size, "more remain: the cursor is the page's last");
+        let (page, cursor) = paged(&held, false, 999);
+        assert_eq!(
+            seqs(page),
+            (6..=size + 5).collect::<Vec<_>>(),
+            "the newest page"
+        );
+        assert_eq!(cursor, 999, "the newest page ends at the stream's tail");
+        let exactly = held.get(5..).unwrap_or_default();
+        let (page, cursor) = paged(exactly, true, 999);
+        assert_eq!(page.len(), PAGE_MESSAGES);
+        assert_eq!(
+            cursor, 999,
+            "a full page with none past it ends at the tail"
+        );
+        let (page, cursor) = paged(exactly, false, 999);
+        assert_eq!(page.len(), PAGE_MESSAGES);
+        assert_eq!(cursor, 999);
+        let few = held.get(..3).unwrap_or_default();
+        assert_eq!(seqs(paged(few, true, 7).0), [1, 2, 3]);
+        assert_eq!(seqs(paged(few, false, 7).0), [1, 2, 3]);
+        assert_eq!(paged(few, true, 7).1, 7);
+        assert!(paged::<()>(&[], false, 4).0.is_empty());
+        assert_eq!(paged::<()>(&[], true, 4).1, 4);
+    }
+
+    #[test]
+    fn a_release_forgets_only_the_released_run_s_stop() {
+        let chat = Chat::new(None, Vec::new());
+        assert!(chat.claim("t", "run_1"));
+        assert!(chat.claim("u", "run_2"));
+        assert!(chat.stop("t", "run_1"));
+        assert!(chat.stop("u", "run_2"));
+        chat.release("t");
+        assert!(!chat.stopped("run_1"));
+        assert!(chat.stopped("run_2"), "another thread's run keeps its Stop");
+        assert_eq!(chat.running("u").as_deref(), Some("run_2"));
+        chat.release("absent");
+        assert!(chat.stopped("run_2"));
+    }
+
+    #[test]
+    fn a_held_thread_is_released_when_its_run_ends_or_panics() {
+        let chat = Chat::new(None, Vec::new());
+        assert!(chat.claim("t", "run_1"));
+        assert!(chat.stop("t", "run_1"));
+        {
+            let _held = chat.held("t");
+            assert_eq!(
+                chat.running("t").as_deref(),
+                Some("run_1"),
+                "held while it runs"
+            );
+        }
+        assert_eq!(chat.running("t"), None);
+        assert!(!chat.stopped("run_1"));
+        assert!(chat.claim("t", "run_2"));
+        assert!(chat.stop("t", "run_2"));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = chat.held("t");
+            std::panic::resume_unwind(Box::new("the run panicked"));
+        }));
+        assert!(
+            unwound.is_err(),
+            "the run's panic unwinds through the guard"
+        );
+        assert_eq!(chat.running("t"), None, "a panicking run frees its thread");
+        assert!(!chat.stopped("run_2"), "and its Stop is forgotten");
+        assert!(chat.claim("t", "run_3"), "the thread takes its next run");
     }
 
     #[test]

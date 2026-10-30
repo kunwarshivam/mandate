@@ -8,8 +8,8 @@ import { SCREENS, type Screen } from "@/lib/screens";
 import { SCREEN_ICON } from "./screen-icons";
 import { StopButton } from "./stop-control";
 
-/** The screens that sit on the dock itself, in order: every listed screen (DEC-2293). */
-export const DOCK_LINKS = ["home", "new", "settings"] as const;
+/** The screens that sit on the dock itself, in order: every listed screen (DEC-2293, DEC-2413). */
+export const DOCK_LINKS = ["home", "portfolio", "new", "settings"] as const;
 
 export function isCurrent(pathname: string, href: string): boolean {
   switch (href) {

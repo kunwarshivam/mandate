@@ -774,7 +774,9 @@ fn capped(cap: &str, spent: &[(&str, &str, i64, &str)]) -> bool {
             .any(|t| t.0 == "owner" && t.1 == "anything new?"),
         "the message is its own record though it reuses the settings write's key: {said:?}"
     );
-    said.last().is_some_and(|t| t.1.contains("spending cap"))
+    said.last().is_some_and(|t| {
+        t.1 == "I've reached today's AI spending cap for this agent. You can raise it in Settings."
+    })
 }
 
 #[test]
@@ -1344,6 +1346,10 @@ fn the_owner_s_stop_ends_the_run_before_its_next_call() {
     release.send(()).expect("the gateway waits");
     let body = settled(&f, &cookie);
     assert_eq!(texts(&body).last().map(|t| t.1.as_str()), Some("Stopped."));
+    assert!(
+        !f.app.chat.stopped(&run),
+        "an ended run's Stop is forgotten, so the flags stay bounded"
+    );
     assert_eq!(
         stop(&run, KEY).status,
         202,
@@ -2812,4 +2818,225 @@ fn settings_under_a_used_key_replay_the_same_body_and_refuse_another() {
         .filter(|row| row.event_type == "ChatSettingsChanged")
         .count();
     assert_eq!(changes, 1);
+}
+
+/// The seqs of a thread read's messages, oldest first.
+fn seqs_of(body: &Value) -> Vec<u64> {
+    body.get("messages")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| m.get("seq").and_then(Value::as_int))
+        .collect()
+}
+
+#[test]
+fn a_long_thread_is_served_a_page_at_a_time_and_its_cursor_continues_it() {
+    let f = fixture(None);
+    let cookie = signed_in(&f);
+    let page = mandate_api_server::chat::PAGE_MESSAGES;
+    let count = u64::try_from(page + 5).expect("a count");
+    let mut rows: Vec<StoredEvent> = (3..count + 3)
+        .map(|seq| {
+            row(
+                seq,
+                "ChatMessagePosted",
+                &format!(
+                    r#"{{"agent_id":"agt_a","author":"owner","card":null,"member":"{ALICE}","proactive":false,"run_id":null,"setup_id":null,"sources":[],"text":"m{seq}"}}"#
+                ),
+            )
+        })
+        .collect();
+    let tail = count + 3;
+    rows.push(row(tail, "AgentGoalsUpdated", r#"{"agent_id":"agt_a"}"#));
+    push(&f, &ctl(), rows);
+    let all: Vec<u64> = (3..count + 3).collect();
+    let cursor = |body: &Value| body.get("cursor").and_then(Value::as_int);
+
+    let newest = thread(&f, &cookie);
+    assert_eq!(
+        seqs_of(&newest),
+        all[5..],
+        "without a cursor, the newest page"
+    );
+    assert_eq!(cursor(&newest), Some(tail));
+
+    let (status, oldest) = get_json(&f, &cookie, "/agents/agt_a/messages?after=0");
+    assert_eq!(status, 200);
+    assert_eq!(
+        seqs_of(&oldest),
+        all[..page],
+        "after a cursor, the oldest page"
+    );
+    assert_eq!(
+        cursor(&oldest),
+        Some(all[page - 1]),
+        "more remain: the cursor is the page's last message"
+    );
+
+    let next = format!("/agents/agt_a/messages?after={}", all[page - 1]);
+    let (_, rest) = get_json(&f, &cookie, &next);
+    assert_eq!(seqs_of(&rest), all[page..]);
+    assert_eq!(
+        cursor(&rest),
+        Some(tail),
+        "none remain: the cursor is the tail"
+    );
+
+    let full = format!("/agents/agt_a/messages?after={}", all[4]);
+    let (_, exactly) = get_json(&f, &cookie, &full);
+    assert_eq!(
+        seqs_of(&exactly),
+        all[5..],
+        "exactly one page after the cursor"
+    );
+    assert_eq!(
+        cursor(&exactly),
+        Some(tail),
+        "a full page with none past it ends at the tail"
+    );
+
+    let (_, ahead) = get_json(&f, &cookie, "/agents/agt_a/messages?after=9999");
+    assert_eq!(seqs_of(&ahead), Vec::<u64>::new());
+    assert_eq!(cursor(&ahead), Some(9999), "a cursor past the tail is kept");
+}
+
+/// The results of a run of `buy 2 AAPL` whose model buys AAPL once `changed` is pushed to the
+/// control stream while the run waits on its first call.
+fn buy_after(changed: impl FnOnce(&Fixture, u64) -> StoredEvent) -> Vec<(String, String)> {
+    let (release, held) = std::sync::mpsc::channel();
+    let gateway = gateway_service_gated(
+        vec![
+            turn(&[(name::BUY, r#"{"quantity":"2","symbol":"AAPL"}"#)], None),
+            turn(&[], Some(r#"{"watch":[]}"#)),
+        ],
+        Some(held),
+    );
+    let f = fixture(Some(gateway));
+    seed_catalogue(&f);
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "buy 2 AAPL").status, 202);
+    let seq = u64::try_from(f.journal.rows_of(&ctl()).len()).expect("a count") + 1;
+    push(&f, &ctl(), vec![changed(&f, seq)]);
+    release.send(()).expect("the gateway answers");
+    settled(&f, &cookie);
+    let requests = f
+        .journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .values()
+        .flatten()
+        .filter(|row| row.event_type == "OwnerRequestSubmitted")
+        .count();
+    assert_eq!(requests, 0, "a refused buy commits nothing");
+    results(&f)
+}
+
+#[test]
+fn a_buy_after_the_agent_was_stopped_mid_run_is_refused() {
+    let found = buy_after(|_, seq| row(seq, "AgentStopped", r#"{"agent_id":"agt_a"}"#));
+    assert_eq!(
+        found,
+        vec![(
+            name::BUY.to_owned(),
+            r#"{"ok":false,"refused":"agent_stopped"}"#.to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_buy_after_a_new_mandate_version_mid_run_is_checked_against_it() {
+    let found = buy_after(|f, seq| {
+        let msft_only = String::from_utf8_lossy(&to_canonical(
+            &parse(PINNED_DOCUMENT.as_bytes()).expect("JSON"),
+        ))
+        .replace(AAPL, MSFT)
+        .replace(r#""symbol":"AAPL""#, r#""symbol":"MSFT""#);
+        let version = store(f, &msft_only);
+        row(
+            seq,
+            "AgentDeployed",
+            &format!(r#"{{"agent_id":"agt_a","mandate_version":"{version}"}}"#),
+        )
+    });
+    assert_eq!(
+        found,
+        vec![(
+            name::BUY.to_owned(),
+            r#"{"ok":false,"refused":"not_in_mandate"}"#.to_owned()
+        )]
+    );
+}
+
+/// Whether a setup message of Alice's, after the turn records `spent`, each `(member, agent, cost,
+/// seconds before now)` of another setup or an agent, is held by the setup cap.
+fn setup_capped(spent: &[(&str, Option<&str>, &str, i64)]) -> bool {
+    let gateway = gateway_service(vec![turn(
+        &[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)],
+        None,
+    )]);
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    let rows = spent
+        .iter()
+        .zip(3_u64..)
+        .map(|((member, agent, cost, ago), seq)| {
+            let (agent, setup) = agent.map_or(("null".to_owned(), r#""setup_old""#), |a| {
+                (format!(r#""{a}""#), "null")
+            });
+            let mut row = row(
+                seq,
+                "ChatTurnRecorded",
+                &format!(
+                    r#"{{"agent_id":{agent},"cost_usd":"{cost}","member":"{member}","setup_id":{setup}}}"#
+                ),
+            );
+            row.recorded_at = UtcNanos::from_parts(T0 - ago, 0)
+                .expect("a time")
+                .to_string();
+            row
+        })
+        .collect();
+    push(&f, &ctl(), rows);
+    let sent = post_setup(&f, &cookie, "?setup_id=setup_cap", "setupkey00000000031");
+    assert_eq!(sent.status, 202, "{}", String::from_utf8_lossy(&sent.body));
+    for _ in 0..800 {
+        if chat_rows(&f).iter().any(|r| r.event_type == "ChatRunEnded") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let (status, body) = get_json(&f, &cookie, "/setup/setup_cap/messages");
+    assert_eq!(status, 200);
+    let said = texts(&body);
+    assert_eq!(said.len(), 2, "{said:?}");
+    said.last().is_some_and(|t| {
+        t.1 == "I've reached today's AI spending cap for setting up agents. Try again tomorrow."
+    })
+}
+
+const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W4A";
+
+#[test]
+fn today_s_setup_turns_of_the_member_that_reach_the_default_cap_hold_their_next_setup() {
+    assert!(setup_capped(&[
+        (ALICE, None, "3", 0),
+        (ALICE, None, "2", 60)
+    ]));
+}
+
+#[test]
+fn another_day_another_member_or_an_agent_s_chat_does_not_count_toward_the_setup_cap() {
+    assert!(!setup_capped(&[
+        (ALICE, None, "4.99", 0),
+        (ALICE, None, "9", 86_400),
+        (BOB, None, "9", 0),
+        (ALICE, Some("agt_a"), "9", 0),
+    ]));
+}
+
+#[test]
+fn a_setup_spend_that_does_not_read_holds_the_setup_run() {
+    assert!(setup_capped(&[(ALICE, None, "not money", 0)]));
 }

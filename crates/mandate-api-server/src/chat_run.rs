@@ -29,7 +29,7 @@ use mandate_time::UtcNanos;
 use tokio::runtime::Handle;
 
 use crate::backtests::paper;
-use crate::chat::{CHAT_ACTOR, latest_goals, settings_of};
+use crate::chat::{CHAT_ACTOR, agent_of, latest_goals, settings_of};
 use crate::commands::{Command, Event, KillScope, Settled, Writer, envelope_by, settle_batch_at};
 use crate::http::App;
 use crate::reads::{Deployment, account_ref, agent_orders, envelope, mode};
@@ -172,9 +172,8 @@ pub(crate) fn spawn(app: Arc<App>, start: Start) {
 pub(crate) fn start_blocking(app: Arc<App>, handle: &Handle, start: Start) {
     let inner = handle.clone();
     handle.spawn_blocking(move || {
-        let key = start.thread.key();
+        let _held = app.chat.held(&start.thread.key());
         execute(&app, &inner, start);
-        app.chat.release(&key);
     });
 }
 
@@ -250,6 +249,9 @@ fn execute(app: &App, handle: &Handle, start: Start) {
         let said = match &end {
             End::Answered { .. } => None,
             End::Stopped => Some("Stopped."),
+            End::Budget if kind == SETUP => Some(
+                "I've reached today's AI spending cap for setting up agents. Try again tomorrow.",
+            ),
             End::Budget => Some(
                 "I've reached today's AI spending cap for this agent. You can raise it in Settings.",
             ),
@@ -312,12 +314,10 @@ impl Journaled<'_> {
         let _ = self.append("ChatRunEnded", payload);
     }
 
-    /// The cost of the agent's chat today, summed from its turns' records; `None` when it cannot
-    /// be known: no clock, an unreadable control stream, or a turn whose cost does not read.
+    /// The cost today of the agent's chat, or of a setup's, the member's every setup thread,
+    /// summed from their turns' records ([`counts_toward`]); `None` when it cannot be known: no
+    /// clock, an unreadable control stream, or a turn whose cost does not read.
     fn spent_today(&self) -> Option<u128> {
-        let Some(agent) = self.start.thread.agent.as_deref() else {
-            return Some(0);
-        };
         let today = self.app.clock.now()?.date().to_string();
         let control = self
             .handle
@@ -334,7 +334,7 @@ impl Journaled<'_> {
             })
             .filter_map(envelope)
             .filter_map(|e| e.get("payload").cloned())
-            .filter(|p| p.get("agent_id").and_then(Value::as_str) == Some(agent))
+            .filter(|p| counts_toward(&self.start.thread, p))
             .filter_map(|p| p.get("cost_usd").cloned())
             .map(|cost| cost.as_str().and_then(micros))
             .try_fold(0u128, |sum, cost| sum.checked_add(cost?))
@@ -442,6 +442,17 @@ impl Host for Journaled<'_> {
     fn call_id(&mut self) -> String {
         let now = self.now();
         self.app.chat.ulid(now)
+    }
+}
+
+/// Whether a turn's record `payload` counts toward `thread`'s daily cap: an agent's thread counts
+/// every turn of that agent, whoever wrote; a setup's counts every turn of the member's own that
+/// names no agent, so a member's setups share one cap ([`crate::chat::DEFAULT_DAILY_CAP_USD`]).
+fn counts_toward(thread: &Thread, payload: &Value) -> bool {
+    let text = |name: &str| payload.get(name).and_then(Value::as_str);
+    match thread.agent.as_deref() {
+        Some(agent) => text("agent_id") == Some(agent),
+        None => text("agent_id").is_none() && text("member") == Some(thread.member.as_str()),
     }
 }
 
@@ -725,8 +736,16 @@ impl Tools<'_> {
             .unwrap_or_default()
     }
 
-    fn deployment(&self) -> Option<&Deployment> {
-        self.start.deployment.as_ref()
+    /// The run's agent as the control stream deploys it now, not as it was when the run started,
+    /// so a Stop or a new mandate version since then is what a tool answers by.
+    fn deployment(&self) -> Option<Deployment> {
+        let agent = self.agent()?;
+        agent_of(&self.control(), agent)
+    }
+
+    /// The id of the run's agent, which no later record changes.
+    fn agent(&self) -> Option<&str> {
+        self.start.deployment.as_ref().map(|d| d.0.as_str())
     }
 
     fn agent_rows(&self) -> Vec<StoredEvent> {
@@ -744,7 +763,7 @@ impl Tools<'_> {
 
     fn account_rows(&self) -> Option<Vec<StoredEvent>> {
         let deployment = self.deployment()?;
-        let doc = document(self.app, deployment)?;
+        let doc = document(self.app, &deployment)?;
         let control = self.control();
         let reference = account_ref(&control, &doc.connection_id)?;
         self.handle
@@ -928,7 +947,7 @@ impl Tools<'_> {
     }
 
     fn mandate(&self) -> String {
-        let Some(doc) = self.deployment().and_then(|d| document(self.app, d)) else {
+        let Some(doc) = self.deployment().and_then(|d| document(self.app, &d)) else {
             return refusal("no_mandate");
         };
         ok(vec![
@@ -1067,7 +1086,7 @@ impl Tools<'_> {
     /// The owner's buy (DEC-2159): the instrument the symbol names, then the owner request route's
     /// own checks and command, under a fresh authorization of the owner's session.
     fn buy(&mut self, symbol: &str, quantity: Option<String>) -> String {
-        let Some(deployment) = self.deployment().cloned() else {
+        let Some(deployment) = self.deployment() else {
             return refusal("no_agent");
         };
         if deployment.4 {
@@ -1120,7 +1139,7 @@ impl Tools<'_> {
 
     /// The owner's sale is the owner exit of the whole instrument (DEC-2151 item 7).
     fn sell(&mut self, symbol: &str) -> String {
-        let Some(deployment) = self.deployment().cloned() else {
+        let Some(agent) = self.agent().map(str::to_owned) else {
             return refusal("no_agent");
         };
         let wanted = symbol.trim().to_ascii_uppercase();
@@ -1132,7 +1151,7 @@ impl Tools<'_> {
             return refusal("unknown_symbol");
         };
         let command = Command::OwnerExit {
-            agent: deployment.0.clone(),
+            agent,
             instrument: snapshot.instrument_id.clone(),
             bid: None,
         };
@@ -1144,10 +1163,10 @@ impl Tools<'_> {
     }
 
     fn command(&mut self, make: impl Fn(&str) -> Command, permission: Permission) -> String {
-        let Some(deployment) = self.deployment().cloned() else {
+        let Some(agent) = self.agent().map(str::to_owned) else {
             return refusal("no_agent");
         };
-        self.commit(&make(&deployment.0), permission)
+        self.commit(&make(&agent), permission)
     }
 
     /// Commits `command` as the owner's own route would: the owner's session admitted again now,
@@ -1341,9 +1360,33 @@ mod pure {
     use mandate_identity::Permission;
 
     use super::{
-        RESULT_BYTES, THREAD_MESSAGES, Thread, cut, micros, owner_named, references,
+        RESULT_BYTES, THREAD_MESSAGES, Thread, counts_toward, cut, micros, owner_named, references,
         session_request, transcript,
     };
+
+    #[test]
+    fn an_agent_s_cap_counts_its_turns_and_a_setup_s_the_member_s_turns_of_no_agent() {
+        let agent = Thread::agent("agt_a", "m1");
+        let setup = Thread::setup("s1", "m1");
+        let counts =
+            |thread: &Thread, text: &str| payload(text).is_some_and(|p| counts_toward(thread, &p));
+        let own_agent = r#"{"agent_id":"agt_a","setup_id":null,"member":"m2"}"#;
+        let other_agent = r#"{"agent_id":"agt_b","setup_id":null,"member":"m1"}"#;
+        let own_setup = r#"{"agent_id":null,"setup_id":"s1","member":"m1"}"#;
+        let other_setup = r#"{"agent_id":null,"setup_id":"s2","member":"m1"}"#;
+        let others_setup = r#"{"agent_id":null,"setup_id":"s1","member":"m2"}"#;
+        assert!(counts(&agent, own_agent), "any member's turn of the agent");
+        assert!(!counts(&agent, other_agent));
+        assert!(!counts(&agent, own_setup));
+        assert!(counts(&setup, own_setup));
+        assert!(counts(&setup, other_setup), "the member's every setup");
+        assert!(!counts(&setup, others_setup), "never another member's");
+        assert!(!counts(&setup, other_agent), "nor the member's agent chat");
+        assert!(
+            !counts(&setup, r#"{"setup_id":"s1"}"#),
+            "a turn of no member"
+        );
+    }
 
     #[test]
     fn a_buy_is_the_owner_s_only_when_their_message_names_its_symbol_and_quantity_as_words() {
