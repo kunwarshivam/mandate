@@ -2,7 +2,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canOpen } from "@/lib/access";
 import { ROLES, can } from "@/lib/roles";
-import { SCREENS, SECTION_INDEX } from "@/lib/screens";
+import { SCREENS } from "@/lib/screens";
 import { renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AppShell } from "./app-shell";
@@ -23,44 +23,26 @@ describe("what the phone reaches (DEC-207)", () => {
     expect(reached.size).toBe(tabbed.length + more.length);
     for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built && can(role, s.needs));
     for (const href of reached) expect(canOpen(role, href), href).toBe(true);
-    const audits = SCREENS.some((s) => s.group === "audit" && can(role, s.needs));
-    expect(reached.has(SECTION_INDEX.audit.href)).toBe(audits);
-    const settings = SCREENS.some((s) => s.group === "workspace" && can(role, s.needs));
-    expect(reached.has(SECTION_INDEX.workspace.href)).toBe(settings);
   });
 
-  it("gives a role that sees agents Home, Messages and Agents as tabs, with Approvals under More (DEC-479)", () => {
+  it("gives a role that sees agents Home and New agent as tabs, with Settings under More (DEC-2293)", () => {
     expect(phoneTabs("owner").map((t) => [t.label, t.href])).toEqual([
       ["Home", "/"],
-      ["Messages", "/messages"],
-      ["Agents", "/agents"],
+      ["New agent", "/new"],
     ]);
-    expect(moreGroups("owner").flatMap((g) => g.links.map((l) => l.href))).toContain("/approvals");
+    expect(moreGroups("owner").flatMap((g) => g.links.map((l) => l.href))).toEqual(["/settings"]);
   });
 
-  it("gives an auditor its own home, the audit, as its one tab", () => {
-    expect(phoneTabs("auditor").map((t) => t.href)).toEqual(["/audit"]);
-    expect(moreGroups("auditor").flatMap((g) => g.links.map((l) => l.href))).not.toContain("/audit");
-  });
-
-  it("groups Approvals and Alerts, then Positions, Audit and Settings, in that order, and lists no screen still to come (DEC-513)", () => {
-    const groups = moreGroups("owner");
-    const labels = groups.map((g) => g.label);
-    const hrefs = groups.flatMap((g) => g.links.map((l) => l.href));
-    expect(hrefs.slice(0, 2)).toEqual(["/approvals", "/alerts"]);
-    expect(hrefs.indexOf("/positions")).toBeLessThan(hrefs.indexOf("/audit"));
-    expect(hrefs.indexOf("/audit")).toBeLessThan(hrefs.indexOf("/settings"));
-    expect(hrefs).not.toContain("/connections");
-    expect(hrefs).not.toContain("/audit/trace");
-    expect(labels).toContain("Audit");
-    expect(labels).toContain("Settings");
+  it("gives an auditor Settings as its one tab", () => {
+    expect(phoneTabs("auditor").map((t) => t.href)).toEqual(["/settings"]);
+    expect(moreGroups("auditor").flatMap((g) => g.links.map((l) => l.href))).toEqual([]);
   });
 });
 
 describe("the More sheet", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("opens from the fourth tab with Approvals and Alerts first, then Search, then every other screen, and the account and workspace at the foot (DEC-513)", () => {
+  it("opens from its tab with every screen that is not a tab, then Search, and the account and workspace at the foot", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const more = within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "More" });
     const sheet = openMore();
@@ -71,15 +53,12 @@ describe("the More sheet", () => {
     expect(account).toHaveTextContent("Alpaca paper");
     expect(within(account).getByRole("button", { name: /^Workspace: / })).toBeInTheDocument();
     const search = within(sheet).getByRole("button", { name: /^Search/ });
-    const approvals = within(sheet).getByRole("link", { name: /^Approvals/ });
-    expect(approvals.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(search.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const hrefs = within(sheet)
       .getAllByRole("link")
       .map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(moreGroups("owner").flatMap((g) => g.links.map((l) => l.href)));
-    for (const name of ["Positions", "Audit overview", "All settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
-    expect(within(sheet).queryByRole("link", { name: "Connections" })).toBeNull();
+    expect(within(sheet).getByRole("link", { name: "Settings" })).toBeInTheDocument();
   });
 
   it("gives every row a 44px target and a visible focus ring", () => {
@@ -107,7 +86,7 @@ describe("the More sheet", () => {
   it("closes when a screen is chosen", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const sheet = openMore();
-    fireEvent.click(within(sheet).getByRole("link", { name: "Positions" }));
+    fireEvent.click(within(sheet).getByRole("link", { name: "Settings" }));
     expect(screen.queryByRole("dialog", { name: "More" })).toBeNull();
   });
 

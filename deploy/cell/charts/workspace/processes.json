@@ -64,14 +64,14 @@
     },
     {
       "name": "api",
-      "row": "Workspace API server (workspace API spec §3.11, DEC-978): Postgres and the identity provider's key set; it listens on its pod's loopback only, so nothing in the cluster reaches it until the tunnel's route lands",
+      "row": "Workspace API server (workspace API spec §3.11, DEC-978): Postgres, the identity provider's key set, and the model gateway for the agent's chat (DEC-2293); it listens on its pod's loopback only, so nothing in the cluster reaches it until the tunnel's route lands",
       "kind": "service",
       "image": "api",
       "built": true,
       "db_role": "mandate_api",
       "guaranteed": false,
       "colocate": false,
-      "egress": ["postgres", "identity-provider"],
+      "egress": ["postgres", "identity-provider", "model-gateway"],
       "resources": {
         "requests": {"cpu": "100m", "memory": "64Mi"},
         "limits": {"cpu": "250m", "memory": "128Mi"}

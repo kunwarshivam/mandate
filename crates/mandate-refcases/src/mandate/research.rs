@@ -166,7 +166,7 @@ fn first_order_action(
     Ok(ActionContext {
         purpose: Purpose::Open,
         order_usd: usd("order_usd")?,
-        combined_score: unit("combined_score")?,
+        combined_score: Some(unit("combined_score")?),
         instrument: mandate_domain::AssetId::parse(str_at(stated, "instrument")?)
             .map_err(|e| format!("`instrument`: {}", e.code()))?,
         asset_class: mandate_domain::AssetClass::parse(str_at(stated, "asset_class")?)

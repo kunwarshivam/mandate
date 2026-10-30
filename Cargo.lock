@@ -1695,8 +1695,10 @@ dependencies = [
  "mandate-authn",
  "mandate-bars",
  "mandate-canon",
+ "mandate-chat",
  "mandate-connections",
  "mandate-gate-context",
+ "mandate-gateway",
  "mandate-identity",
  "mandate-identity-seal",
  "mandate-identity-testkit",
@@ -1836,6 +1838,15 @@ dependencies = [
  "serde_json_canonicalizer",
  "sha2 0.11.0",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-chat"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-gateway",
+ "mandate-time",
 ]
 
 [[package]]
@@ -2183,6 +2194,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-chat",
  "mandate-connections",
  "mandate-gateway",
  "mandate-gateway-http",

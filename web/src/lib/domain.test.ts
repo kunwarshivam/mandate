@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { GateDecision, ReasonCode, RestrictionCode } from "@/fixtures/types";
+import type { RestrictionCode } from "@/fixtures/types";
 import { AGENT_IDS, SCENARIOS, buildWorkspace, findAgent } from "@/fixtures/workspace";
 import { dec, sub, toDecimalString } from "./decimal";
-import { actionSentence, gateRule, verdictLabel } from "./gate-reasons";
 import { AGENT_ID, APPROVAL_ID } from "./ids";
 import { agentLimits, nextLevel } from "./limits";
 import { effectiveMode } from "./mock-runtime";
@@ -79,66 +78,6 @@ describe("restrictions (brief §4.3)", () => {
     expect(effectiveMode([r("drawdown_scale_sizes")])).toBe("normal");
     expect(effectiveMode([r("drawdown_exits_only"), r("owner_pause")])).toBe("paused");
     expect(effectiveMode([r("owner_pause"), r("stopped")])).toBe("stopped");
-  });
-});
-
-describe("gate decisions render as rules", () => {
-  const codes: ReasonCode[] = [
-    "account_restricted",
-    "account_trading_blocked",
-    "agent_exits_only",
-    "agent_paused",
-    "agent_stopped",
-    "not_in_universe",
-    "concentration_limit",
-    "max_order_size",
-    "reentry_cooldown",
-    "session_not_allowed",
-    "extended_hours_opening_not_allowed",
-    "auction_window",
-    "instrument_halted",
-    "unknown_order_in_flight",
-    "stale_mark",
-    "price_outside_collar",
-    "max_orders_per_day",
-    "close_window",
-    "discretionary_exit_regular_session_only",
-    "owner_confirmation_required",
-    "gross_exposure_limit",
-    "insufficient_buying_power",
-  ];
-
-  it.each(codes)("%s is a plain sentence with no error or retry wording", (code) => {
-    const rule = gateRule(code, swing.mandate);
-    expect(rule).toMatch(/^[A-Z].*\.$/);
-    expect(rule).not.toMatch(/error|failed|try again|retry|\b[a-z]+_[a-z_]+\b/i);
-  });
-
-  it.each(codes)("%s without the mandate it was decided under is a plain sentence that states no limit's figure", (code) => {
-    const rule = gateRule(code, null);
-    expect(rule).toMatch(/^[A-Z].*\.$/);
-    expect(rule).not.toMatch(/error|failed|try again|retry|\b[a-z]+_[a-z_]+\b/i);
-    if (rule !== gateRule(code, swing.mandate)) expect(rule).not.toMatch(/\d/);
-  });
-
-  it("uses the mandate's own figures", () => {
-    expect(gateRule("max_order_size", swing.mandate)).toBe("Orders are at most $1,000.00.");
-  });
-
-  it("calls a denied exit held, never denied", () => {
-    const base: GateDecision = {
-      event_id: "01JB00000000000000000000AA",
-      at: ws.now,
-      agent_id: swing.agent_id,
-      mandate_version: swing.mandate_version,
-      verdict: "deny",
-      reason_code: "unknown_order_in_flight",
-      action: { side: "sell", qty: "5", symbol: "QRS", limit_price: "97.6", purpose: "discretionary_exit" },
-    };
-    expect(verdictLabel(base)).toBe("Held");
-    expect(verdictLabel({ ...base, action: { ...base.action, side: "buy", purpose: "increase" } })).toBe("Not allowed");
-    expect(verdictLabel({ ...base, verdict: "defer" })).toBe("Waiting");
-    expect(actionSentence(base.action)).toBe("Sell 5 QRS at $97.60");
   });
 });
 

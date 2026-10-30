@@ -14,13 +14,13 @@ beforeEach(() => {
   signOut.mockReset();
 });
 
-async function openMenu(name: "Your account" | "Alerts and account") {
+async function openMenu(name: "Your account" | "Account") {
   fireEvent.click(screen.getByRole("button", { name }));
   return screen.findByRole("menu");
 }
 
 describe("the account menus with sign-in off", () => {
-  it.each(["Your account", "Alerts and account"] as const)("%s reads as before: no address and no Sign out", async (name) => {
+  it.each(["Your account", "Account"] as const)("%s reads as before: no address and no Sign out", async (name) => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const menu = await openMenu(name);
     expect(within(menu).getByText("You, owner")).toBeInTheDocument();
@@ -40,7 +40,7 @@ describe("the account menus with sign-in off", () => {
 describe("the account menus while signed in (DEC-211)", () => {
   const session = { email: "ada@example.com" };
 
-  it.each(["Your account", "Alerts and account"] as const)("%s shows the address beside the role, and Sign out", async (name) => {
+  it.each(["Your account", "Account"] as const)("%s shows the address beside the role, and Sign out", async (name) => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { session });
     const menu = await openMenu(name);
     expect(within(menu).getByText("ada@example.com").closest("[data-slot=account-identity]")).toHaveTextContent("You, ownerada@example.com");

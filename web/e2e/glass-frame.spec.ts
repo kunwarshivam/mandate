@@ -1,4 +1,8 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
+import { APPROVAL_IDS } from "../src/fixtures/workspace";
+
+/** A page long enough to scroll under the frame: an approval request, with its evidence. */
+const LONG = `/approvals/${APPROVAL_IDS.swingXyz}`;
 
 /**
  * The frame is frosted glass: the header, the tab bar on phones and the dock on desktops sit over
@@ -53,7 +57,7 @@ const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 test.describe("the frame is frosted glass over the scrolling page", () => {
   test("desktop, 1440 x 900: the header and the dock", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/");
+    await page.goto(LONG);
     await page.waitForLoadState("networkidle");
     const glass = await tokenColor(page, "--glass");
     expect(glass).not.toBe(await tokenColor(page, "--card"));
@@ -62,7 +66,7 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
     const dockGlass = await tokenColor(page, "--dock-glass");
     expect(await paint(dock(page))).toEqual({ background: dockGlass, filter: BLUR, image: "none" });
 
-    await scrollBy(page, 330);
+    await scrollBy(page, 150);
     expect((await header(page).boundingBox())?.y, "the header stays at the top").toBe(0);
     expect(await contentUnder(header(page)), "the page passes under the header").toBe(true);
     expect(await contentUnder(dock(page)), "the page passes under the dock").toBe(true);
@@ -71,7 +75,7 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
 
   test("phone, 390 x 844: the header and the tab bar", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
+    await page.goto(LONG);
     await page.waitForLoadState("networkidle");
     const glass = await tokenColor(page, "--glass");
     for (const frame of [header(page), tabBar(page)]) expect(await paint(frame)).toEqual({ background: glass, filter: BLUR, image: "none" });

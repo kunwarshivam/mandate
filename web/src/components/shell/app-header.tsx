@@ -6,12 +6,10 @@ import { usePathname } from "next/navigation";
 import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
 import { AvatarCircle } from "pixelarticons/react/AvatarCircle.js";
-import { Bell } from "pixelarticons/react/Bell.js";
 import { ChevronsVertical } from "pixelarticons/react/ChevronsVertical.js";
 import { Logout } from "pixelarticons/react/Logout.js";
 import { MoreVertical } from "pixelarticons/react/MoreVertical.js";
 import { Suitcase } from "pixelarticons/react/Suitcase.js";
-import { CopilotButton } from "@/components/copilot/copilot";
 import { menuIcon } from "@/components/icon";
 import { canOpen, homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -111,14 +109,7 @@ function AccountLinks({ role }: { role: Role }) {
           You, {role}
           {session?.email ? <span className="block truncate font-normal text-muted-foreground">{session.email}</span> : null}
         </DropdownMenu.Label>
-        {can(role, "workspace.view") ? (
-          <>
-            <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
-            <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
-          </>
-        ) : (
-          <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
-        )}
+        {can(role, "workspace.view") ? <DropdownMenu.LinkItem render={<Link href="/settings" />}>Settings</DropdownMenu.LinkItem> : null}
       </DropdownMenu.Group>
       {session ? (
         <>
@@ -148,16 +139,15 @@ function UserMenu() {
   );
 }
 
-/** Alerts and the account menu folded into one control, where the header has no room for both. */
-function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
+/** The account menu, where the header has no room for the avatar. */
+function MoreMenu() {
   const { role } = useRole();
   return (
     <DropdownMenu>
-      <DropdownMenu.Trigger render={<button type="button" />} aria-label="Alerts and account" className={ICON_LINK}>
+      <DropdownMenu.Trigger render={<button type="button" />} aria-label="Account" className={ICON_LINK}>
         <MoreVertical className="size-6" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
-        {seesAgents ? <DropdownMenu.LinkItem render={<Link href="/alerts" />}>Alerts</DropdownMenu.LinkItem> : null}
         <AccountLinks role={role} />
       </DropdownMenu.Content>
     </DropdownMenu>
@@ -171,8 +161,8 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * As the header narrows, lower-priority items give way first:
  * the trail folds its earlier crumbs into a menu and then hides, never truncating the current page,
  * the command bar narrows (it is centred where both sides fit, `e2e/command-bar.spec.ts`), the
- * workspace switcher becomes an icon (below 100rem), alerts and the account menu fold into "Alerts
- * and account" (below `xl`), and the paper badge keeps its gloss for screen readers only (at `lg`
+ * workspace switcher becomes an icon (below 100rem), the account menu folds into "Account" (below
+ * `xl`), and the paper badge keeps its gloss for screen readers only (at `lg`
  * below 100rem, and below 30rem). Below `lg` the header holds two things, the brand owl and the
  * paper badge (DEC-207, DEC-452); the tab bar and its More sheet carry the rest. There, an open
  * thread hides it through `className` and carries the paper badge in its own bar (DEC-482).
@@ -192,7 +182,6 @@ export function AppHeader({
   const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label)
     .filter((c) => canOpen(role, c.href))
     .slice(-3);
-  const seesAgents = can(role, "agents.view");
   const home = homeFor(role);
 
   return (
@@ -227,19 +216,13 @@ export function AppHeader({
         </div>
         <CommandMenu container={sheetLayer} />
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1.5 lg:flex-1 lg:basis-0 lg:justify-end">
-          {seesAgents ? <CopilotButton className="max-lg:hidden" /> : null}
           <ThemeMenu className={`${ICON_LINK} max-lg:hidden`} />
           <EnvironmentBadge environment={ws.environment} className="lg:max-[100rem]:[&>span+span]:sr-only" />
-          {seesAgents ? (
-            <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-xl:hidden`}>
-              <Bell className="size-6" aria-hidden />
-            </Link>
-          ) : null}
           <div className="max-xl:hidden">
             <UserMenu />
           </div>
           <div className="max-lg:hidden xl:hidden">
-            <MoreMenu seesAgents={seesAgents} />
+            <MoreMenu />
           </div>
         </div>
       </div>

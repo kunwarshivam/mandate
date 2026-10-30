@@ -46,6 +46,7 @@
 
 mod error;
 mod escalation;
+mod owner_request;
 mod payload;
 mod ports;
 mod research;
@@ -74,7 +75,7 @@ pub use types::{
     Deployment, DryRunVerdict, Effect, EventDraft, EventId, ExitOrigin, FlattenLeg, FlattenPlan,
     FlattenRequest, FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope,
     LiquidityRead, LocalHold, MandateView, Mode, ModelDirection, ModelOutput, ModelOutputIgnored,
-    NotificationRef, Observation, OrderExecution, Outstanding, OwnerConfirmation, Proposal,
-    ProtectionPrices, Purpose, RiskClock, RuntimeAlert, Seq, SignalInputs, TimeInForce, TimerId,
-    TimerRequest, WorkspaceId, WriterEpoch,
+    NotificationRef, Observation, OrderExecution, Outstanding, OwnerConfirmation, OwnerRequest,
+    Proposal, ProtectionPrices, Purpose, Requester, RiskClock, RuntimeAlert, Seq, SignalInputs,
+    TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch,
 };

@@ -1,11 +1,11 @@
 import { type Page, expect, test } from "@playwright/test";
 import { APPROVAL_IDS } from "../src/fixtures/workspace";
-import { SCREENS, SECTION_INDEX } from "../src/lib/screens";
+import { SCREENS } from "../src/lib/screens";
 
 /**
  * From 1024 px the dock carries the navigation: a floating glass bar centred at the bottom, every
- * item an icon over its name, the current section on a pill, menus a keyboard can open, move through
- * and close, and every screen the sidebar reached one press or one menu away. It never covers a
+ * item an icon over its name, the current section on a pill, and every screen one press away: Home,
+ * New agent and Settings (DEC-2293). It never covers a
  * focused control, an approval's choices or the header, and Stop ends it (DEC-452). Below 1024 px the
  * tab bar carries it instead.
  */
@@ -53,7 +53,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
   expect(found.radius3xl).toBeGreaterThan(0);
   expect(found.radius, "the dock takes the 3xl corner DESIGN.md gives it").toBe(found.radius3xl);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
-  expect(found.items, "six links and the More menu, Stop aside (DEC-513 item 2)").toHaveLength(7);
+  expect(found.items, "Home, New agent and Settings, Stop aside (DEC-2293)").toHaveLength(3);
   expect(found.stop, "Stop, at the dock's end, is as tall as its items").toBe(50);
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);
@@ -64,9 +64,9 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
 });
 
 test("the current section sits on a tinted pill with a semibold label; hover is a lighter pill", async ({ page }) => {
-  await open(page, "/positions");
-  const current = dock(page).getByRole("link", { name: "Positions" });
-  const idle = dock(page).getByRole("link", { name: "Alerts" });
+  await open(page, "/settings");
+  const current = dock(page).getByRole("link", { name: "Settings" });
+  const idle = dock(page).getByRole("link", { name: "New" });
   await expect(current).toHaveAttribute("aria-current", "page");
   const paint = (el: HTMLElement) => ({ bg: getComputedStyle(el).backgroundColor, weight: getComputedStyle(el.querySelector("[data-slot=dock-label]")!).fontWeight });
   const [pill, rest, tint, hoverTint, ink, mandate] = await Promise.all([
@@ -92,8 +92,8 @@ test("the labels name every item: no tooltip on hover or focus, and a visible fo
   await open(page, "/");
   const items = dock(page).locator("a, button:not([data-slot=stop-control])");
   const names = await items.evaluateAll((els) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent));
-  expect(names).toEqual(["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "More"]);
-  await items.nth(4).hover();
+  expect(names).toEqual(["Home", "New", "Settings"]);
+  await items.nth(1).hover();
   await page.waitForTimeout(600);
   await expect(page.locator(".kumo-tooltip-popup")).toHaveCount(0);
 
@@ -107,56 +107,10 @@ test("the labels name every item: no tooltip on hover or focus, and a visible fo
   expect(await second.evaluate((el) => getComputedStyle(el).boxShadow), "the focus ring").not.toBe("none");
 });
 
-test("the menus open, move and close from the keyboard, and focus comes back to the button", async ({ page }) => {
+test("every screen is one press away", async ({ page }) => {
   await open(page, "/");
-  const more = dock(page).getByRole("button", { name: "More", exact: true });
-  await more.focus();
-  await page.keyboard.press("Enter");
-  const menu = page.getByRole("menu");
-  await expect(menu).toBeVisible();
-  await expect(more).toHaveAttribute("aria-expanded", "true");
-  await expect(menu).toContainText("Account");
-  await expect(menu).toContainText("Alpaca paper");
-  await page.keyboard.press("ArrowDown");
-  await expect(menu.locator(":focus")).toHaveCount(1);
-  await page.keyboard.press("Escape");
-  await expect(menu).toBeHidden();
-  await expect(more).toBeFocused();
-
-  await more.focus();
-  await page.keyboard.press("ArrowUp");
-  await expect(page.getByRole("menu")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(more).toBeFocused();
-});
-
-test("every built screen is one press or one menu away, and no screen still to come has a door (DEC-513)", async ({ page }) => {
-  await open(page, "/");
-  const reached = new Set(await dock(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href"))));
-  for (const menu of ["More"]) {
-    await dock(page).getByRole("button", { name: menu, exact: true }).click();
-    const list = page.getByRole("menu");
-    await expect(list).toBeVisible();
-    for (const href of await list.getByRole("menuitem").evaluateAll((els) => els.map((el) => el.getAttribute("href")))) if (href) reached.add(href);
-    await page.keyboard.press("Escape");
-    await expect(list).toBeHidden();
-  }
-  for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built);
-  for (const href of [SECTION_INDEX.audit.href, SECTION_INDEX.workspace.href]) expect(reached, href).toContain(href);
-});
-
-test("a menu item navigates, and the menu's button shows where you are", async ({ page }) => {
-  await open(page, "/");
-  await dock(page).getByRole("button", { name: "More" }).click();
-  await page.getByRole("menuitem", { name: "Gate decisions" }).click();
-  await expect(page).toHaveURL("/audit/decisions");
-  const more = dock(page).getByRole("button", { name: "More" });
-  await expect(more).toHaveAttribute("aria-current", "true");
-  await expect(async () => {
-    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
-    await expect(page.getByRole("menu")).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 15_000 });
-  await expect(page.getByRole("menuitem", { name: "Gate decisions" })).toHaveAttribute("aria-current", "page");
+  const reached = await dock(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href")));
+  expect(reached).toEqual(SCREENS.filter((s) => s.built).map((s) => s.href));
 });
 
 for (const [width, height] of [
@@ -164,7 +118,7 @@ for (const [width, height] of [
   [1440, 900],
 ] as const) {
   test(`${width} x ${height}: tabbing through a long page, no focused control sits under the dock`, async ({ page }) => {
-    await open(page, "/agents", width, height);
+    await open(page, "/settings", width, height);
     const bar = (await dock(page).boundingBox())!;
     await page.locator("#main").focus();
     const covered: string[] = [];

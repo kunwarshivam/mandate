@@ -216,6 +216,7 @@ fn fixture_with(rows: &Rows, answer: Unverified, stores: bool) -> Fixture {
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

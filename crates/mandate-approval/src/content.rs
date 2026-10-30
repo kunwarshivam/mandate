@@ -44,8 +44,9 @@ pub struct BoundAction {
     pub mandate_version: String,
     /// `DecidedBy::label()` of the rule that asked: `rule:<id>`, `default`, or `admission_ceiling`.
     pub decided_by: String,
-    /// Bound, because it is what the owner approved (brief, checks 10 and 11).
-    pub combined_score: Signed,
+    /// Bound, because it is what the owner approved (brief, checks 10 and 11). `None` for an owner
+    /// or client request, which no §8.3 evaluation produced and so has no score (DEC-2858 item 2).
+    pub combined_score: Option<Signed>,
     /// `None` when no mark was folded at the request, which re-validation skips as `drift`.
     pub reference_mark: Option<ReferenceMark>,
     pub approvers_required: NonZeroU8,
@@ -181,10 +182,13 @@ pub fn content_object(content: &RequestContent) -> Result<Value, ApprovalError> 
     let evidence = object([
         (
             "combined_score",
-            object([
-                ("label", text(SCORE_LABEL)),
-                ("value", text(&bound.combined_score.to_string())),
-            ])?,
+            match bound.combined_score {
+                Some(score) => object([
+                    ("label", text(SCORE_LABEL)),
+                    ("value", text(&score.to_string())),
+                ])?,
+                None => Value::Null,
+            },
         ),
         ("outputs", Value::Array(outputs)),
     ])?;

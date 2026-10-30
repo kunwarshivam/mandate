@@ -11,7 +11,9 @@ use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_bars::LiquidityFacts;
 use mandate_canon::{DecStr, Digest, Value};
 use mandate_daemon::bars::BarsReader;
-use mandate_daemon::production::{Facts, Gate, Liquidity, UNJOURNALED, UNSEEN, deferral, verdict};
+use mandate_daemon::production::{
+    Facts, Gate, Liquidity, Plan, UNJOURNALED, UNSEEN, deferral, verdict,
+};
 use mandate_gate_context::{Freshness, gate_rule_set};
 use mandate_journal::StoredEvent;
 use mandate_marketdata::dataset::Store;
@@ -23,7 +25,10 @@ use mandate_risk::{
     Advisory, CheckOutcome, Computed, Decision, Deferred, GateConfig, Purpose as GatePurpose,
     ReasonCode, Verdict,
 };
-use mandate_runtime::{Deferral, DryRunVerdict, GateDryRun, LiquidityRead, Proposal, Purpose};
+use mandate_runtime::{
+    ApprovalSettings, Deferral, DryRunVerdict, EventId, GateDryRun, LiquidityRead, MandateView,
+    OrderPlan, OwnerRequest, Proposal, Purpose, Requester,
+};
 use mandate_spec::document::Mandate;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_midnight};
 use proptest::prelude::*;
@@ -1538,4 +1543,77 @@ proptest! {
         };
         prop_assert_eq!(gate_over(&rows, Some(config())).check(&opening("3", "99.95")), expected);
     }
+}
+
+/// The plan over the same rows and the same $300-capped envelope as the gate, and the runtime's
+/// view of it, for an owner's request to reach the gate as the runtime hands it on (DEC-2858).
+fn plan_over(rows: &Rows, document: &Value) -> (Plan, MandateView) {
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    let view = MandateView {
+        version: DEPLOYED.into(),
+        working_universe: [InstrumentId::new(SPY).unwrap()].into(),
+        restricted_instruments: Default::default(),
+        approval: ApprovalSettings {
+            approvers: Default::default(),
+            author: "user-owner".into(),
+            timeout_s: 600,
+            environment: mandate_journal::Environment::Paper,
+            live_cli_confirm: None,
+        },
+    };
+    (
+        Plan::new(facts, Mandate::parse(document).unwrap(), FRESH),
+        view,
+    )
+}
+
+fn owners(qty: &str) -> OwnerRequest {
+    OwnerRequest {
+        request: EventId("01J8Z3MOWNERREQUEST0000001".into()),
+        instrument: InstrumentId::new(SPY).unwrap(),
+        qty: Qty::parse(qty).unwrap(),
+        requested_by: Requester::Owner,
+    }
+}
+
+/// Five SPY ($499.75) under the $300 order cap is clipped to three ($299.85), which the gate
+/// allows with every deferral named, so the clipped request is asked as any opening is.
+#[test]
+fn an_owners_request_clipped_to_the_order_cap_is_one_the_gate_allows() {
+    let rows = journaled_with(&RICH);
+    let (plan, view) = plan_over(&rows, &document());
+    let proposal = plan
+        .requested(&view, &owners("5"))
+        .expect("the owner's buy");
+    assert_eq!(proposal.qty, Qty::parse("3").unwrap());
+    assert_eq!(gate_over(&rows, Some(config())).check(&proposal), asked());
+}
+
+/// Under a $50 order cap not one share fits, so the owner's five reach the gate unclipped, and the
+/// gate refuses them by the cap's own reason, which the `DecisionMade` records (DEC-2858 item 7).
+#[test]
+fn a_request_with_no_room_for_a_share_is_refused_by_the_gates_own_reason() {
+    let rows = journaled_with(&RICH);
+    let text = String::from_utf8(mandate_canon::to_canonical(&document())).unwrap();
+    let tiny = text.replace(r#""max_order_usd":"300""#, r#""max_order_usd":"50""#);
+    assert_ne!(tiny, text, "the order cap is where this case sets it");
+    let tiny = mandate_canon::parse(tiny.as_bytes()).unwrap();
+    let (plan, view) = plan_over(&rows, &tiny);
+    let proposal = plan
+        .requested(&view, &owners("5"))
+        .expect("the owner's buy");
+    assert_eq!(proposal.qty, Qty::parse("5").unwrap());
+    assert!(proposal.clips_applied.is_empty(), "{proposal:?}");
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    let gate = Gate::new(
+        facts,
+        (DEPLOYED, Mandate::parse(&tiny).unwrap()),
+        Some(config()),
+        FRESH,
+    );
+    assert_eq!(gate.check(&proposal), denied("max_order_size"));
 }

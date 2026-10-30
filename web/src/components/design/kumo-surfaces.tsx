@@ -22,7 +22,7 @@ export function KumoSurfaces() {
         <Button size="lg" variant="secondary" className={KEY}>
           Primary button
         </Button>
-        <LinkButton href="/design" size="lg" variant="secondary" className={KEY}>
+        <LinkButton href="/settings" size="lg" variant="secondary" className={KEY}>
           Primary link
         </LinkButton>
       </div>

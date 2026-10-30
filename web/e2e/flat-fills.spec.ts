@@ -1,7 +1,7 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
 import { recordHref } from "../src/components/stop/commands";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "../src/fixtures/workspace";
-import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref } from "../src/lib/screens";
+import { SCREENS, agentHref } from "../src/lib/screens";
 
 /**
  * DEC-200: flat fills only. Kumo paints linear gradients and masks in several components, and
@@ -11,24 +11,13 @@ import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderH
 
 const WS = buildWorkspace("normal");
 const CONNECTION = WS.connection.connection_id;
-const SWING = WS.agents.find((a) => a.agent_id === AGENT_IDS.swing)!;
-const BTC = WS.agents.find((a) => a.agent_id === AGENT_IDS.btc)!;
-const XYZ = SWING.positions.find((p) => p.instrument.symbol === "XYZ")!;
 
 const ROUTES = [
   ...new Set([
     ...SCREENS.map((s) => s.href),
-    SECTION_INDEX.audit.href,
-    SECTION_INDEX.workspace.href,
-    ...AGENT_SECTIONS.map((s) => agentHref(AGENT_IDS.swing, s.key)),
-    agentHref(AGENT_IDS.btc, "overview"),
+    agentHref(AGENT_IDS.swing),
+    agentHref(AGENT_IDS.btc),
     `/approvals/${APPROVAL_IDS.swingXyz}`,
-    positionHref(AGENT_IDS.swing, XYZ.instrument.asset_id),
-    `${positionHref(AGENT_IDS.swing, XYZ.instrument.asset_id)}/close`,
-    positionHref(AGENT_IDS.btc, BTC.positions[0].instrument.asset_id),
-    orderHref(AGENT_IDS.swing, SWING.orders[0].client_order_id),
-    orderHref(AGENT_IDS.swing, SWING.past_orders[0].client_order_id),
-    decisionHref(AGENT_IDS.swing, WS.decisions.find((d) => d.agent_id === AGENT_IDS.swing)!.event_id),
     recordHref("kill", AGENT_IDS.btc),
     recordHref("release", AGENT_IDS.btc),
     recordHref("stop_all", CONNECTION),
@@ -227,7 +216,7 @@ test("renders in the project's theme, with the body on the theme's card colour",
 });
 
 test.describe("no gradient paints in any overlay (DEC-200)", () => {
-  for (const path of ["/", agentHref(AGENT_IDS.btc, "overview")]) {
+  for (const path of ["/", agentHref(AGENT_IDS.btc)]) {
     test(`the Stop sheet at ${path}`, async ({ page }) => {
       await page.goto(path);
       await openBy(page, page.getByRole("button", { name: "Stop", exact: true }), page.getByRole("dialog"));
@@ -250,7 +239,7 @@ test.describe("no gradient paints in any overlay (DEC-200)", () => {
   test.describe("phone", () => {
     test.use({ viewport: { width: 390, height: 844 } });
     test("the More sheet", async ({ page }) => {
-      await page.goto(agentHref(AGENT_IDS.btc, "overview"));
+      await page.goto(agentHref(AGENT_IDS.btc));
       await page.waitForLoadState("networkidle");
       await openBy(page, page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }), page.getByRole("dialog", { name: "More" }));
       expect(await gradientsIn(page)).toEqual([]);

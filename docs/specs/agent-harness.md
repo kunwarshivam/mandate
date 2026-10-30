@@ -1548,7 +1548,8 @@ interval, the longer strategy brief, and resuming after a crash.
 [DEC-2243](../project/decisions/DEC-2243.md), Proposed for the founder). It builds on E19-13's
 agentic loop (lane AH's harness design input, ADR-0005 when it merges: its §4 run kinds, §5
 tools, §9 run records) and adds no loop, no gateway path, and no run record of its own.
-§1 to §14 are lane AH's and are not changed here.*
+§1 to §14 are lane AH's and are not changed here. [DEC-2293](../project/decisions/DEC-2293.md)
+replaces the desk with the agent's chat, §15.13, whose readings hold where they differ.*
 
 The **desk** is where an owner talks to their agent: "why did you buy X?", "why did you ask me?",
 "what are you watching?", "why was this refused?". Two of E19-13's run kinds serve it:
@@ -1868,3 +1869,68 @@ action, such as "sell half of X" or "stop watching Y".
    member of a card holds model text (API-18).
 5. **Depends on** E19-13's action tools, lane SU's step-up for desk sends, the card-send route of
    workspace API §4.6, and its own spec change and DEC.
+
+### 15.13 The agent's chat ([DEC-2293](../project/decisions/DEC-2293.md))
+
+*The founder's rulings of 2026-10-29. Where they differ from §15.1 to §15.12, these hold:*
+- *withdrawn: EX-4's per-sentence citations, EX-5's advice filter, EX-6's numeric scrub, §15.7's
+  turn, tool and time bounds, §15.8's disclaimer, and EX-12's exact provenance;*
+- *replaced: §15.1's mode gate, and §15.12's card-digest send for the owner's explicit
+  instructions;*
+- *kept: isolation, the private thread per member, and journal before showing or acting.*
+
+The chat is how an owner works with an agent: one private thread per member and agent, in plain
+words. The agent answers from its own records, carries out the owner's explicit instructions, keeps
+goals for the owner, and messages first when something happens. It runs in the workspace API
+process (workspace API §4.6.2), off every trading path, and calls the model through the model
+gateway service.
+
+1. **One entry, three run kinds.** `mandate-chat` pins the chat entry. Its output kind is
+   `action_tools`, whose summary is `{"watch": [symbol]}`, and its inputs are `context`, `kind`,
+   `message` and `thread`. The run kind fixes the tools the gateway offers:
+
+   | Kind | Started by | Tools beyond the reads and `chat.reply`, `goals.update` |
+   |---|---|---|
+   | `agent` | The owner's message | `order.buy`, `order.sell`, `agent.pause`, `agent.resume`, `agent.stop`, `agent.kill` |
+   | `proactive` | An event the agent follows, while it is active | `order.propose` |
+   | `setup` | The owner's message in a setup thread | `mandate.template`, `mandate.propose`; no agent reads |
+
+   The reads are `account.summary`, `account.positions`, `account.orders`, `market.price` (the last
+   trusted daily close), `agent.mandate`, `agent.goals`, `research.theses`, `news.recent`,
+   `catalogue.search` and `catalogue.models`.
+2. **Scope by construction (EX-2, EX-3 kept).** No tool argument names an agent, a workspace or a
+   stream. Each tool reads the run's own agent's streams, or for a setup the workspace's catalogue.
+3. **The model proposes; code acts (rule 4).** Each action tool commits the command the web app's
+   own route commits, under the sending member's session and a fresh authorization by the same
+   matrix row:
+   - `order.buy` is an owner request (`requested_by` `owner`) for the agent's pinned instrument,
+     with the quantity the owner asked for. The builder clips it, the gate decides, and DEC-2159
+     makes it `auto`. A symbol outside the mandate is refused `not_in_mandate`, and a live
+     environment `live_unavailable`.
+   - `order.sell` is an owner exit of the whole position.
+   - The four agent controls are pause, resume, Stop and the agent's kill switch.
+   - `mandate.propose` creates a draft version through the version route, which validates it. The
+     owner confirms and deploys it on the version's own page; the chat never does.
+   - `order.propose` puts the agent's own idea to the owner as a card, which the autonomy rules
+     and the approval flow decide.
+4. **Journal before acting (rule 5).** A run journals each model call, with the tool calls it
+   asked for, before any of them runs. It journals their results before the next call reads them,
+   and each message before the thread serves it (journal spec §9.39). If a record cannot be
+   journaled, the run ends `halted` and nothing after it runs.
+5. **Bounds.** Money is the only bound a run meets:
+   - the agent's daily cap, default 5 USD, checked before every call;
+   - the gateway's workspace and deployment caps.
+
+   The pinned loop ceilings, 64 turns and 512 tool calls, are technical, and each call has its
+   entry's deadline. Stop ends a run before its next call. A thread runs one run at a time.
+6. **Modes.** The chat answers in every mode. A stopped agent refuses an action with
+   `agent_stopped`, and a paused one's buy is refused by the runtime as any opening is.
+7. **Untrusted text.** A tool result that carries stored research or news text says
+   `"untrusted": true`, and the system prompt treats it as data. A reply links the records it
+   relied on in `sources`.
+8. **Models.** The chat model is a per-agent setting (`ChatSettingsChanged`), among the entries the
+   gateway offers: Sonnet by default, and Haiku for routine wake-ups. The research model stays a
+   mandate field (rule 11).
+9. **What exists.** The entry, the loop, the tools, the records and the routes are built. Still to
+   come: the proactive wake-ups (fills, price moves, a daily brief), their pushes, and setup's
+   confirm-and-deploy step.

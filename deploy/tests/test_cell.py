@@ -44,7 +44,7 @@ IN_CLUSTER = {"postgres", "vault", "model-gateway"}
 # Each destination is (target, protocol, port); `dns` is added for any process with a destination.
 SECTION_3_1 = {
     "migrate": {("postgres", "TCP", 5432)},
-    "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443)},
+    "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443), ("model-gateway", "TCP", 8080)},
     "control": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("identity-provider", "TCP", 443)},
     "journal-verify": {("postgres", "TCP", 5432)},
     "connect-check": {("postgres", "TCP", 5432)},
@@ -1239,12 +1239,16 @@ def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():
 
 
 def test_staging_names_the_committed_live_registry_byte_for_byte():
-    """DEC-2081, #2844: staging's gateway starts from deploy/cell/model-gateway/registry.json as
-    committed, every entry `evaluating` and none naming a gate report, so it offers nothing."""
+    """DEC-2081, #2844, DEC-2293: staging's gateway starts from deploy/cell/model-gateway/registry.json
+    as committed: every research entry `evaluating` and none naming a gate report, and the chat
+    entries, which are offered with no gate (DEC-2293 item 13), Sonnet and Haiku."""
     registry = staging_values()["modelGateway"]["registry"]
     assert registry == LIVE_REGISTRY_FILE.read_text()
-    entries = json.loads(registry)["entries"]
+    parsed = json.loads(registry)
+    entries = parsed["entries"]
     assert entries and all(e["status"] == "evaluating" and "gate_report" not in e for e in entries)
+    chat = [c["entry"]["model_id"] for c in parsed["chat"]]
+    assert chat == ["llm.chat_sonnet", "llm.chat_haiku"], chat
 
 
 def test_the_local_cell_records_both_demo_agents_instruments():

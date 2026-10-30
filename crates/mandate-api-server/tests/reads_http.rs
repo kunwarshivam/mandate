@@ -89,6 +89,7 @@ fn fixture_with(
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

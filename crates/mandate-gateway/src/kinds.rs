@@ -11,6 +11,9 @@ pub enum Purpose {
     /// The platform's call that evaluates a registry entry: the §4.3 gate and the live start's
     /// identity probe (DEC-2216). It names no agent and never crosses the wire.
     Evaluation,
+    /// One turn of an owner's chat with an agent, or of the agent's own message to its owner
+    /// (DEC-2293). It names the agent and proposes only through the chat's tools.
+    Chat,
 }
 
 impl Purpose {
@@ -21,6 +24,7 @@ impl Purpose {
             Self::FastSignal => "fast_signal",
             Self::Compiler => "compiler",
             Self::Evaluation => "evaluation",
+            Self::Chat => "chat",
         }
     }
 

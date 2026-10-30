@@ -37,7 +37,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 140] = [
+pub(crate) const EVENT_TYPES: [&str; 147] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -141,6 +141,13 @@ pub(crate) const EVENT_TYPES: [&str; 140] = [
     "PersonalDataErased",
     "MandateDraftSaved",
     "OwnerRequestSubmitted",
+    "ChatMessagePosted",
+    "ChatTurnRecorded",
+    "ChatToolResultsRecorded",
+    "ChatRunEnded",
+    "ChatRunStopRequested",
+    "ChatSettingsChanged",
+    "AgentGoalsUpdated",
     "ClientConnected",
     "ClientRevoked",
     "OwnerCommandIssued",
@@ -312,7 +319,14 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "StepUpCoolOffWaived"
         | "ConnectionRolesMade"
         | "ConnectionRolesRefused"
-        | "ConnectionRolesRemoved" => entry(CONTROL, NONE),
+        | "ConnectionRolesRemoved"
+        | "ChatMessagePosted"
+        | "ChatTurnRecorded"
+        | "ChatToolResultsRecorded"
+        | "ChatRunEnded"
+        | "ChatRunStopRequested"
+        | "ChatSettingsChanged"
+        | "AgentGoalsUpdated" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

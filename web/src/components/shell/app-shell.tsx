@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type ReactNode, useRef } from "react";
+import { type ReactNode, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { canOpen } from "@/lib/access";
 import { isRecordRoute } from "@/lib/frozen";
@@ -8,7 +8,6 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allFeedsOk } from "@/lib/feeds";
 import { useRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { COPILOT_WIDTH, CopilotPanel, CopilotProvider, useCopilot } from "@/components/copilot/copilot";
 import { FixtureTag, InlineDisclosures } from "@/components/domain/placeholders";
 import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
@@ -20,9 +19,9 @@ import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
 import { StopSheetHost } from "./stop-control";
 
-/** Audit and admin read like a console; everything an owner lives in stays calm (DEC-204). */
+/** A connection's admin screens read like a console; everything an owner lives in stays calm (DEC-204). */
 export function densityFor(pathname: string): "calm" | "dense" {
-  return /^\/(audit|settings|connections)(\/|$)/.test(pathname) ? "dense" : "calm";
+  return /^\/connections\//.test(pathname) ? "dense" : "calm";
 }
 
 /**
@@ -43,23 +42,15 @@ const DENSE_FRAME = cn(
  * decision is read against every feed's age, not against the absence of a warning. With no strip,
  * the "Fixture data" tag sits at the foot of the page. The More sheet opens into a layer inside the
  * frame, under the header and the tab bar, so it rises from behind the bar and never covers Stop.
- * Owlhead, when open, docks to the right of the page from 110rem and the dock recentres on what is
- * left; narrower, it floats over the page's right side, and on a phone it is a sheet between the
- * header and the tab bar (DEC-479). Messages fills the window edge to edge, with no gutter and no
- * page footer; its list of threads carries the fixture tag (DEC-481). On a phone, an open thread
- * takes the header's place: its own bar carries the paper badge and the way back (DEC-482).
+ * A thread, an agent's or a new agent's setup, fills the window edge to edge, with no gutter and
+ * no page footer (DEC-481, DEC-2293).
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  return (
-    <CopilotProvider>
-      <Frame>{children}</Frame>
-    </CopilotProvider>
-  );
+  return <Frame>{children}</Frame>;
 }
 
 function Frame({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
-  const copilot = useCopilot();
   const { role } = useRole();
   const pathname = usePathname();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
@@ -72,7 +63,7 @@ function Frame({ children }: { children: ReactNode }) {
   const density = densityFor(pathname);
 
   return (
-    <div className="group/frame relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
+    <div className="group/frame relative isolate flex min-h-svh w-full">
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
@@ -113,12 +104,11 @@ function Frame({ children }: { children: ReactNode }) {
           </div>
         )}
       </div>
-      <CopilotPanel />
       <div ref={sheetLayer} data-slot="sheet-layer" />
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
         <TabNav approvals={open} sheetLayer={sheetLayer} />
       </div>
-      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 min-[110rem]:left-[calc((100%-var(--copilot-w))/2)] hidden -translate-x-1/2 lg:block">
+      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 hidden -translate-x-1/2 lg:block">
         <Dock approvals={open} />
       </div>
       <StopSheetHost />

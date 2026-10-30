@@ -21,12 +21,12 @@ use sha2::{Digest, Sha256};
 
 use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
-    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_APP_ORIGIN, DEMO_OWNER,
-    DEPLOY_MANAGER_PROCESS, ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE,
-    RESEARCH_MANAGER_PROCESS, RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART,
-    api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
-    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
-    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
+    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
+    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART, api_diagnosis, api_image_tag,
+    api_port_forward, helm, host_image_source, http, kubectl, open_session, processes, render,
+    render_with, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
+    stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -247,15 +247,15 @@ pub struct WebCheck {
 
 /// The owner's set-up from `web/` in the run's workspace (`web/e2e-cell/setup.spec.ts`), run after
 /// the gestures' Job: a passkey added in Settings by Chromium's virtual authenticator, version 1
-/// created in `/agents/new`, and its confirm held in words for the passkey's first 24 hours, with
-/// no deployment offered ([`web::setup_from_web`]).
+/// created over the API and opened on its confirm card at `/new?version=`, and its confirm refused
+/// for the passkey's first 24 hours, with no deployment offered ([`web::setup_from_web`]).
 #[derive(Debug)]
 pub struct SetUpCheck {
     pub shows: &'static str,
 }
 
-/// The owner's visit of a backtest's report from `web/`: what it shows, and the backtest whose
-/// report it opens from its link.
+/// The owner's read of a backtest's report from `web/`'s session: what it shows, and the backtest
+/// whose report it reads.
 #[derive(Debug)]
 pub struct ReportCheck {
     pub shows: &'static str,
@@ -923,8 +923,8 @@ pub fn plan(
                     ),
                     Part::WebSetUp(SetUpCheck {
                         shows: "the owner's set-up from web/: a passkey added in Settings, \
-                                version 1 created in /agents/new, and its confirm held in words \
-                                for the passkey's first 24 hours, with nothing sent",
+                                version 1 created over the API and opened on its confirm card, \
+                                and its confirm refused for the passkey's first 24 hours",
                     }),
                     Part::Gap(Gap {
                         what: "the confirm and deploy from web/",
@@ -1169,10 +1169,11 @@ pub fn plan(
                     ],
                 }),
                 Part::WebTradeLoop(WebCheck {
-                    shows: "the trade loop from web/ on the agent: its approval request \
-                            shown, approved with the code the host confirms, the order filled, \
-                            the position, the journal and the positions screen shown, the \
-                            owner's exit filled, the audit timeline shown, then its kill switch",
+                    shows: "the trade loop from web/ on the agent: its approval asked in its \
+                            thread, approved with the code the host confirms, the fill said in \
+                            the thread, the position and the filled order in its Details, the \
+                            owner's exit from Details filled, then its kill switch and the agent \
+                            shown stopped",
                     agent: WEB_AGENT,
                 }),
             ]
@@ -1231,9 +1232,9 @@ pub fn plan(
                     ]),
                 }),
                 Part::WebReport(ReportCheck {
-                    shows: "the owner opening the backtest's report in web/ from its link (the \
-                            API lists no backtests), and the report the run stored shown, read \
-                            through the API",
+                    shows: "the owner, signed in on web/'s Home, reading the report the run \
+                            stored through the API with that session, its comparison with buy \
+                            and hold included (web/ has no report screen, DEC-2293)",
                     backtest: BACKTEST_ID,
                 }),
             ],
@@ -1242,9 +1243,9 @@ pub fn plan(
             number: 6,
             title: "the owner exits the agent's position from the web app",
             parts: vec![Part::WebTradeLoop(WebCheck {
-                shows: "the owner's exit of the agent's position from web/'s positions screen, \
-                        after step 4's fill, its sell filled on the agent's orders before the \
-                        audit and the kill switch: the trade loop's `owner_exit`, read from step \
+                shows: "the owner's exit of the agent's position from the agent's Details in web/, \
+                        after step 4's fill, its sell said filled in the agent's thread before \
+                        the kill switch: the trade loop's `owner_exit`, read from step \
                         4's one run (no gesture of the Job exits, since an exit before the fill \
                         sells nothing)",
                 agent: WEB_AGENT,
@@ -3063,7 +3064,7 @@ pub fn setup_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static st
             (
                 "ran",
                 format!(
-                    "version {version} created; its confirm held for the passkey's first 24 hours"
+                    "version {version} created; its confirm refused for the passkey's first 24 hours"
                 ),
                 false,
             )
@@ -3089,16 +3090,15 @@ fn report(workspace: &str, backtest: &str) -> Result<SetUpOutcome> {
     })
 }
 
-/// How the report visit from `web/` reads, as [`setup_verdict`] reads a set-up: `ran` only when
-/// it reached every step of [`web::REPORT_STEPS`], naming the link the owner opens, at `web/`'s
-/// origin.
+/// How the report read from `web/` reads, as [`setup_verdict`] reads a set-up: `ran` only when
+/// it reached every step of [`web::REPORT_STEPS`], naming the backtest read.
 pub fn report_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static str, String, bool) {
     match outcome {
         SetUpOutcome::Ran(reached) => {
-            let link = reached.get("report_link").map_or("", String::as_str);
+            let backtest = reached.get("report_read").map_or("", String::as_str);
             (
                 "ran",
-                format!("the stored report shown at {}{link}", DEMO_APP_ORIGIN),
+                format!("the stored report of {backtest} read with the owner's web session"),
                 false,
             )
         }
@@ -4512,7 +4512,7 @@ mod tests {
 
     /// Step 6 runs no gesture in the Job, since an owner's exit before the trade loop's fill sells
     /// nothing: it reads the trade loop's `owner_exit`, which web/ reaches after the fill and
-    /// before the audit timeline and the kill switch, and it waits on no lane.
+    /// before the exit's own fill and the kill switch, and it waits on no lane.
     #[test]
     fn step_six_reads_web_s_exit_after_the_fill() {
         let steps = planned("demo1");
@@ -4531,10 +4531,10 @@ mod tests {
         assert!(lanes(step6).is_empty());
         let at = |step: &str| web::TRADE_LOOP_STEPS.iter().position(|s| *s == step);
         assert!(
-            at("positions_screen") < at("owner_exit")
-                && at("owner_exit") < at("audit_timeline")
-                && at("audit_timeline") < at("kill_switch"),
-            "the exit follows the fill's position and comes before the audit and the kill switch"
+            at("details") < at("owner_exit")
+                && at("owner_exit") < at("exit_filled")
+                && at("exit_filled") < at("kill_switch"),
+            "the exit follows the fill's position and comes before its own fill and the kill switch"
         );
         let pinned = parsed(INSTRUMENT_FILE);
         assert_eq!(pinned["instrument_id"], SPY, "SPY's Alpaca asset id");

@@ -71,6 +71,7 @@ import marks
 import membership
 import membership_fold
 import owner_confirmations
+import owner_requests
 import connection_requested
 import requests
 import research
@@ -201,6 +202,9 @@ SIDE = one_of("buy", "sell")
 ORDER_TYPE = one_of("limit", "market")
 TIF = one_of("day", "gtc", "ioc")
 RISK_ADDING = ("open", "increase")
+OWNER_REQUESTED = ("owner", "client")
+"""v0.117 rule 8 (DEC-2858): a decision these asked for is an owner request (§9.9), produced by no
+§8.3 evaluation whatever its purpose, whose `clips_applied` still lists the bounds that cut it."""
 DECISION_PURPOSE = one_of("open", "increase", "discretionary_exit", "risk_exit")
 INTENT_PURPOSE = one_of("open", "increase", "discretionary_exit", "risk_exit", "owner_exit")
 CLIPS = (
@@ -226,8 +230,9 @@ REQUESTED_BY = one_of("agent", "owner", "client")
 BUILTIN_LABEL = "builtin_risk_reducing"
 DELEGATION_PREFIX = "delegation:"
 POLICY_OVERLAY_LABEL = "policy_overlay"
+OWNER_REQUEST_LABEL = "owner_request"
 DECIDED_BY = re.compile(
-    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay|(rule|delegation):[A-Za-z0-9_-]+)\Z"
+    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay|owner_request|(rule|delegation):[A-Za-z0-9_-]+)\Z"
 )
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -460,6 +465,15 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
         overlay_label = by != POLICY_OVERLAY_LABEL or p["autonomy"] != "auto"
         rule("7.policy_overlay_label", overlay_label, "schema", "payload.decided_by")
+        owner = p["requested_by"] == "owner"
+        rule(
+            "7.owner_request",
+            not (owner and adds_risk and asked),
+            "schema",
+            "payload.autonomy",
+        )
+        owner_label = by != OWNER_REQUEST_LABEL or (owner and adds_risk and p["autonomy"] == "auto")
+        rule("7.owner_request_label", owner_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule(
             "8.exit_origin",
@@ -467,7 +481,10 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             "schema",
             "payload.exit_origin",
         )
+        owner_request = p["requested_by"] in OWNER_REQUESTED
         evaluated = adds_risk or p["exit_origin"] == "signal"
+        if "regress.rule_8_owner_request_evaluated" not in skip:
+            evaluated = evaluated and not owner_request
         if "regress.rule_8_numbers_on_every_exit_but_risk" in skip:
             evaluated = p["purpose"] != "risk_exit"
         wrong = [
@@ -476,7 +493,10 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             if (p[m] is not None) != evaluated
         ]
         if not evaluated and "regress.rule_8_numbers_on_every_exit_but_risk" not in skip:
-            wrong += [m for m in ("outputs_used", "model_weights", "clips_applied") if p[m]]
+            emptied = ("outputs_used", "model_weights", "clips_applied")
+            if owner_request and "regress.rule_8_owner_request_without_clips" not in skip:
+                emptied = ("outputs_used", "model_weights")
+            wrong += [m for m in emptied if p[m]]
         rule(8, not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
         rule(9, ascending(p["outputs_used"]), "non_canonical", "payload.outputs_used")
         keys = [w["key"].encode() for w in p["model_weights"]]
@@ -1121,6 +1141,19 @@ def chain_bodies() -> list[dict]:
     return bodies
 
 
+def unevaluated() -> list[dict]:
+    """v0.117 rule 8 (DEC-2858): an owner's or a client's request was produced by no §8.3
+    evaluation, so its decision carries none of the evaluation's numbers, outputs or weights; the
+    bounds that cut it stay in `clips_applied`."""
+    return [
+        change("payload.exit_conviction", None),
+        change("payload.buy_conviction", None),
+        change("payload.combined_score", None),
+        change("payload.outputs_used", []),
+        change("payload.model_weights", []),
+    ]
+
+
 def invalid(name, clause, base, changes, reason, path):
     return {
         "name": name,
@@ -1480,6 +1513,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.requested_by", "client"),
                 change("payload.autonomy", "ask"),
                 change("payload.decided_by", "client_ceiling"),
+                *unevaluated(),
             ],
             "schema",
             "payload.client_id",
@@ -1499,6 +1533,7 @@ def invalid_drafts() -> list[dict]:
             [
                 change("payload.requested_by", "client"),
                 change("payload.client_id", "client_dots"),
+                *unevaluated(),
             ],
             "schema",
             "payload.autonomy",
@@ -1512,6 +1547,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.client_id", "client_dots"),
                 change("payload.decided_by", "delegation:d1"),
                 change("payload.delegation_id", "d1"),
+                *unevaluated(),
             ],
             "schema",
             "payload.autonomy",
@@ -1846,7 +1882,7 @@ def valid_drafts() -> list[dict]:
             "decision_owner_request_auto",
             "§9.1 rule 7",
             "decision",
-            [change("payload.requested_by", "owner")],
+            [change("payload.requested_by", "owner"), *unevaluated()],
         ),
         valid(
             "decision_client_request_asked",
@@ -1857,6 +1893,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.client_id", "client_dots"),
                 change("payload.autonomy", "ask"),
                 change("payload.decided_by", "client_ceiling"),
+                *unevaluated(),
             ],
         ),
         valid(
@@ -1868,6 +1905,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.client_id", "client_dots"),
                 change("payload.autonomy", "ask"),
                 change("payload.decided_by", "rule:large_orders"),
+                *unevaluated(),
             ],
         ),
         valid(
@@ -1879,6 +1917,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.client_id", "client_dots"),
                 change("payload.autonomy", "deny"),
                 change("payload.decided_by", "rule:large_orders"),
+                *unevaluated(),
             ],
         ),
         valid(
@@ -3585,6 +3624,7 @@ def build_policy_overlay_section() -> dict:
                     change("payload.client_id", "client_dots"),
                     change("payload.autonomy", "deny"),
                     overlay(),
+                    *unevaluated(),
                 ],
             ),
         ],
@@ -3885,6 +3925,32 @@ def deferral_decisions(chain: list[dict]) -> dict[str, dict]:
         ],
     }
     return {"plain": apply_changes(chain, plain), "deferring": apply_changes(chain, deferring)}
+
+
+def owner_request_decisions(chain: list[dict]) -> dict[str, dict]:
+    """The three openings `owner_requests` judges (v0.117, DEC-2858): the chain's evaluated decision
+    asked by a rule, the same opening requested by a connected client and asked by the client
+    ceiling, and requested by the owner and run `auto` by the owner's request (mandate spec §6.2
+    step 5d, item 10). The two requests were produced by no §8.3 evaluation, so they carry no
+    numbers, outputs or weights and keep the chain's clip."""
+    by_rule = [change("payload.autonomy", "ask"), change("payload.decided_by", "rule:large_orders")]
+    owner = [
+        change("payload.requested_by", "owner"),
+        *unevaluated(),
+        change("payload.autonomy", "auto"),
+        change("payload.decided_by", OWNER_REQUEST_LABEL),
+    ]
+    client = [
+        change("payload.requested_by", "client"),
+        change("payload.client_id", "client_dots"),
+        *unevaluated(),
+        change("payload.autonomy", "ask"),
+        change("payload.decided_by", "client_ceiling"),
+    ]
+    return {
+        name: apply_changes(chain, {"base_seq": SEQ["decision"], "changes": changes})
+        for name, changes in (("agent_asked", by_rule), ("owner_auto", owner), ("client_asked", client))
+    }
 
 
 def check_deferred(section: dict, agent_section: dict) -> list[str]:
@@ -4228,6 +4294,7 @@ def render(
     policy_overlay: dict,
     deferred_section: dict,
     deferrals_section: dict,
+    owner_requests_section: dict,
     control_section: dict,
     risk_section: dict,
     research_section: dict,
@@ -4295,6 +4362,7 @@ def render(
             "policy_overlay": policy_overlay,
             "deferred_to_binding": deferred_section,
             "approval_deferrals": deferrals_section,
+            "owner_requests": owner_requests_section,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -4394,6 +4462,7 @@ def main(argv: list[str] | None = None) -> int:
     policy_overlay = build_policy_overlay_section()
     deferred_section = build_deferred_section()
     deferrals_section = approval_deferrals.build_section(deferral_decisions(section["chain"]))
+    owner_requests_section = owner_requests.build_section(owner_request_decisions(section["chain"]))
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
@@ -4462,6 +4531,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += run_deferred_mutants(deferred_section, section)
     problems += approval_deferrals.check_section(deferrals_section, violations)
     problems += approval_deferrals.run_mutants(deferrals_section, violations)
+    problems += owner_requests.check_section(owner_requests_section, violations)
+    problems += owner_requests.run_mutants(owner_requests_section, violations)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -4590,6 +4661,7 @@ def main(argv: list[str] | None = None) -> int:
         policy_overlay,
         deferred_section,
         deferrals_section,
+        owner_requests_section,
         control_section,
         risk_section,
         research_section,
@@ -4662,6 +4734,7 @@ def main(argv: list[str] | None = None) -> int:
         or check_policy_overlay(reread["policy_overlay"], reread["agent_stream"])
         or check_deferred(reread["deferred_to_binding"], reread["agent_stream"])
         or approval_deferrals.check_section(reread["approval_deferrals"], violations)
+        or owner_requests.check_section(reread["owner_requests"], violations)
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
@@ -4748,6 +4821,11 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(deferrals_section['ranges'])} approval_deferral_mismatch ranges, "
         f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator, {len(approval_deferrals.RANGE_MUTANTS)} range and "
         f"{len(approval_deferrals.vector_mutants(deferrals_section))} vector mutants caught; "
+        f"{len(owner_requests_section['decision_cases'])} owner-request DecisionMade cases, "
+        f"{len(owner_requests_section['invalid_drafts'])} invalid and {len(owner_requests_section['valid_drafts'])} valid "
+        f"score-free ApprovalRequested drafts and {len(owner_requests_section['batches'])} rule-319 batches, "
+        f"{len(owner_requests.VALIDATOR_MUTANTS)} validator and "
+        f"{len(owner_requests.vector_mutants(owner_requests_section))} vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "

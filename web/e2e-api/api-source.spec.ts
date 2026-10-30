@@ -16,24 +16,48 @@ function apiCalls(page: Page): Request[] {
   return calls;
 }
 
+/** Opens the agent that needs you from Home, then its approval card's request. */
+async function openRequest(page: Page) {
+  await page.goto("/?scenario=approvals");
+  await page.getByRole("list", { name: "Agents" }).getByRole("link").filter({ has: page.locator("[data-slot=needs-you]") }).first().click();
+  await page.locator("[data-slot=chat-card][data-kind=approval]").first().getByRole("link", { name: "Review and answer" }).click();
+}
+
 test("Home reads the workspace through documented operations and labels nothing as fixture data", async ({ page }) => {
   const calls = apiCalls(page);
   await page.goto("/?scenario=approvals");
-  await expect(page.getByRole("heading", { name: /^Needs you/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your agents" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "Agents" }).getByRole("link")).not.toHaveCount(0);
-  expect(calls.length).toBeGreaterThan(3);
+  await expect(page.getByRole("list", { name: "Agents" }).getByRole("link")).not.toHaveCount(0);
+  await expect(page.locator("[data-slot=needs-you]").first()).toBeVisible();
+  expect(calls.length).toBeGreaterThan(1);
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});
+
+test("a message to an agent goes to its messages route once, with an idempotency key, and the thread shows what the API read back (DEC-2293)", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.goto("/?scenario=approvals");
+  await page.getByRole("list", { name: "Agents" }).getByRole("link").first().click();
+  const composer = page.getByRole("textbox").last();
+  await composer.fill("How are you doing today?");
+  await composer.press("Enter");
+  await expect(page.locator("[data-slot=owner-message]").filter({ hasText: "How are you doing today?" })).toBeVisible();
+  const posts = () => calls.filter((c) => c.method() === "POST");
+  await expect.poll(() => posts().map((c) => new URL(c.url()).pathname)).toEqual([expect.stringMatching(new RegExp(`^/v1/workspaces/${WS}/agents/[^/]+/messages$`))]);
+  expect(posts()[0].headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
+  expect(posts()[0].headers()["x-mandate-request"]).toBe("1");
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });
 
 test("Skip on a request goes to the approval's responses route once, and shows only what the API recorded", async ({ page }) => {
   const calls = apiCalls(page);
-  await page.goto("/?scenario=approvals");
-  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await openRequest(page);
   await page.getByRole("button", { name: "Skip", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Recorded in the journal: you skipped" })).toBeVisible();
-  await expect.poll(() => calls.filter((c) => c.method() === "POST").map((c) => new URL(c.url()).pathname)).toEqual([expect.stringMatching(new RegExp(`^/v1/workspaces/${WS}/approvals/[^/]+/responses$`))]);
-  const [post] = calls.filter((c) => c.method() === "POST");
+  const answers = () => calls.filter((c) => c.method() === "POST" && new URL(c.url()).pathname.includes("/approvals/"));
+  await expect.poll(() => answers().map((c) => new URL(c.url()).pathname)).toEqual([expect.stringMatching(new RegExp(`^/v1/workspaces/${WS}/approvals/[^/]+/responses$`))]);
+  const [post] = answers();
   expect(post.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
   expect(post.headers()["x-mandate-request"]).toBe("1");
   expect(post.postDataJSON()).toMatchObject({ verdict: "skipped", step_up: null, delegation: null });
@@ -41,8 +65,7 @@ test("Skip on a request goes to the approval's responses route once, and shows o
 
 test("Approve shows a code to confirm on the host, and the approve that follows carries that challenge's evidence (DEC-2104)", async ({ page }) => {
   const calls = apiCalls(page);
-  await page.goto("/?scenario=approvals");
-  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await openRequest(page);
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   const panel = page.getByRole("region", { name: "Confirm on the host" });
   await expect(panel).toBeVisible();
@@ -51,7 +74,7 @@ test("Approve shows a code to confirm on the host, and the approve that follows 
   await expect(panel.locator("[data-slot=host-confirm-command]")).toContainText(`mandate step-up confirm --workspace ${WS} --principal `);
   await expect(panel.locator("[data-slot=host-confirm-command]")).toContainText(`--code ${code}`);
   const posts = () => calls.filter((c) => c.method() === "POST");
-  expect(posts().map((c) => new URL(c.url()).pathname)).toEqual([`/v1/workspaces/${WS}/step-up/challenges`]);
+  await expect.poll(() => posts().map((c) => new URL(c.url()).pathname)).toEqual([`/v1/workspaces/${WS}/step-up/challenges`]);
   const challenge = (await (await posts()[0].response())?.json()) as { challenge_id: string; issued_at: string };
   await panel.getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Recorded in the journal: you approved" })).toBeVisible();
@@ -68,8 +91,7 @@ test("a grant the runtime refused not_an_approver reads as refused in words, nev
     const step = { stream_id: "agent", seq: 9, event_type: "ApprovalResponded", recorded_at: "2026-10-26T15:00:00.000000000Z", reason: "not_an_approver" };
     await route.fulfill({ response: served, json: { ...body, phase: "refused", steps: [step] } });
   });
-  await page.goto("/?scenario=approvals");
-  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await openRequest(page);
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await page.getByRole("region", { name: "Confirm on the host" }).getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Refused: you are not an approver of this request now. Nothing was approved." })).toBeVisible();
@@ -87,7 +109,7 @@ test("Connect Alpaca paper shows the disclosure and a host code, starts with tha
     authorize = route.request().url();
     await route.fulfill({ status: 200, contentType: "text/html", body: "<title>Alpaca (mock)</title>" });
   });
-  await page.goto("/connections");
+  await page.goto("/settings");
   await expect(page.getByRole("list", { name: "Broker accounts" })).toContainText("Connected.");
   await page.getByRole("button", { name: "Connect Alpaca paper" }).click();
   await expect(page.getByRole("region", { name: "Before you connect Alpaca paper trading" })).toHaveAttribute("data-version", "1");
@@ -117,45 +139,26 @@ test("a deployment that does not answer shows unreachable, not the fixtures", as
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
 
-test("setting up an agent is served over the API: the conversation, read without a model, with no fixture tag", async ({ page }) => {
-  await page.goto("/agents/new?scenario=normal");
-  await expect(page.getByRole("textbox", { name: "Your answer" })).toBeVisible();
-  await expect(page.getByText("Your deployment doesn't serve a model to read your words yet")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toHaveCount(0);
-  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-});
-
-test("positions are read from the API: each agent's own, with what is not served said so, and no fixture tag", async ({ page }) => {
-  await page.goto("/positions?scenario=normal");
-  await expect(page.getByRole("table", { name: "The account's holdings" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
-  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-});
-
-test("the audit timeline reads the journal's streams from the API, newest first, with no fixture tag", async ({ page }) => {
-  await page.goto("/audit/timeline?scenario=normal");
-  await expect(page.getByRole("list", { name: "Journal records" }).getByRole("listitem").first()).toBeVisible();
-  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-});
-
-test("the gate decisions are read from the journal, with no fixture tag", async ({ page }) => {
-  await page.goto("/audit/decisions?scenario=approvals");
-  await expect(page.getByRole("list", { name: "Gate decisions" }).getByRole("listitem").first()).toBeVisible();
-  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-});
-
-test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
-  await page.goto("/agents/agt_01JB3K8Y4N7QW2M6R9T5V0XZAC/orders?scenario=approvals");
-  await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
-  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-});
-
-test("a backtest report reads GET /backtests/{id} and shows the served report, with no fixture tag", async ({ page }) => {
+test("setting up an agent is a chat served over the API: the first message opens a setup, with no fixture tag (DEC-2293)", async ({ page }) => {
   const calls = apiCalls(page);
-  await page.goto("/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2?scenario=normal");
-  await expect(page.getByRole("table", { name: "This version and buy and hold" })).toBeVisible();
-  await expect(page.getByText("[[LEGEND-HYPOTHETICAL]]")).toBeVisible();
+  await page.goto("/new?scenario=normal");
+  await expect(page.getByRole("heading", { name: "New agent" })).toBeVisible();
+  const composer = page.getByRole("textbox").last();
+  await composer.fill("Buy and hold a few large US companies.");
+  await composer.press("Enter");
+  await expect(page.locator("[data-slot=owner-message]").filter({ hasText: "Buy and hold a few large US companies." })).toBeVisible();
+  await expect.poll(() => calls.filter((c) => c.method() === "POST").map((c) => new URL(c.url()).pathname)).toEqual([`/v1/workspaces/${WS}/setup/messages`]);
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
-  expect(calls.map((c) => new URL(c.url()).pathname)).toContain(`/v1/workspaces/${WS}/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2`);
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});
+
+test("an agent's Details read its positions, goals, mandate and orders from the API, with no fixture tag", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.goto("/?scenario=normal");
+  await page.getByRole("list", { name: "Agents" }).getByRole("link").first().click();
+  await page.getByRole("button", { name: "Details" }).click();
+  const drawer = page.locator("[data-slot=details-drawer]");
+  for (const name of ["Positions", "Goals", "Mandate", "Activity"]) await expect(drawer.getByRole("region", { name })).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });

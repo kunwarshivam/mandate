@@ -15,7 +15,7 @@ const bar = (page: Page) => page.locator("[data-slot=command-bar]");
 /** The command palette, by its role and its accessible name. */
 const commandPalette = (page: Page) => page.getByRole("dialog", { name: "Command palette", exact: true });
 
-const ROUTES = ["/", agentHref(AGENT_IDS.swing, "positions"), "/audit/trace"];
+const ROUTES = ["/", agentHref(AGENT_IDS.swing), "/settings"];
 
 async function boxes(page: Page) {
   return page.evaluate(() => {
@@ -234,7 +234,7 @@ const PALETTE_OPENERS = [
   {
     name: "⌘K",
     open: async (page: Page) => {
-      const brand = page.getByRole("banner").getByRole("link", { name: "Owlhead, dashboard", exact: true });
+      const brand = page.getByRole("banner").getByRole("link", { name: "Owlhead, home", exact: true });
       await brand.focus();
       await expect(brand, "focus is on the brand link before ⌘K").toBeFocused();
       await page.keyboard.press("ControlOrMeta+k");
@@ -332,9 +332,9 @@ test.describe("a press on Stop with the palette open leaves focus in the Stop sh
 
 const TRAILS: Array<[string, string, string[]]> = [
   ["/", "Home", []],
-  [`/agents/${AGENT_IDS.btc}`, "Agent 1", ["Home", "Agents"]],
-  [agentHref(AGENT_IDS.swing, "positions"), "Positions", ["Agents", "Agent 2"]],
-  ["/audit/decisions", "Gate decisions", ["Home", "Audit"]],
+  [`/agents/${AGENT_IDS.btc}`, "Agent 1", []],
+  [`/agents/${AGENT_IDS.swing}/kill-switch`, "Kill switch", ["Home", "Agent 2"]],
+  ["/settings", "Settings", []],
 ];
 
 for (const width of [1280, 1440]) {

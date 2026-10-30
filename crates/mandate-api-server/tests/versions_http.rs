@@ -212,6 +212,7 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

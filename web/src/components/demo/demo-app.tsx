@@ -4,14 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
-import { ConversationsProvider } from "@/components/messages/conversations";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
 import type { Workspace } from "@/fixtures/types";
 import { RoleProvider } from "@/lib/roles";
 import { SessionProvider } from "@/lib/session";
 import { DEMO_PATH, DEMO_SOURCE, type DemoReport, isDemoCommand } from "./demo-messages";
-import { demoPath, demoScreen, inMessages } from "./demo-routes";
+import { demoPath, demoScreen } from "./demo-routes";
 
 /** Pages of the site, not the app: a link to one leaves the example for the real page. */
 const SITE_PATHS = ["/login", "/welcome", "/auth/"];
@@ -23,7 +22,7 @@ function NoSuchScreen() {
     <section className="grid max-w-3xl gap-3">
       <h1 className="text-h1 sm:text-h1">No such page</h1>
       <Link href="/" className="w-fit font-semibold text-primary underline decoration-lapis/30 underline-offset-4 hover:decoration-current">
-        Go to the dashboard
+        Go to your agents
       </Link>
     </section>
   );
@@ -141,7 +140,7 @@ export function DemoApp({ workspace }: { workspace: Workspace }) {
         <SessionProvider session={null}>
           <RoleProvider>
             <Providers key={run} workspace={workspace} tick={false}>
-              <AppShell>{inMessages(path) ? <ConversationsProvider>{body}</ConversationsProvider> : body}</AppShell>
+              <AppShell>{body}</AppShell>
             </Providers>
           </RoleProvider>
         </SessionProvider>

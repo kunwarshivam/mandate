@@ -102,11 +102,19 @@ pub struct App {
     /// The stored bars root the price read reads (`MANDATE_BARS`, DEC-2152); `None` when the
     /// deployment names none, and the read answers `no_store`.
     pub bars: Option<std::path::PathBuf>,
+    /// The chat (DEC-2293): the gateway service's address, the chat models, and the runs in
+    /// flight; [`crate::chat::Chat::default`] serves no model and every run says so.
+    pub chat: Arc<crate::chat::Chat>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
 /// Each request is counted in flight on `drain` until its response is ready.
 pub fn api(app: App, drain: Arc<Drain>) -> Router {
+    api_shared(Arc::new(app), drain)
+}
+
+/// [`api`] over an `App` the caller shares, as the chat's watcher does (`chat_watch`).
+pub fn api_shared(app: Arc<App>, drain: Arc<Drain>) -> Router {
     let settings = app.settings.clone();
     let unauthenticated = problem_body(ProblemCode::Unauthenticated);
     let refused = unauthenticated.clone();
@@ -160,6 +168,42 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/mandate-versions",
             get(mandate_versions::agent_mandate_versions).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/messages",
+            get(crate::chat::get_messages)
+                .post(crate::chat::post_message)
+                .fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/runs/{run}/stop",
+            post(crate::chat::stop_run).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/goals",
+            get(crate::chat::goals).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/settings",
+            get(crate::chat::get_settings)
+                .put(crate::chat::put_settings)
+                .fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/setup/messages",
+            post(crate::chat::post_setup).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/setup/{setup}/messages",
+            get(crate::chat::get_setup).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/models",
+            get(crate::chat::models).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/home",
+            get(crate::chat::home).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/orders",
@@ -290,15 +334,13 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",
             post(version_routes::go_live).fallback(otherwise.clone()),
-        );
-    #[cfg(debug_assertions)]
-    let routes = routes.route(
-        "/v1/workspaces/{workspace}/agents/{agent}/requests",
-        post(crate::owner_requests::owner_request).fallback(otherwise.clone()),
-    );
-    let routes = routes
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/requests",
+            post(crate::owner_requests::owner_request).fallback(otherwise.clone()),
+        )
         .fallback(otherwise)
-        .with_state(Arc::new(app))
+        .with_state(app)
         .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
     counted(routes, drain)
 }

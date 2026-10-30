@@ -21,7 +21,7 @@
  * behind the row's 120px) leaves at every width, given the shell already puts the same
  * `px-(--page-x)` gutters inside it, so both densities share one left edge at every width —
  * below 80rem the inset is 0 and the page's gutters hold on both, above it the inset mirrors
- * the calm column's (the shape of the dock's own `left-[calc((100%-var(--copilot-w))/2)]`).
+ * the calm column's.
  * `w-auto` and `mr-0`, replacing `w-full` and `mx-auto` on the column, drop the centred
  * widening so the column extends to the right only, never past its own density's bound
  * (`--content-max` 90rem under `data-density="dense"`, unchanged); the merge helper keeps

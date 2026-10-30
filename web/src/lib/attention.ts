@@ -2,7 +2,7 @@ import type { Approval, OrderState, Workspace } from "@/fixtures/types";
 import { MODE_LABEL } from "./labels";
 import { agentLimits, levelNoun, nearLossLimits } from "./limits";
 import { RESTRICTIONS, type RestrictionSource } from "./restrictions";
-import { agentHref, orderHref } from "./screens";
+import { agentHref } from "./screens";
 
 const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
 
@@ -66,14 +66,14 @@ export function needsYouLines(ws: Workspace): AlertLine[] {
       lines.push({
         key: `${a.agent_id}-in-flight-order`,
         text: `${a.label}: ${IN_FLIGHT_CONDITION[order.state] ?? "an order is in flight"}`,
-        href: orderHref(a.agent_id, order.client_order_id),
+        href: agentHref(a.agent_id),
         source: "account",
       });
     } else if (inFlight.length > 1) {
       lines.push({
         key: `${a.agent_id}-in-flight-order`,
         text: `${a.label}: ${inFlight.every((o) => o.state === "Unknown") ? `${inFlight.length} orders' states are unknown` : `${inFlight.length} orders are in flight`}`,
-        href: agentHref(a.agent_id, "orders"),
+        href: agentHref(a.agent_id),
         source: "account",
       });
     }

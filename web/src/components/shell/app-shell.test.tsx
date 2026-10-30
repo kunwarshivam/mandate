@@ -2,15 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as agentsNew from "@/app/(app)/agents/new/page";
-import * as agents from "@/app/(app)/agents/page";
-import * as approvals from "@/app/(app)/approvals/page";
-import * as audit from "@/app/(app)/audit/page";
-import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page.dev";
+import * as setup from "@/app/(app)/new/page";
 import * as dashboard from "@/app/(app)/page";
 import * as settings from "@/app/(app)/settings/page";
-import { AGENT_IDS, APPROVAL_IDS, SCENARIOS } from "@/fixtures/workspace";
+import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
+import { pageFor } from "@/test/app-routes";
 import { can } from "@/lib/roles";
 import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime, tabStop } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
@@ -46,28 +43,25 @@ describe("every screen in every scenario", () => {
     },
   );
 
-  it("folds earlier crumbs into a menu only past the top level: a top-level screen has only Home before it, which the brand links to, so it shows no …", () => {
-    setPathname("/agents");
+  it("folds earlier crumbs into a menu only past the top level: a top-level screen has only Home before it, which the brand links to, so it shows no …", async () => {
+    setPathname("/settings");
     const { unmount } = renderWithRuntime(
       <AppShell>
-        <agents.default />
+        <settings.default />
       </AppShell>,
     );
     const [header] = screen.getAllByRole("banner");
     expect(within(header).queryByRole("button", { name: "Earlier pages" })).toBeNull();
     expect(within(header).getByRole("navigation", { name: "breadcrumb" })).not.toHaveTextContent("…");
     unmount();
-    setPathname(`/agents/${AGENT_IDS.btc}`);
-    renderWithRuntime(
-      <AppShell>
-        <agents.default />
-      </AppShell>,
-    );
+    const deep = `/agents/${AGENT_IDS.btc}/kill-switch`;
+    setPathname(deep);
+    renderWithRuntime(<AppShell>{await pageFor(deep)}</AppShell>);
     expect(within(screen.getAllByRole("banner")[0]).getByRole("button", { name: "Earlier pages" })).toBeInTheDocument();
   });
 
   it("keeps page titles generic: no agent names, tickers, or amounts", () => {
-    const titles = [dashboard, agents, agentsNew, approvals, audit, settings, design].map(({ metadata }) => {
+    const titles = [dashboard, setup, settings, design].map(({ metadata }) => {
       const title = metadata.title;
       return typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
     });
@@ -105,7 +99,7 @@ describe("Owlhead", () => {
   it("names the product Owlhead in the header, with the brand owl at every width and the wordmark from lg (DEC-452)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const [header] = screen.getAllByRole("banner");
-    const home = within(header).getByRole("link", { name: "Owlhead, dashboard" });
+    const home = within(header).getByRole("link", { name: "Owlhead, home" });
     const owl = home.querySelector("[data-slot=brand-owl] svg[data-slot=owl]");
     const wordmark = home.querySelector("[data-slot=owlhead-wordmark]");
     expect(owl).toHaveAttribute("aria-hidden", "true");
@@ -176,17 +170,17 @@ describe("the phone frame (DEC-207)", () => {
     expect(within(header).queryByRole("button", { name: /sidebar/i })).toBeNull();
   });
 
-  it("offers four tabs: Home, Messages with the count of requests waiting, Agents and More, then Stop at the bar's end", () => {
+  it("offers three tabs: Home with the count of requests waiting, New agent and More, then Stop at the bar's end", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const tabs = screen.getByRole("navigation", { name: "Main" });
     expect(tabs.parentElement).toHaveClass("lg:hidden");
     const items = phoneControls(tabs);
-    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Messages", "Agents", "More", "Stop"]);
-    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/messages", "/agents", null, null]);
-    expect(items[1].querySelector("[data-slot=approvals-count]")?.textContent).toMatch(/^\d+ open$/);
-    expect(items[3]).toHaveAttribute("aria-haspopup", "dialog");
-    expect(items[3]).toHaveAttribute("aria-expanded", "false");
-    expect(items[4]).toHaveAttribute("data-slot", "stop-control");
+    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "New agent", "More", "Stop"]);
+    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/new", null, null]);
+    expect(items[0].querySelector("[data-slot=approvals-count]")?.textContent).toMatch(/^\d+ open$/);
+    expect(items[2]).toHaveAttribute("aria-haspopup", "dialog");
+    expect(items[2]).toHaveAttribute("aria-expanded", "false");
+    expect(items[3]).toHaveAttribute("data-slot", "stop-control");
     for (const item of items) expect(item).toHaveClass("h-(--tab-bar)");
     expect(tabs).toHaveClass("pb-[env(safe-area-inset-bottom)]");
   });
@@ -222,7 +216,7 @@ describe("the phone frame (DEC-207)", () => {
   });
 
   it("marks More as current on a screen that lives under it", () => {
-    setPathname("/positions");
+    setPathname("/settings");
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const tabs = screen.getByRole("navigation", { name: "Main" });
     expect(within(tabs).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
@@ -312,119 +306,60 @@ function declaredIn(selector: string): Record<string, string> {
   return out;
 }
 
-describe("one left edge across densities on the audit screens (critique C-17)", () => {
-  it("pending E11-9: the dense column keeps the calm page's left edge and only widens to the right (C-17)", () => {
+const STOP_ALL = `/connections/${buildWorkspace("normal").connection.connection_id}/stop-all`;
+
+describe("one left edge across densities (critique C-17)", () => {
+  it("the dense column, a connection's, keeps the calm page's left edge and only widens to the right (C-17)", async () => {
     const classes = denseEdgeClass().split(" ").filter(Boolean);
-    expect(classes.length, "one helper's classes, not a spread of utilities").toBeGreaterThan(0);
     expect(classes, "the left edge stays the calm page's own; everything right of it widens").toEqual([
       "w-auto",
       expect.stringMatching(/^ml-\[max\(0px,calc\(\(100%-80rem\)\/2\)\)\]$/),
       "mr-0",
     ]);
-    setPathname("/audit");
-    const auditVisit = renderWithRuntime(
-      <AppShell>
-        <audit.default />
-      </AppShell>,
-    );
+    setPathname(STOP_ALL);
+    renderWithRuntime(<AppShell>{await pageFor(STOP_ALL)}</AppShell>);
     const main = screen.getByRole("main");
     expect(main).toHaveAttribute("data-density", "dense");
     for (const cls of classes) expect(main.classList, cls).toContain(cls);
-    expect(main.classList, "the column is no longer auto-centred, the drawing that put it at 40px").not.toContain("mx-auto");
-    expect(main).toHaveClass("px-(--page-x)", "max-w-(--content-max)");
-    auditVisit.unmount();
+    expect(main.classList, "the column is no longer auto-centred").not.toContain("mx-auto");
+    expect(main.classList, "a w-full kept behind the inset would push the column's right edge past the window").not.toContain("w-full");
+    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
+    for (const cls of classes) expect(foot.classList, "the tag does not follow the dense column").not.toContain(cls);
+  });
 
+  it("keeps an owner's pages calm, in the centred frame, and the bounds stay", () => {
     setPathname("/settings");
     renderWithRuntime(
       <AppShell>
         <settings.default />
       </AppShell>,
     );
-    const settingsMain = screen.getByRole("main");
-    expect(settingsMain).toHaveAttribute("data-density", "dense");
-    for (const cls of classes) expect(settingsMain.classList, "the whole density shares the column, not Audit alone").toContain(cls);
-  });
-
-  it("pending E11-9: the tag stays on the page's foot, the calm column keeps its frame, and the widening bounds stay (C-17)", () => {
-    const classes = denseEdgeClass().split(" ").filter(Boolean);
-    setPathname("/audit");
-    const auditVisit = renderWithRuntime(
-      <AppShell>
-        <audit.default />
-      </AppShell>,
-    );
-    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
-    expect(within(foot).getByText("Fixture data"), "the tag still labels the screen, at the page's own foot").toBeInTheDocument();
-    expect(foot, "the tag's row keeps the frame every calm screen starts from").toHaveClass(
-      "mx-auto",
-      "w-full",
-      "max-w-(--content-max)",
-      "px-(--page-x)",
-    );
-    for (const cls of classes) expect(foot.classList, "the tag does not follow the dense column").not.toContain(cls);
-    auditVisit.unmount();
-
-    setPathname("/");
-    renderWithRuntime(
-      <AppShell>
-        <dashboard.default />
-      </AppShell>,
-    );
     const calm = screen.getByRole("main");
     expect(calm).toHaveAttribute("data-density", "calm");
-    expect(calm, "the calm column keeps today's centred frame").toHaveClass(
-      "mx-auto",
-      "w-full",
-      "max-w-(--content-max)",
-      "px-(--page-x)",
-      "pt-(--page-top)",
-      "pb-10",
-    );
-    for (const cls of classes) expect(calm.classList, "the fix cannot pass by moving the calm column").not.toContain(cls);
-
-    const rootVars = declaredIn(":root");
-    const denseVars = declaredIn('[data-density="dense"]');
-    expect(rootVars["content-max"], "the calm page's bound, the left edge's source, stays").toBe("80rem");
-    expect(denseVars["content-max"], "the dense column still widens, never past its own bound").toBe("90rem");
-    expect(denseVars["page-x"], "the gutters stay shared: both densities read --page-x the same").toBeUndefined();
-    expect(densityFor("/audit")).toBe("dense");
-    expect(densityFor("/settings")).toBe("dense");
-    expect(densityFor("/connections")).toBe("dense");
+    expect(calm).toHaveClass("mx-auto", "w-full", "max-w-(--content-max)", "px-(--page-x)", "pt-(--page-top)", "pb-10");
+    expect(declaredIn(":root")["content-max"]).toBe("80rem");
+    expect(declaredIn('[data-density="dense"]')["content-max"]).toBe("90rem");
+    expect(densityFor("/connections/conn_1")).toBe("dense");
+    expect(densityFor("/settings")).toBe("calm");
     expect(densityFor("/")).toBe("calm");
-    expect(densityFor("/messages")).toBe("calm");
-  });
-
-  it("the third dense route shares the column, and neither the foot nor a full width follows it (C-17)", () => {
-    const classes = denseEdgeClass().split(" ").filter(Boolean);
-    setPathname("/connections");
-    renderWithRuntime(
-      <AppShell>
-        <connections.default />
-      </AppShell>,
-    );
-    const main = screen.getByRole("main");
-    expect(main).toHaveAttribute("data-density", "dense");
-    for (const cls of classes) expect(main.classList, "the density's third route draws the same column Audit does").toContain(cls);
-    expect(main.classList, "a w-full kept behind the inset would push the column's right edge past the window by the inset").not.toContain("w-full");
-    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
-    expect(foot, "the tag's row stays density-blind; a dense foot would read the 90rem bound and put the tag back at 40px").not.toHaveAttribute("data-density", "dense");
   });
 });
 
 describe("the frame", () => {
   it.each([
-    ["/messages", true],
-    ["/messages/agt_1", true],
-    ["/messages/agt_1/desk", true],
+    ["/new", true],
+    ["/agents/agt_1", true],
+    ["/agents/agt_1/", true],
+    ["/agents/new", false],
     ["/", false],
-    ["/messagesx", false],
-    ["/agents/agt_1/activity", false],
+    ["/newx", false],
+    ["/agents/agt_1/kill-switch", false],
   ])("fills the window edge to edge on %s: %s", (path, bleed) => {
     expect(fullBleed(path)).toBe(bleed);
   });
 
-  it("holds Messages to the window's height, above the phone's tab bar, with no gutter and no page footer", () => {
-    setPathname("/messages");
+  it("holds a thread to the window's height, above the phone's tab bar, with no gutter and no page footer", () => {
+    setPathname("/new");
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const main = screen.getByRole("main");
     expect(main).toHaveClass("flex", "min-h-0", "flex-col");

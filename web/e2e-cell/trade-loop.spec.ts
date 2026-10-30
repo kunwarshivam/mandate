@@ -4,13 +4,13 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
 import { deferredCheckLabel } from "../src/lib/deferred-checks";
 
 /**
- * The trade loop from web/, end to end in the local cell (the founder's 2026-10-27 deadline): a
- * deployed paper agent's request appears in the web app, the owner approves it in the browser with
- * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
- * the fixture broker, the agent's screen shows the order filled, the position and the journal
- * records from the served reads (DEC-2377), the positions screen shows the agent's own position, the
- * audit timeline shows the agent's and its account's records, the browser's kill switch is recorded,
- * and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
+ * The trade loop from web/, end to end in the local cell (the founder's 2026-10-27 deadline), on the
+ * chat screens (DEC-2293): a deployed paper agent asks for the owner's OK in its thread, the owner
+ * approves it in the browser with the code the host confirms (`cli_confirm`, DEC-2104), the executor
+ * places and fills the order on the fixture broker, the agent says so in its thread, its Details
+ * show the position and the filled order from the served reads (DEC-2377), the owner's exit from
+ * Details is recorded and its sell is said in the thread too, the browser's kill switch is recorded,
+ * and the agent then reads as stopped.
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -37,8 +37,20 @@ const FILL_MS = Number(process.env.OWLHEAD_CELL_FILL_MS ?? 120_000);
  */
 const APPROVER_SENTENCE = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals.approver_sentence;
 
-/** The agent screen's fixed sentences for a section with nothing listed (`api-screens.tsx`'s `AgentActivity`), the only text a failure may quote from it. */
-const SECTION_STATES = ["Reading positions.", "This agent holds nothing.", "Not reported.", "Reading the journal.", "Not available to your role.", "Journal not reported.", "Nothing recorded yet."];
+/** The Details drawer's fixed sentences for a section with nothing listed (`details.tsx`), the only text a failure may quote from it. */
+const SECTION_STATES = ["Reading…", "Holds nothing.", "No orders yet.", "Your deployment didn't report this. It is read again when you reopen Details."];
+
+/** The agent's thread, and the cards its runtime posts there (`chat_watch.rs`). */
+const cards = (page: Page, kind: string) => page.locator(`[data-slot=chat-card][data-kind=${kind}]`);
+
+/** Opens the agent's Details drawer, closing one already open first so its reads run again. */
+async function openDetails(page: Page): Promise<Locator> {
+  const drawer = page.locator("[data-slot=details-drawer]");
+  if (await drawer.isVisible()) await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(drawer).toBeVisible();
+  return drawer;
+}
 
 /**
  * Whether `locator`'s text comes to match `phrase` within `ms`, read here rather than by `expect`, so
@@ -88,11 +100,11 @@ async function until(page: Page, path: string, ms: number, ready: () => Promise<
   return ready();
 }
 
-test("the trade loop from web/: approve in the browser, see the fill, the position and the journal, and kill the agent", async ({ page }) => {
+test("the trade loop from web/: approve in the agent's thread, hear of the fill, exit from Details, and kill the agent", async ({ page }) => {
   test.setTimeout(PROPOSAL_MS + CONFIRM_MS + 2 * FILL_MS + 120_000);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, CONFIRM_REQUEST, CONFIRM_DONE })) expect(value, `the driver names ${name}`).not.toBe("");
 
-  await test.step("the agent's request shows in the web app, with the checks its dry run deferred", async () => {
+  await test.step("the agent asks for the owner's OK in its thread, with the checks its dry run deferred", async () => {
     let approval = "";
     const contents = new Map<string, Record<string, unknown>>();
     page.on("response", async (r) => {
@@ -104,14 +116,15 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
         if (content) contents.set(decodeURIComponent(detail[1]), content);
         return;
       }
-      if (url.pathname !== `/v1/workspaces/${WORKSPACE}/approvals` || url.searchParams.get("state") !== "pending") return;
-      const listed = ((await r.json().catch(() => ({}))) as { approvals?: Array<{ approval_id: string; agent_id: string }> }).approvals ?? [];
-      approval ||= listed.find((a) => a.agent_id === AGENT)?.approval_id ?? "";
+      if (url.pathname !== `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/messages`) return;
+      const read = (await r.json().catch(() => ({}))) as { messages?: Array<{ card?: { kind?: string; approval_id?: string } | null }> };
+      approval ||= read.messages?.map((m) => m.card).find((c) => c?.kind === "approval")?.approval_id ?? "";
     });
-    const shown = await until(page, "/approvals", PROPOSAL_MS, async () => approval !== "");
-    if (!shown) refuse(`no request from agent ${AGENT} waited in the web app within ${PROPOSAL_MS} ms`);
+    const shown = await until(page, `/agents/${AGENT}`, PROPOSAL_MS, async () => approval !== "" && (await cards(page, "approval").count()) > 0);
+    if (!shown) refuse(`agent ${AGENT} asked for no OK in its thread within ${PROPOSAL_MS} ms`);
     step("approval", approval);
-    await page.goto(`/approvals/${approval}`, { timeout: 15_000 });
+    await cards(page, "approval").last().getByRole("link", { name: "Review and answer" }).click();
+    await expect(page).toHaveURL(new RegExp(`/approvals/${approval}$`));
 
     await expect.poll(() => contents.has(approval), { message: "the API's read of the request", timeout: 30_000 }).toBe(true);
     const deferred = contents.get(approval)?.deferred_to_binding;
@@ -160,23 +173,23 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     step("approved", ((await answer.json()) as { response_id?: string }).response_id ?? "");
   });
 
-  await test.step("the agent's screen shows the order filled, the position, and the journal's records", async () => {
-    const orders = page.getByRole("list", { name: "Orders" });
-    const positions = page.getByRole("list", { name: "This agent's positions" }).getByRole("listitem");
-    const journal = page.getByRole("list", { name: "Journal" });
-    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await orders.locator("[data-state=filled]").count()) > 0);
-    if (!filled) refuse(`no filled order on the agent's screen within ${FILL_MS} ms`);
+  await test.step("the agent says the fill in its thread, and its Details show the position and the filled order", async () => {
+    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await cards(page, "fill").count()) > 0);
+    if (!filled) refuse(`the agent said no fill in its thread within ${FILL_MS} ms`);
     step("order_filled");
-    const reads: string[] = [];
-    page.on("requestfinished", async (request) => {
-      const path = new URL(request.url()).pathname;
-      if (request.method() !== "GET" || !(path.endsWith(`/agents/${AGENT}/positions`) || path.includes("/journal/streams/agent"))) return;
-      const status = (await request.response().catch(() => null))?.status() ?? 0;
-      reads.push(`${status} ${path.split("/").slice(-2).join("/")} ${Math.round(request.timing().responseEnd)}ms`);
-    });
-    const held = await until(page, `/agents/${AGENT}`, 30_000, async () => (await positions.count()) > 0 && (await journal.getByRole("listitem").count()) > 0);
+    const positions = page.getByRole("region", { name: "Positions", exact: true }).getByRole("listitem");
+    const activity = page.getByRole("region", { name: "Activity", exact: true }).getByRole("listitem");
+    const deadline = Date.now() + 30_000;
+    let held = false;
+    while (!held && Date.now() < deadline) {
+      await openDetails(page);
+      held = await expect
+        .poll(async () => (await positions.count()) > 0 && (await activity.filter({ hasText: /· filled$/ }).count()) > 0, { timeout: 10_000 })
+        .toBe(true)
+        .then(() => true, () => false);
+    }
     if (!held) {
-      /** What a section shows, never what it lists: the uploaded failure carries no position or record (`AGENTS.md`, no positions in logs). */
+      /** What a section shows, never what it lists: the uploaded failure carries no position or order (`AGENTS.md`, no positions in logs). */
       const showed = async (title: string) => {
         const region = page.getByRole("region", { name: title, exact: true });
         if ((await region.count()) === 0) return "absent";
@@ -185,51 +198,33 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
         const text = (await region.first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "";
         return SECTION_STATES.find((state) => text.includes(state)) ?? "an unrecognized state";
       };
-      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s, watched in place; positions: ${await showed("This agent's positions")}; journal: ${await showed("Journal")}; reads (status, route, ms): ${reads.slice(-6).join(", ") || "none"}`);
+      refuse(`the agent said the fill but its Details showed no position or no filled order within 30 s; positions: ${await showed("Positions")}; activity: ${await showed("Activity")}`);
     }
     step("position");
-    step("journal", String(await journal.getByRole("listitem").count()));
+    step("activity", String(await activity.count()));
   });
 
-  await test.step("the positions screen shows the agent's own position from the API, in its columns", async () => {
-    const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
-    const shown = await until(page, "/positions", 30_000, async () => (await own.getByRole("row").count()) > 1);
-    if (!shown) refuse("the positions screen showed no row of the agent's own position within 30 s");
-    await expect(own.getByRole("columnheader", { name: "Cost basis" })).toBeVisible();
-    await expect(own.getByRole("row").nth(1).getByRole("cell")).toHaveCount(8);
-    step("positions_screen");
-  });
-
-  await test.step("the owner's exit from the positions screen is recorded, and its sell fills on the agent's orders", async () => {
-    const sells = page.getByRole("list", { name: "Orders" }).locator("[data-state=filled]").filter({ hasText: /^Sell / });
+  await test.step("the owner's exit from Details is recorded, and the agent says its sell in the thread", async () => {
     await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
-    await page.getByRole("list", { name: "Orders" }).waitFor({ timeout: 30_000 });
-    const before = new Set(await sells.allTextContents());
-    await page.goto("/positions", { timeout: 15_000 });
-    const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
-    const exit = own.getByRole("button", { name: /^Exit / }).first();
+    const before = await cards(page, "fill").filter({ hasText: /^Filled\s*Sell / }).count();
+    const drawer = await openDetails(page);
+    const exit = drawer.getByRole("button", { name: /^Exit / }).first();
     await expect(exit).toBeVisible({ timeout: 30_000 });
+    step("details");
     await exit.click();
-    const confirm = own.getByRole("group", { name: /^Exit / });
+    const confirm = drawer.getByRole("group", { name: /^Exit / });
     if (!(await comesToSay(confirm, /only participation caps pace it/, 15_000))) refuse("the owner exit's confirmation did not say that only participation caps pace it within 15 s");
     const sent = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/exits`);
     await confirm.getByRole("button", { name: "Sell it" }).click();
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
-    const exitStatus = page.getByRole("status", { name: /^Your exit from / });
+    const exitStatus = drawer.getByRole("status", { name: /^Your exit from / });
     if (!(await comesToSay(exitStatus, /Recorded in the journal: your exit|Taken by the agent's runtime/, 30_000))) refuse("the owner exit's status did not read recorded or taken within 30 s");
-    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.allTextContents()).some((sell) => !before.has(sell)));
-    if (!filled) refuse(`the owner exit was recorded but no new sell filled on the agent's orders within ${FILL_MS} ms`);
     step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
-  });
-
-  await test.step("the audit timeline shows the agent's records and its account's, as the journal holds them", async () => {
-    const records = page.getByRole("list", { name: "Journal records" });
-    const agent = records.locator(`[data-stream="agent:${WORKSPACE}:${AGENT}"]`);
-    const account = records.locator('[data-stream^="acct:"]');
-    const shown = await until(page, "/audit/timeline", 30_000, async () => (await agent.count()) > 0 && (await account.count()) > 0);
-    if (!shown) refuse("the audit timeline showed no record of the agent's stream and of an account stream within 30 s");
-    step("audit_timeline");
+    await page.keyboard.press("Escape");
+    const said = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await cards(page, "fill").filter({ hasText: /^Filled\s*Sell / }).count()) > before);
+    if (!said) refuse(`the owner exit was recorded but the agent said no sell filled within ${FILL_MS} ms`);
+    step("exit_filled");
   });
 
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {
@@ -255,13 +250,9 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     step("kill_switch", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
 
-  await test.step("the alerts screen shows the kill switch as exactly one alert", async () => {
-    const killed = page.locator('[data-slot="api-alert"][data-kind="kill_switch"]');
-    const shown = await until(page, "/alerts", 30_000, async () => (await killed.count()) > 0);
-    if (!shown) refuse("the alerts screen showed no kill switch alert within 30 s of the kill switch");
-    const count = await killed.count();
-    if (count !== 1) refuse(`the alerts screen showed ${count} kill switch alerts for one kill switch, not one`);
-    await expect(killed.getByText("Kill switch activated")).toBeVisible();
-    step("kill_switch_alert");
+  await test.step("after the kill switch, the agent reads as stopped", async () => {
+    const stopped = await until(page, `/agents/${AGENT}`, 30_000, async () => (await page.getByText("Stopped: questions only").count()) > 0);
+    if (!stopped) refuse("the agent did not read as stopped within 30 s of its kill switch");
+    step("stopped_shown");
   });
 });

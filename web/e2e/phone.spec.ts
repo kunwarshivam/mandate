@@ -1,9 +1,9 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
-import { AGENT_IDS } from "../src/fixtures/workspace";
-import { SCREENS, SECTION_INDEX } from "../src/lib/screens";
+import { APPROVAL_IDS } from "../src/fixtures/workspace";
+import { SCREENS } from "../src/lib/screens";
 
 /**
- * The phone is a remote control (DEC-207): two things in the header, four tabs and Stop (DEC-452), one navigation,
+ * The phone is a remote control (DEC-207): two things in the header, three tabs and Stop (DEC-452), one navigation,
  * a banner only when a feed is failing, and everything else one press away under More. Checked at
  * the four common phone widths, in the light and dark projects, and with reduced motion.
  */
@@ -36,23 +36,6 @@ async function labels(items: Locator) {
   return items.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? el.textContent?.trim() ?? ""));
 }
 
-/**
- * How many pixels of a chart's plot differ from the plot's own background: the line, the fill and
- * the labels. Zero until the client has drawn it. How tall the plot is is look (DEC-739 item 1).
- */
-async function plotMarks(host: Locator): Promise<number> {
-  return host.evaluate((el) => {
-    const canvas = [...el.querySelectorAll("canvas")].find((c) => c.width > 0 && c.height > 0);
-    if (!canvas) return 0;
-    const d = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
-    if (d[3] !== 255) return 0;
-    const near = (p: number) => [0, 1, 2].every((i) => Math.abs(d[p + i] - d[i]) <= 3);
-    let marks = 0;
-    for (let p = 0; p < d.length; p += 4) if (d[p + 3] === 255 && !near(p)) marks++;
-    return marks;
-  });
-}
-
 /** Every visible control inside a box that is smaller than a 44px touch target. */
 async function smallTargets(root: Locator) {
   return root.evaluate((el, min) => {
@@ -75,16 +58,16 @@ for (const width of PHONES) {
     test("the header holds two things: the mark and the paper badge", async ({ page }) => {
       await open(page, "/", width);
       const controls = header(page).locator("a[href], button, [role=button], input").locator("visible=true");
-      expect(await labels(controls)).toEqual(["Owlhead, dashboard"]);
+      expect(await labels(controls)).toEqual(["Owlhead, home"]);
       await expect(header(page).locator("[data-slot=environment-badge]")).toBeVisible();
       await expect(header(page).locator("[data-slot=environment-badge]")).toContainText("PAPER");
       expect(await smallTargets(header(page))).toEqual([]);
     });
 
-    test("four tabs and then Stop sit at the bottom, 44 px or more, frosted, and the page never scrolls sideways", async ({ page }) => {
+    test("three tabs and then Stop sit at the bottom, 44 px or more, frosted, and the page never scrolls sideways", async ({ page }) => {
       await open(page, "/", width);
       const items = tabBar(page).locator(":scope > a, :scope > button");
-      expect((await labels(items)).map((l) => l.replace(/\d+ open/, "").trim())).toEqual(["Home", "Messages", "Agents", "More", "Stop"]);
+      expect((await labels(items)).map((l) => l.replace(/\d+ open/, "").trim())).toEqual(["Home", "New agent", "More", "Stop"]);
       await expect(tabStop(page)).toBeEnabled();
       await expect(tabStop(page)).toBeInViewport({ ratio: 1 });
       const bar = (await tabBar(page).boundingBox())!;
@@ -96,13 +79,13 @@ for (const width of PHONES) {
     });
 
     test("there is one navigation: no sidebar, no menu button, no search button", async ({ page }) => {
-      await open(page, "/agents", width);
+      await open(page, "/settings", width);
       await expect(page.locator("[data-sidebar]")).toHaveCount(0);
       expect(await page.getByRole("navigation").locator("visible=true").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")))).toEqual(["Main"]);
       await expect(header(page).getByRole("button", { name: /sidebar|menu|Go to/i })).toHaveCount(0);
     });
 
-    test("More reaches every built screen and no screen still to come, with the account and Search (DEC-513)", async ({ page }) => {
+    test("More reaches every screen not on the tabs, with the account and Search", async ({ page }) => {
       await open(page, "/", width);
       const reached = new Set(await tabBar(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href"))));
       const sheet = await openMore(page);
@@ -112,7 +95,6 @@ for (const width of PHONES) {
       await expect(account.getByRole("button", { name: /^Workspace: / })).toBeVisible();
       for (const href of await sheet.getByRole("link").evaluateAll((els) => els.map((el) => el.getAttribute("href")))) if (href) reached.add(href);
       for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(s.built);
-      for (const href of [SECTION_INDEX.audit.href, SECTION_INDEX.workspace.href]) expect(reached, href).toContain(href);
       await expect(sheet.getByRole("button", { name: /^Search/ })).toBeVisible();
       expect(await smallTargets(sheet)).toEqual([]);
       expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -132,8 +114,8 @@ for (const width of PHONES) {
 
     test("a screen chosen under More opens, closes the sheet and marks More current", async ({ page }) => {
       await open(page, "/", width);
-      await (await openMore(page)).getByRole("link", { name: "Positions" }).click();
-      await expect(page).toHaveURL("/positions");
+      await (await openMore(page)).getByRole("link", { name: "Settings" }).click();
+      await expect(page).toHaveURL("/settings");
       await expect(moreSheet(page)).toBeHidden();
       await expect(moreTab(page)).toHaveAttribute("aria-current", "page");
     });
@@ -196,209 +178,9 @@ for (const width of PHONES) {
 }
 
 for (const width of PHONES) {
-  test.describe(`${width} px, Home`, () => {
-    test("Needs you comes first, the request with a static time, then the account, the agents and the decisions (DEC-468)", async ({ page }) => {
-      await open(page, "/?scenario=stale", width);
-      const headings = await page.locator("#main h2").locator("visible=true").evaluateAll((els) => els.map((el) => el.textContent?.replace(/\d+ items?$/, "").trim()));
-      expect(headings).toEqual(["Needs you", "Account equity", "Agents", "Decisions"]);
-      const rows = page.locator("[data-slot=needs-you] li");
-      expect(await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-kind"))), "the request, then one line per agent and condition, and no feed (DEC-513 item 9)").toEqual(["request", "alert"]);
-      await expect(rows.first()).toContainText(/Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing$/);
-      await expect(rows.first()).not.toContainText("left");
-      expect(await smallTargets(page.locator("[data-slot=needs-you]"))).toEqual([]);
-      await expect(page.locator("#main").getByText(/asks to buy|asked you to buy/).locator("visible=true")).toHaveCount(1);
-    });
-
-    test("Needs you is one row of cards that scrolls sideways, however many wait, with each price in full", async ({ page }) => {
-      await open(page, "/?scenario=approvals", width);
-      const list = page.locator("[data-slot=needs-you] ul");
-      const items = list.locator(":scope > li");
-      expect(await items.count(), "the three open requests: more cards than a phone's width holds").toBeGreaterThan(2);
-      const tops = await items.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
-      expect(new Set(tops).size, "every card sits on the same row").toBe(1);
-      const box = (await list.boundingBox())!;
-      expect(box.height, "the strip stays one card tall").toBeLessThanOrEqual(110);
-      expect(await list.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-      const first = (await items.first().boundingBox())!;
-      expect(first.x + first.width, "the next card shows at the edge").toBeLessThan(width);
-      const request = items.first().getByRole("link");
-      expect(await request.evaluate((el) => el.scrollWidth <= el.clientWidth && [...el.querySelectorAll("*")].every((s) => getComputedStyle(s).textOverflow !== "ellipsis"))).toBe(true);
-      await expect(request).toContainText(/\$[\d,]+\.\d{2}/);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    });
-
-    test("the range picker sits wholly above the tab bar on the first screen", async ({ page }) => {
-      await open(page, "/", width);
-      const picker = (await page.locator("[data-slot=account-equity] [data-slot=range-picker]").boundingBox())!;
-      const bar = (await tabBar(page).boundingBox())!;
-      expect(picker.y).toBeGreaterThan(0);
-      expect(picker.y + picker.height, "the range picker ends above the tab bar").toBeLessThanOrEqual(bar.y);
-      expect(await smallTargets(page.locator("[data-slot=range-picker]"))).toEqual([]);
-    });
-
-    test("agent rows carry the name, the state and the headroom, and no P&L", async ({ page }) => {
-      await open(page, "/", width);
-      const rows = page.locator("[data-slot=phone-agent]");
-      await expect(rows).toHaveCount(3);
-      for (const row of await rows.all()) {
-        await expect(row).toBeVisible();
-        await expect(row.locator("[data-slot=headroom]")).toHaveText(/^\$[\d,]+\.\d{2} (above|below) its /);
-        await expect(row.locator("[data-direction], [data-placeholder=performance], [data-slot=disclosure]")).toHaveCount(0);
-        await expect(row).not.toContainText(/P&L|today|[+−]\$/);
-      }
-      await expect(page.locator("[data-slot=agent-band]").first()).toBeHidden();
-      expect(await smallTargets(page.locator("[data-slot=phone-agents]"))).toEqual([]);
-    });
-
-    test("Home ends on three decisions, their tally and All decisions, and positions stay off Home", async ({ page }) => {
-      await open(page, "/", width);
-      const decisions = page.getByRole("region", { name: "Decisions" });
-      await expect(decisions.locator("[data-slot=timeline-entry]").locator("visible=true")).toHaveCount(3);
-      await expect(decisions.getByRole("link", { name: "All decisions" })).toBeVisible();
-      await expect(decisions.locator("[data-slot=decision-tally]")).toHaveText(/^The latest 3 decisions: /);
-      await expect(page.getByRole("region", { name: "Positions" })).toBeHidden();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-      expect(await smallTargets(decisions)).toEqual([]);
-    });
-  });
-}
-
-const AGENT = `/agents/${AGENT_IDS.btc}`;
-const SWING = `/agents/${AGENT_IDS.swing}`;
-
-for (const width of PHONES) {
-  test.describe(`${width} px, an agent`, () => {
-    test("the name, its state and Stop this agent come first, then the equity and the headroom, with no tabs", async ({ page }) => {
-      await open(page, SWING, width);
-      const head = page.locator("[data-slot=page-header]");
-      await expect(head.getByRole("heading", { level: 1 })).toBeVisible();
-      await expect(head.locator("[data-slot=mode-badge]")).toBeVisible();
-      await expect(head.getByRole("button", { name: "Stop this agent…" })).toBeVisible();
-      await expect(head.getByRole("navigation", { name: "Agent sections" })).toBeHidden();
-      const headings = await page.locator("#main h2").locator("visible=true").evaluateAll((els) => els.map((el) => el.textContent?.trim()));
-      expect(headings).toEqual(["Waiting for you", "Equity against your mandate", "Headroom", "This agent"]);
-      await expect(page.locator("[data-slot=phone-waiting] li").first()).toContainText(/Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing$/);
-      await expect(page.locator("[data-layout=rail]")).toBeHidden();
-      await expect(page.getByRole("region", { name: "Key figures" })).toBeHidden();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-      expect(await smallTargets(page.locator("#main"))).toEqual([]);
-    });
-
-    test("Stop this agent shares the title's row, one paper badge shows, and the chart is on screen, drawn", async ({ page }) => {
-      await open(page, AGENT, width);
-      const head = page.locator("[data-slot=page-header]");
-      const title = (await head.getByRole("heading", { level: 1 }).boundingBox())!;
-      const stop = head.getByRole("button", { name: "Stop this agent…" });
-      expect((await stop.innerText()).trim()).toBe("Stop");
-      const s = (await stop.boundingBox())!;
-      expect(s.height).toBeGreaterThanOrEqual(MIN_TARGET);
-      expect(s.y, "Stop starts within the title block's height, not under it").toBeLessThan(title.y + title.height);
-      expect(s.x + s.width).toBeLessThanOrEqual(width);
-      await expect(page.locator("[data-slot=environment-badge]").locator("visible=true")).toHaveCount(1);
-      await expect(header(page).locator("[data-slot=environment-badge]")).toBeVisible();
-      const chart = page.locator("[data-slot=agent-equity] [data-slot=chart-canvas]");
-      await expect(chart).toBeVisible();
-      const plot = (await chart.boundingBox())!;
-      expect(plot.height, "the chart takes room on the page").toBeGreaterThan(0);
-      expect(plot.x + plot.width, "the chart fits the phone's width").toBeLessThanOrEqual(width);
-      await expect.poll(() => plotMarks(chart), { message: "the chart draws its line", timeout: 30_000 }).toBeGreaterThan(200);
-      await stop.click();
-      await expect(page.getByRole("dialog", { name: /^Stop/ })).toContainText("Agent 1");
-    });
-
-    test("the level legend waits behind Levels", async ({ page }) => {
-      await open(page, AGENT, width);
-      const hero = page.locator("[data-slot=agent-equity]");
-      const disclosure = hero.getByRole("button", { name: "Performance disclosure" });
-      await expect(disclosure).toBeVisible();
-      await expect(disclosure).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
-      const toggle = hero.getByRole("button", { name: "Levels" });
-      await expect(toggle).toHaveAttribute("aria-expanded", "false");
-      await expect(hero.locator("[data-slot=level-legend]")).toBeHidden();
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-      await expect(hero.locator("[data-slot=level-legend]")).toBeVisible();
-      expect(await hero.locator("[data-slot=level-legend] li").count()).toBeGreaterThanOrEqual(5);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    });
-
-    test("Headroom has a row per limit with a meter, in ink and the marker, and no gain or loss colour", async ({ page }) => {
-      await open(page, AGENT, width);
-      const rows = page.locator("[data-slot=headroom] [data-slot=headroom-row]");
-      expect(await rows.count()).toBeGreaterThanOrEqual(3);
-      for (const row of await rows.all()) {
-        await expect(row).toBeVisible();
-        const meter = row.locator("[data-slot=headroom-meter]");
-        await expect(meter).toBeVisible();
-        expect((await meter.boundingBox())!.height).toBeLessThanOrEqual(6);
-      }
-      const colours = await page.locator("[data-slot=headroom]").evaluate((el) => {
-        const probe = (v: string) => {
-          const s = document.createElement("span");
-          s.style.color = `var(${v})`;
-          document.body.append(s);
-          const c = getComputedStyle(s).color;
-          s.remove();
-          return c;
-        };
-        const banned = new Set(["--gain", "--loss", "--gain-cvd", "--loss-cvd", "--crimson"].map(probe));
-        return [...el.querySelectorAll("*")].flatMap((n) => {
-          const cs = getComputedStyle(n);
-          return [cs.color, cs.backgroundColor].filter((c) => banned.has(c));
-        });
-      });
-      expect(colours).toEqual([]);
-      await expect(page.locator("[data-slot=headroom]")).toContainText(/Daily loss limit\$[\d,]+\.\d{2} headroom/);
-    });
-
-    test("the section links at the foot open each section, and the list follows", async ({ page }) => {
-      await open(page, AGENT, width);
-      const links = page.getByRole("navigation", { name: "This agent" });
-      await expect(links).toBeVisible();
-      expect(await labels(links.getByRole("link"))).toEqual([
-        "Overview",
-        expect.stringMatching(/^Positions\d+$/),
-        expect.stringMatching(/^Orders\d+$/),
-        "Decisions",
-        "Approvals",
-        "Mandate",
-        "Prove",
-        "Activity",
-      ]);
-      expect(await smallTargets(links)).toEqual([]);
-      await links.getByRole("link", { name: /^Orders/ }).click();
-      await expect(page).toHaveURL(`${AGENT}/orders`);
-      await expect(page.getByRole("navigation", { name: "This agent" }).getByRole("link", { name: /^Orders/ })).toHaveAttribute("aria-current", "page");
-      await page.getByRole("navigation", { name: "This agent" }).getByRole("link", { name: "Mandate" }).click();
-      await expect(page).toHaveURL(`${AGENT}/mandate`);
-      await expect(page.locator("[data-slot=envelope]")).toBeVisible();
-      await expect(tabStop(page)).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    });
-  });
-}
-
-for (const width of PHONES) {
   test.describe(`${width} px, approvals`, () => {
-    test("the inbox gives each request one hairline row with its static time", async ({ page }) => {
-      await open(page, "/approvals?scenario=approvals", width);
-      const rows = page.getByRole("region", { name: "Open, by deadline" }).getByRole("link");
-      expect(await rows.count()).toBeGreaterThan(1);
-      for (const row of await rows.all()) {
-        await expect(row).toBeVisible();
-        expect(await row.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
-        expect(await row.evaluate((el) => getComputedStyle(el.parentElement!).borderBottomWidth)).toBe("1px");
-        await expect(row.locator("[data-slot=deadline]")).toHaveText(/^Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing\s*$/, { useInnerText: true });
-        await expect(row.locator("[data-slot=remaining]")).toBeHidden();
-      }
-      expect(await smallTargets(page.locator("#main"))).toEqual([]);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    });
-
     test("a request fills the screen, with Approve and Skip equal and pinned above the tab bar", async ({ page }) => {
-      await open(page, "/approvals?scenario=approvals", width);
-      await page.getByRole("region", { name: "Open, by deadline" }).getByRole("link").first().click();
-      await expect(page).toHaveURL(/\/approvals\/apr_/);
+      await open(page, `/approvals/${APPROVAL_IDS.swingXyz}?scenario=approvals`, width);
       const approve = page.getByRole("button", { name: "Approve", exact: true });
       const skip = page.getByRole("button", { name: "Skip", exact: true });
       await expect(approve).toBeVisible();
@@ -425,61 +207,6 @@ for (const width of PHONES) {
     });
   });
 }
-
-test("desktop agent keeps its tabs, its mandate card and the full overview, with the legend open", async ({ page }) => {
-  await open(page, AGENT, 1440, 900);
-  await expect(page.getByRole("navigation", { name: "Agent sections" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "This agent" })).toBeHidden();
-  await expect(page.locator("[data-slot=mandate-card]")).toBeVisible();
-  for (const name of ["Key figures", "Positions", "Working orders", "Recent decisions", "Activity"]) await expect(page.getByRole("region", { name, exact: true })).toBeVisible();
-  await expect(page.locator("[data-slot=level-legend]")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Levels" })).toBeHidden();
-  await expect(page.locator("[data-slot=headroom]")).toBeHidden();
-  await expect(page.locator("[data-slot=mandate-card] [data-slot=mode-badge]")).toHaveCount(0);
-});
-
-test("Home says all clear once the one request is answered", async ({ page }) => {
-  await open(page, "/", 390);
-  await page.locator("[data-slot=needs-you] li[data-kind=request] a").click();
-  await expect(page).toHaveURL(/\/approvals\/apr_/);
-  await page.getByRole("button", { name: "Skip", exact: true }).click();
-  await expect(page.locator("[data-phase=sent], [data-phase=recorded], [data-status]").first()).toBeVisible();
-  await expect(page.getByRole("region", { name: "Outcome" })).toBeVisible({ timeout: 10_000 });
-  await expect(async () => {
-    await tabBar(page).getByRole("link", { name: "Home" }).click();
-    await expect(page).toHaveURL("/", { timeout: 1000 });
-  }).toPass({ timeout: 15_000 });
-  const clear = page.locator("[data-slot=all-clear]");
-  await expect(clear).toBeVisible();
-  await expect(clear).toHaveText("All clear. Nothing needs you.");
-});
-
-test("desktop Home leads with the account and agent bands with P&L and disclosure, then assets, beside a rail of Needs you and the latest decisions (DEC-468)", async ({ page }) => {
-  await open(page, "/", 1440, 900);
-  const rail = page.locator("main [data-layout=rail]");
-  const column = page.locator("main [data-layout=main]");
-  await expect(rail.locator("[data-slot=needs-you]")).toBeVisible();
-  await expect(column.locator("[data-slot=account-equity]")).toBeVisible();
-  await expect(rail.locator("[data-slot=account-equity]")).toHaveCount(0);
-  const box = (await column.boundingBox())!;
-  expect((await rail.boundingBox())!.x, "the rail sits right of the money").toBeGreaterThan(box.x + box.width);
-  const bands = page.locator("[data-slot=agent-band]");
-  await expect(bands).toHaveCount(3);
-  for (const band of await bands.all()) {
-    await expect(band).toBeVisible();
-    await expect(band.getByRole("button", { name: "Performance disclosure" })).toBeVisible();
-    await expect(band.locator("[data-direction]").first()).toBeVisible();
-  }
-  await expect(page.locator("[data-slot=phone-agent]").first()).toBeHidden();
-  await expect(page.getByRole("region", { name: "Assets" })).toBeVisible();
-  const decisions = rail.getByRole("region", { name: "Decisions" });
-  await expect(decisions.locator("[data-slot=timeline-entry]")).toHaveCount(4);
-  await expect(decisions.locator("[data-slot=decision-tally]")).toHaveText(/^The latest 4 decisions: /);
-  await expect(decisions.getByRole("link", { name: "All decisions" })).toBeVisible();
-  await expect(column.getByRole("region", { name: "Decisions" })).toHaveCount(0);
-  await expect(page.locator("[data-slot=paper-note]")).toHaveCount(1);
-  expect((await page.locator("[data-slot=account-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(260);
-});
 
 test("the banner says the deployment is unreachable", async ({ page }) => {
   await open(page, "/?scenario=unreachable", 390);

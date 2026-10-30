@@ -41,7 +41,7 @@ describe("what each role may do", () => {
 
   it("gives viewers and auditors no Stop", () => {
     expect(allowed("viewer")).toEqual(["agents.view", "workspace.view"]);
-    expect(allowed("auditor")).toEqual(["audit.view"]);
+    expect(allowed("auditor")).toEqual(["audit.view", "workspace.view"]);
   });
 
   it("covers every role", () => {
@@ -67,12 +67,10 @@ describe("roles in the shell", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 
-  it("shows an auditor only the Audit group", () => {
+  it("shows an auditor only Settings", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role: "auditor" });
     const hrefs = sidebarGroups();
-    expect(hrefs.length).toBeGreaterThan(0);
-    for (const href of hrefs) expect(href).toMatch(/^\/audit(\/|$)/);
-    expect(screen.queryByRole("link", { name: /^Approvals/ })).toBeNull();
+    expect(hrefs).toEqual(["/settings"]);
   });
 
   it("shows a viewer the request read-only, with no Approve or Skip", async () => {

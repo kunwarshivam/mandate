@@ -42,6 +42,8 @@ use std::time::Duration;
 
 use mandate_api_server::cache::{CachedJournal, Limits};
 use mandate_api_server::challenges::Challenges;
+use mandate_api_server::chat::{Chat, chat_from};
+use mandate_api_server::chat_watch;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
@@ -169,7 +171,15 @@ struct Start {
     cool_off_waiver: Option<(CoolOffWaiver, Option<UtcNanos>)>,
     /// The stored bars root the price read reads (`MANDATE_BARS`, DEC-2152).
     bars: Option<std::path::PathBuf>,
+    /// The chat's gateway address and models (`MANDATE_MODEL_GATEWAY`, `MANDATE_CHAT_REGISTRY`,
+    /// DEC-2293); neither set serves no model.
+    chat: Chat,
 }
+
+/// The model gateway service's `host:port` (DEC-2293).
+const MODEL_GATEWAY: &str = "MANDATE_MODEL_GATEWAY";
+/// The gateway's live registry file, read for its chat entries (DEC-2293).
+const CHAT_REGISTRY: &str = "MANDATE_CHAT_REGISTRY";
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
 fn setting(name: &'static str) -> Result<String, StartRefusal> {
@@ -246,6 +256,12 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         connect,
         cool_off_waiver: waiver,
         bars: bars_root(env::var_os(BARS).as_deref()),
+        chat: chat_from(
+            env::var(MODEL_GATEWAY).ok(),
+            env::var_os(CHAT_REGISTRY)
+                .and_then(|path| std::fs::read(path).ok())
+                .as_deref(),
+        ),
     };
     Ok((args, start))
 }
@@ -362,11 +378,18 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
         folds: Arc::default(),
         bars: start.bars,
+        chat: Arc::new(start.chat),
     };
+    let app = Arc::new(app);
+    tokio::spawn(chat_watch::watch(
+        Arc::clone(&app),
+        stop.clone(),
+        chat_watch::PASS,
+    ));
     let api = spawn_listener(
         serve(
             api,
-            http::api(app, Arc::clone(&drain)),
+            http::api_shared(app, Arc::clone(&drain)),
             wait_for(stop.clone()),
         ),
         wake.clone(),

@@ -1,17 +1,17 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS, APPROVAL_IDS } from "../src/fixtures/workspace";
-import { SCREENS, SECTION_INDEX, type Screen } from "../src/lib/screens";
+import { SCREENS } from "../src/lib/screens";
 
 /**
  * The labelled dock: every item's name reads under its icon at every desktop width, the current
- * section is marked on every route, including inside an agent or an audit screen, the labels hold
+ * section is marked on every route, including inside an agent's thread, the labels hold
  * 4.5:1 on the glass whatever scrolls underneath, nothing on a page ends up under the dock, and the
  * keyboard meets the items in the order they read.
  */
 
 const WIDTHS = [1024, 1280, 1440, 1920] as const;
-const LABELS = ["Home", "Messages", "Approvals", "Alerts", "Agents", "Positions", "More"];
-const DOCKED: Record<string, string> = { home: "Home", messages: "Messages", approvals: "Approvals", alerts: "Alerts", agents: "Agents", positions: "Positions" };
+const LABELS = ["Home", "New", "Settings"];
+const DOCKED: Record<string, string> = { home: "Home", new: "New", settings: "Settings" };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 const items = (page: Page) => dock(page).locator("a, button:not([data-slot=stop-control])");
@@ -24,24 +24,11 @@ async function open(page: Page, path: string, width = 1440, height = 900) {
   await page.waitForLoadState("networkidle");
 }
 
-function sectionOf(s: Screen): string {
-  return DOCKED[s.key] ?? "More";
-}
-
-/** Only a built screen has a door on the dock (DEC-513); one still to come marks nothing current. */
+/** Every screen, and inside an agent its thread and its record screens, mark their section current. */
 const ROUTES: [string, string][] = [
-  ...SCREENS.filter((s) => s.built).map((s): [string, string] => [s.href, sectionOf(s)]),
-  [SECTION_INDEX.audit.href, "More"],
-  [SECTION_INDEX.workspace.href, "More"],
-  [`/agents/${AGENT_IDS.btc}`, "Agents"],
-  [`/agents/${AGENT_IDS.btc}/positions`, "Agents"],
-  [`/agents/${AGENT_IDS.swing}/mandate`, "Agents"],
-  [`/agents/${AGENT_IDS.btc}/kill-switch`, "Agents"],
-  [`/approvals/${APPROVAL_IDS.swingXyz}`, "Approvals"],
-  [`/messages/${AGENT_IDS.swing}`, "Messages"],
-  [`/messages/${AGENT_IDS.swing}/desk`, "Messages"],
-  ["/audit/decisions", "More"],
-  ["/audit/timeline", "More"],
+  ...SCREENS.filter((s) => s.built).map((s): [string, string] => [s.href, DOCKED[s.key]]),
+  [`/agents/${AGENT_IDS.btc}`, "Home"],
+  [`/agents/${AGENT_IDS.btc}/kill-switch`, "Home"],
 ];
 
 for (const width of WIDTHS) {
@@ -67,14 +54,14 @@ for (const width of WIDTHS) {
 
 test("the dock does not shift when the current section changes", async ({ page }) => {
   const boxes: string[] = [];
-  for (const path of ["/", "/connections", "/audit/decisions"]) {
+  for (const path of ["/", "/new", "/settings"]) {
     await open(page, path, 1280);
     boxes.push(JSON.stringify(await dock(page).boundingBox()));
   }
   expect(new Set(boxes).size).toBe(1);
 });
 
-test("the current section is marked on every top-level route and inside agents, approvals and audit", async ({ page }) => {
+test("the current section is marked on every top-level route and inside an agent", async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   for (const [path, section] of ROUTES) {
@@ -82,7 +69,7 @@ test("the current section is marked on every top-level route and inside agents, 
     await expect(dock(page).locator("[data-current]"), path).toHaveCount(1);
     const current = dock(page).locator("[data-current]");
     await expect(current.locator("[data-slot=dock-label]"), path).toHaveText(section);
-    await expect(current, path).toHaveAttribute("aria-current", section === "More" ? "true" : "page");
+    await expect(current, path).toHaveAttribute("aria-current", "page");
     expect(await current.locator("[data-slot=dock-label]").evaluate((el) => getComputedStyle(el).fontWeight), path).toBe("600");
   }
 });
@@ -129,7 +116,7 @@ async function padOf(item: Locator): Promise<[number, number]> {
 test.describe("labels hold 4.5:1 on the dock's glass, whatever scrolls under it", () => {
   for (const under of ["none", "--foreground", "--ink", "--mandate-marker", "--gain", "--loss", "--lapis-line"]) {
     test(`over ${under === "none" ? "the page" : `solid ${under}`}`, async ({ page }) => {
-      await open(page, "/positions", 1280, 800);
+      await open(page, "/settings", 1280, 800);
       if (under !== "none") {
         await page.evaluate((under) => {
           const holder = document.querySelector("nav[aria-label=Primary]")!.parentElement!;
@@ -139,9 +126,9 @@ test.describe("labels hold 4.5:1 on the dock's glass, whatever scrolls under it"
         }, under);
       }
       await page.mouse.move(0, 0);
-      const current = dock(page).getByRole("link", { name: "Positions" });
-      const idle = dock(page).getByRole("link", { name: "Alerts" });
-      const hovered = dock(page).getByRole("link", { name: "Agents" });
+      const current = dock(page).getByRole("link", { name: "Settings" });
+      const idle = dock(page).getByRole("link", { name: /^Home/ });
+      const hovered = dock(page).getByRole("link", { name: "New" });
       await hovered.hover();
       await page.waitForTimeout(250);
       const colorOf = (item: Locator) => item.locator("[data-slot=dock-label]").evaluate((el) => getComputedStyle(el).color);
@@ -165,7 +152,7 @@ test.describe("labels hold 4.5:1 on the dock's glass, whatever scrolls under it"
 
 for (const width of WIDTHS) {
   test(`${width} px: nothing on a long page ends under the dock`, async ({ page }) => {
-    for (const path of ["/", "/agents", "/positions", "/audit/decisions", "/audit/timeline", `/agents/${AGENT_IDS.btc}/orders`]) {
+    for (const path of ["/", "/settings", `/approvals/${APPROVAL_IDS.swingXyz}`, `/agents/${AGENT_IDS.btc}/kill-switch`]) {
       await open(page, path, width, 800);
       await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
       await page.waitForFunction(() => Math.abs(window.scrollY + innerHeight - document.documentElement.scrollHeight) < 2);

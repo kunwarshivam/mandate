@@ -106,12 +106,12 @@ pub const TRADE_LOOP_STEPS: [&str; 11] = [
     "approved",
     "order_filled",
     "position",
-    "journal",
-    "positions_screen",
+    "activity",
+    "details",
     "owner_exit",
-    "audit_timeline",
+    "exit_filled",
     "kill_switch",
-    "kill_switch_alert",
+    "stopped_shown",
 ];
 
 /// What the trade loop spec asks the host to confirm: the owner's step-up for one approval, the
@@ -533,9 +533,8 @@ const JOURNEY_SPEC: &str = "customer-journey.spec.ts";
 /// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
 const JOURNEY_TIMEOUT_MS: &str = "330000";
 /// The customer journey's steps, in the order the spec reaches them; its result names each one.
-pub const JOURNEY_STEPS: [&str; 5] = [
+pub const JOURNEY_STEPS: [&str; 4] = [
     "connections",
-    "disclosures",
     "disclosure_accepted",
     "real_money_refused",
     "refusal_journaled",
@@ -543,8 +542,9 @@ pub const JOURNEY_STEPS: [&str; 5] = [
 
 /// The customer's journey from `web/` (`customer-journey.spec.ts`, DEC-2134) on `agent` in
 /// `workspace`, after the demo scenario: the owner, signed in, sees Alpaca paper connected and
-/// Robinhood's real money off, reads the go-live screen's disclosures and limits pending counsel,
-/// asks to trade real money and is refused, and finds the refusal journaled. Answers the steps
+/// Robinhood's real money off in Settings, finds the go-live disclosure's acceptance journaled,
+/// asks to trade real money with the page's session and is refused, and finds the refusal
+/// journaled. Answers the steps
 /// reached; an `Err` names the first that was not, or a run that wrote no result.
 ///
 /// # Errors
@@ -603,21 +603,11 @@ const WARM_POLLS: u32 = 720;
 pub fn warm_paths(agent: &str) -> Vec<String> {
     [
         "/",
-        "/agents",
+        "/settings",
         &format!("/agents/{agent}"),
         &format!("/agents/{agent}/kill-switch"),
-        &format!("/agents/{agent}/positions"),
-        "/agents/new",
-        "/approvals",
+        "/new",
         "/approvals/warm",
-        "/positions",
-        "/instruments",
-        "/audit/timeline",
-        "/alerts",
-        "/connections",
-        "/go-live",
-        "/settings/profile",
-        "/backtests/warm",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -684,9 +674,10 @@ pub const SETUP_STEPS: [&str; 4] = [
 ];
 
 /// The owner's set-up from `web/` (`setup.spec.ts`) in `workspace`: the owner, signed in, adds a
-/// passkey in Settings through the API's enrolment, made by Chromium's virtual authenticator,
-/// creates version 1 in `/agents/new`, and is told the confirm waits for the new passkey's first 24
-/// hours, with nothing sent and no deployment offered. A first passkey's cool-off is a safety rule
+/// passkey in Settings through the API's enrolment, made by Chromium's virtual authenticator, has
+/// version 1 created over the API with the page's session and opened on its confirm card at
+/// `/new?version=`, and is refused the confirm while the new passkey is in its first 24 hours,
+/// with no deployment offered. A first passkey's cool-off is a safety rule
 /// the founder decides (DEC-79), so the cell's confirm and deploy stay the CLI's. Answers the steps
 /// reached; an `Err` names the first that was not, or a run that wrote no result.
 ///
@@ -738,13 +729,13 @@ const REPORT_SPEC: &str = "backtest-report.spec.ts";
 /// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
 const REPORT_TIMEOUT_MS: &str = "270000";
 /// The report visit's steps, in the order the spec reaches them; its result names each one.
-pub const REPORT_STEPS: [&str; 2] = ["report_link", "report_shown"];
+pub const REPORT_STEPS: [&str; 2] = ["report_read", "report_compared"];
 
-/// The owner's visit of the backtest `backtest`'s report from `web/` (`backtest-report.spec.ts`) in
-/// `workspace`: the owner, signed in, opens its link, `/backtests/{id}`, since the API lists no
-/// backtests, and sees the report the runner stored, read through the API. Needs no market session.
-/// Answers the steps reached, `report_link` naming the link; an `Err` names the first step that was
-/// not reached, or a run that wrote no result.
+/// The owner's read of the backtest `backtest`'s report from `web/` (`backtest-report.spec.ts`) in
+/// `workspace`: the owner, signed in on Home, reads the report the runner stored through the API
+/// with that session, since `web/` has no report screen (DEC-2293). Needs no market session.
+/// Answers the steps reached, `report_read` naming the backtest; an `Err` names the first step
+/// that was not reached, or a run that wrote no result.
 ///
 /// # Errors
 /// A missing tool, a run past [`TRADE_LOOP_POLLS`], a run that wrote no result, or a step not
@@ -937,12 +928,12 @@ mod tests {
     /// runs is in this checkout and writes each step the driver reads.
     #[test]
     fn the_journey_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
-        let all = r#"{"connections":"ok","disclosures":"4","disclosure_accepted":"ok","real_money_refused":"ok","refusal_journaled":"01JB"}"#;
-        assert_eq!(journey_result(all)?.len(), 5);
+        let all = r#"{"connections":"ok","disclosure_accepted":"ok","real_money_refused":"ok","refusal_journaled":"01JB"}"#;
+        assert_eq!(journey_result(all)?.len(), 4);
         let stopped = r#"{"connections":"ok","error":"no Alpaca connection is listed"}"#;
         let why = format!("{:#}", journey_result(stopped).err().context("an error")?);
         assert!(why.contains("no Alpaca connection is listed"), "{why}");
-        let short = r#"{"connections":"ok","disclosures":"4","disclosure_accepted":"ok","real_money_refused":"ok"}"#;
+        let short = r#"{"connections":"ok","disclosure_accepted":"ok","real_money_refused":"ok"}"#;
         let why = format!(
             "{:#}",
             journey_result(short).err().context("a missing step")?
@@ -989,20 +980,20 @@ mod tests {
     /// The report visit's result is every step or the first one missing, and the spec writes each.
     #[test]
     fn the_report_visit_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
-        let whole = r#"{"report_link":"/backtests/bt-demo-01","report_shown":"ok"}"#;
+        let whole = r#"{"report_read":"bt-demo-01","report_compared":"ok"}"#;
         assert_eq!(
-            report_result(whole)?.get("report_link").map(String::as_str),
-            Some("/backtests/bt-demo-01")
+            report_result(whole)?.get("report_read").map(String::as_str),
+            Some("bt-demo-01")
         );
-        let stopped = r#"{"report_link":"/backtests/bt-demo-01","error":"no comparison shown"}"#;
+        let stopped = r#"{"report_read":"bt-demo-01","error":"no comparison shown"}"#;
         let why = format!("{:#}", report_result(stopped).err().context("an error")?);
         assert!(why.contains("no comparison shown"), "{why}");
-        let short = r#"{"report_link":"/backtests/bt-demo-01"}"#;
+        let short = r#"{"report_read":"bt-demo-01"}"#;
         let why = format!(
             "{:#}",
             report_result(short).err().context("a missing step")?
         );
-        assert!(why.contains("`report_shown`"), "{why}");
+        assert!(why.contains("`report_compared`"), "{why}");
         assert!(report_result("[]").is_err());
         let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(REPORT_SPEC))?;
         for step in REPORT_STEPS {
@@ -1514,13 +1505,7 @@ mod tests {
                 opened.extend(opened_paths(&fs::read_to_string(&path)?, &screens));
             }
         }
-        for route in [
-            "/agents",
-            "/approvals/*",
-            "/positions",
-            "/go-live",
-            "/agents/*",
-        ] {
+        for route in ["/", "/settings", "/approvals/*", "/agents/*"] {
             assert!(
                 opened.iter().any(|o| o == route),
                 "the specs open {route}: {opened:?}"

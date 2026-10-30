@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { DashboardScreen } from "@/components/screens/dashboard";
-import { ApiHome, BySource } from "@/components/api-screens/api-screens";
+import { HomeScreen } from "@/components/agent-chat/home";
+import { WorkspaceGate } from "@/components/screens/common";
 
 /** The root layout's title template does not apply to its own segment. */
-export const metadata: Metadata = { title: { absolute: "Dashboard · Owlhead" } };
+export const metadata: Metadata = { title: { absolute: "Home · Owlhead" } };
 
-export default function DashboardPage() {
-  return <BySource fixtures={<DashboardScreen />} api={<ApiHome />} />;
+export default function HomePage() {
+  return (
+    <WorkspaceGate api>
+      <HomeScreen />
+    </WorkspaceGate>
+  );
 }

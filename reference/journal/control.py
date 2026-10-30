@@ -833,7 +833,7 @@ SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("wor
 SCHEMAS[("meter", "MeterReserved")] = rec(
     ("call_id", ULID),
     ("agent_id", opt(IDENT_T)),
-    ("purpose", one_of(*AGENT_PURPOSES, *NO_AGENT_PURPOSES)),
+    ("purpose", one_of(*AGENT_PURPOSES, "chat", *NO_AGENT_PURPOSES)),
     ("model", MODEL_REF),
     ("endpoint", STR),
     ("key_owner", one_of("platform", "customer")),
@@ -1621,7 +1621,7 @@ REQUEST_CONTENT_V1 = rec(
     (
         "evidence",
         rec(
-            ("combined_score", rec(("label", STR), ("value", DEC))),
+            ("combined_score", opt(rec(("label", STR), ("value", DEC)))),
             (
                 "outputs",
                 list_of(
@@ -1675,7 +1675,7 @@ REQUEST_TOP = (
     ("purpose", one_of("open", "increase")),
     ("mandate_version", REF),
     ("decided_by", STR),
-    ("combined_score", DEC),
+    ("combined_score", opt(DEC)),
     ("reference_mark", opt(REQUEST_MARK)),
     ("approvers_required", INT),
     ("independent_required", BOOL),
@@ -2532,8 +2532,10 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
 def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.6's `ApprovalRequested` rules, on a well-typed payload, in the journal's order: each mirror,
     then rule 136 (version 2's plan names the order's asset class), rule 291 (version 3's deferrals
-    are ascending, never empty, and pair the liquidity checks), the deadline, the label, the
-    default, the choices, and last the content hash over the whole content, the plan included."""
+    are ascending, never empty, and pair the liquidity checks), rule 319 (v0.117, DEC-2858: a null
+    score cites no output), the deadline, the label of a score that is present, the default, the
+    choices, and last the content hash over the whole content, the plan included. A null score and
+    a null score object mirror each other; a null beside a present one breaks the score's mirror."""
     if event_type != "ApprovalRequested":
         return []
     p = draft["payload"]
@@ -2559,9 +2561,13 @@ def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
             out.append(Violation("rule.291.ascending", "non_canonical", path))
         rule("291.nonempty", bool(named), path)
         rule("291.pair", len(set(LIQUIDITY_PAIR) & set(named)) != 1, path)
+    if p["combined_score"] is None:
+        rule("319.outputs", not content["evidence"]["outputs"], "payload.content.evidence.outputs")
     rule("9.6.deadline", p["deadline"] == epoch_seconds(content["deadline"]), "payload.deadline")
-    label = content["evidence"]["combined_score"]["label"]
-    rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")
+    score = content["evidence"]["combined_score"]
+    if score is not None or "regress.label_on_a_null_score" in skip:
+        label = (score or {}).get("label")
+        rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")
     rule("9.6.default", content["default"] == "If you do nothing, this action is skipped", "payload.content.default")
     rule("9.6.choices", content["choices"] == ["approve", "skip"], "payload.content.choices")
     rule("9.6.content_hash", p["content_hash"] == artifact_ref(content), "payload.content_hash")

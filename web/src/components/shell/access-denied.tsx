@@ -20,7 +20,7 @@ export function AccessDenied({ role }: { role: Role }) {
       <p className="max-w-measure">
         {can(role, "agents.view")
           ? `As ${label.toLowerCase()}, you cannot open this screen. An owner or operator can.`
-          : `As ${label.toLowerCase()}, you see the journal and its exports, and nothing that acts.`}
+          : `As ${label.toLowerCase()}, you read the journal through your deployment's exports; here you see Settings, and nothing that acts.`}
       </p>
       <Link href={home.href} className={cn("w-fit", KEY)}>
         Go to the {home.label}

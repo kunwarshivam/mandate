@@ -405,6 +405,13 @@ async fn created(
     body: Body,
 ) -> Result<Response, Answer> {
     let admitted = admitted(app, headers, workspace, Permission::DraftVersion, body).await?;
+    created_by(app, &admitted)
+        .await
+        .map(|(response, _)| response)
+}
+
+/// [`created`] once admitted, with the version it created or found.
+async fn created_by(app: &App, admitted: &Admitted) -> Result<(Response, String), Answer> {
     let value = parse(&admitted.body).map_err(|_| Answer::schema("", "malformed"))?;
     let mandate = Mandate::parse(&value).map_err(|_| Answer::schema("", "mandate"))?;
     match value.get("environment").and_then(Value::as_str) {
@@ -445,7 +452,7 @@ async fn created(
         Vec::new(),
     )
     .ok_or(Refused::JournalUnavailable)?;
-    let drafted = drafted(&admitted, "create_version", event)?;
+    let drafted = drafted(admitted, "create_version", event)?;
     let created = object(vec![
         ("mandate_version", text(&version)),
         ("provenance", Value::Array(provenance)),
@@ -458,7 +465,7 @@ async fn created(
     let date = admitted.gate.now.date();
     let control = &admitted.reader.control;
     let objects = admitted.objects.as_ref();
-    let earlier = repeat(&admitted, &drafted)
+    let earlier = repeat(admitted, &drafted)
         .map(|repeated| repeated.map(|row| (StatusCode::ACCEPTED, row)))
         .or_else(|| {
             latest(control, CREATED, &version).map(|row| Ok((StatusCode::OK, row.clone())))
@@ -467,9 +474,8 @@ async fn created(
         let (status, row) = earlier?;
         let warnings =
             check((control, &[]), objects, (&mandate, ""), pending, date).unwrap_or_default();
-        return Ok(version_created(
-            status, &admitted, &row, &version, &warnings,
-        ));
+        let response = version_created(status, admitted, &row, &version, &warnings);
+        return Ok((response, version));
     }
     let warnings =
         check((control, &[]), objects, (&mandate, ""), pending, date).map_err(Answer::of)?;
@@ -477,14 +483,108 @@ async fn created(
     objects
         .put(&canonical)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let row = commit(app, &admitted, drafted, &[]).await?;
-    Ok(version_created(
-        StatusCode::ACCEPTED,
-        &admitted,
-        &row,
-        &version,
-        &warnings,
+    let row = commit(app, admitted, drafted, &[]).await?;
+    let response = version_created(StatusCode::ACCEPTED, admitted, &row, &version, &warnings);
+    Ok((response, version))
+}
+
+/// The version a chat's setup created (DEC-2293): its reference and the summary its confirmation
+/// card shows.
+pub struct ChatVersion {
+    pub hash: String,
+    pub summary: Value,
+}
+
+/// Creates a mandate version from a setup chat's `document` exactly as `POST /mandate-versions`
+/// does, under the owner's session and a fresh authorization for *Draft a mandate version*, with
+/// an idempotency key of the document's own; its problems, as `{path, code}` items, otherwise.
+///
+/// # Errors
+/// The violations, or the one refusal's code, as a JSON array.
+pub(crate) async fn create_for_chat(
+    app: &App,
+    gate: &Gate,
+    workspace: &str,
+    document: Value,
+) -> Result<ChatVersion, Value> {
+    let failure = |code: &str| {
+        Value::Array(vec![
+            object(vec![("code", text(code))]).unwrap_or(Value::Null),
+        ])
+    };
+    let body = mandate_canon::to_canonical(&document);
+    let digest = mandate_canon::Digest::of(&body).to_hex();
+    let key = mandate_api::idempotency::IdempotencyKey::parse(&format!(
+        "chat-draft-{}",
+        digest.get(..40).unwrap_or_default()
     ))
+    .map_err(|_| failure("idempotency"))?;
+    let now = app.clock.now().unwrap_or(gate.now);
+    let gate = Gate {
+        admitted: gate.admitted,
+        now,
+        key,
+    };
+    let reader = authorized(
+        app,
+        &gate.admitted,
+        now,
+        workspace,
+        Permission::DraftVersion,
+        Unreadable::Command,
+    )
+    .await
+    .map_err(|_| failure("not_permitted"))?;
+    let objects = app.objects.clone().ok_or_else(|| failure("no_store"))?;
+    let environment = reader
+        .control
+        .first()
+        .map(|row| row.environment.clone())
+        .ok_or_else(|| failure("not_found"))?;
+    let principal = principal_text(&gate).ok_or_else(|| failure("journal_unavailable"))?;
+    let admitted = Admitted {
+        gate,
+        body: Bytes::from(body),
+        reader,
+        objects,
+        environment,
+        principal,
+    };
+    match created_by(app, &admitted).await {
+        Ok((_, version)) => {
+            let summary = app
+                .artifacts
+                .as_ref()
+                .and_then(|store| crate::documents::envelope(store.as_ref(), &version))
+                .map(|envelope| {
+                    object(vec![
+                        ("name", text(&envelope.label)),
+                        ("mandate", envelope.mandate),
+                    ])
+                    .unwrap_or(Value::Null)
+                })
+                .unwrap_or(Value::Null);
+            Ok(ChatVersion {
+                hash: version,
+                summary,
+            })
+        }
+        Err(Answer::Invalid(violations)) => Err(Value::Array(
+            violations
+                .iter()
+                .map(|v| {
+                    let (path, code) = match v {
+                        Violation::Schema { path, code, .. }
+                        | Violation::Rule { path, code, .. } => (path.as_str(), code.as_str()),
+                        _ => ("", "invalid"),
+                    };
+                    object(vec![("path", text(path)), ("code", text(code))]).unwrap_or(Value::Null)
+                })
+                .collect(),
+        )),
+        Err(Answer::Code(_, code)) => Err(failure(&format!("{code:?}"))),
+        Err(_) => Err(failure("refused")),
+    }
 }
 
 /// `commands/version-created`.

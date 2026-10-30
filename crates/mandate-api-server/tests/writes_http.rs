@@ -95,6 +95,7 @@ fn fixture() -> Fixture {
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     let drain = Drain::new();
     let f = Fixture {

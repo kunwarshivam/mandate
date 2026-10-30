@@ -6,7 +6,7 @@ import { agentHref } from "../src/lib/screens";
 
 /**
  * The shell is laid out by CSS from the first server render (brief §5, rule 13: Stop does not depend
- * on the dashboard having loaded), and nothing in it picks a layout in JS, so there is nothing for a
+ * on Home having loaded), and nothing in it picks a layout in JS, so there is nothing for a
  * phone to wait for. With JavaScript off, and with it on but the bundle held back, a phone gets the
  * phone shell (DEC-207): the full-width content column, the tab bar with Stop at its end wholly on
  * screen (DEC-452), the status strip only on a record screen, and nothing wider than the viewport. A
@@ -22,11 +22,10 @@ const HEIGHT = 844;
 
 const ROUTES = [
   { name: "home", path: "/" },
-  { name: "agents", path: "/agents" },
-  { name: "an agent", path: agentHref(AGENT_IDS.btc, "overview") },
-  { name: "approvals", path: "/approvals" },
+  { name: "an agent", path: agentHref(AGENT_IDS.btc) },
+  { name: "a new agent", path: "/new" },
+  { name: "settings", path: "/settings" },
   { name: "an approval request", path: `/approvals/${APPROVAL_IDS.swingXyz}` },
-  { name: "positions", path: "/positions" },
   { name: "the kill-switch record", path: recordHref("kill", AGENT_IDS.btc) },
 ];
 

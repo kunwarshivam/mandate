@@ -115,6 +115,7 @@ fn fixture(environment: &str) -> Fixture {
         reduction: Arc::default(),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),
@@ -331,7 +332,6 @@ fn member<'v>(value: &'v Value, path: &[&str]) -> &'v Value {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_request_is_recorded_on_the_control_stream_before_its_202() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -361,7 +361,6 @@ fn a_request_is_recorded_on_the_control_stream_before_its_202() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_fractional_size_is_recorded_as_asked() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -381,7 +380,6 @@ fn a_fractional_size_is_recorded_as_asked() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_sell_is_invalid_at_side_and_judged_before_the_size() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -404,7 +402,6 @@ fn a_sell_is_invalid_at_side_and_judged_before_the_size() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_repeat_replays_its_request_and_another_body_under_the_key_conflicts() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -427,7 +424,6 @@ fn a_repeat_replays_its_request_and_another_body_under_the_key_conflicts() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_size_that_is_missing_or_not_positive_is_invalid_at_size() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -452,7 +448,6 @@ fn a_size_that_is_missing_or_not_positive_is_invalid_at_size() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn an_instrument_the_agent_does_not_pin_is_invalid_at_instrument() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -479,7 +474,6 @@ fn an_instrument_the_agent_does_not_pin_is_invalid_at_instrument() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn the_size_is_judged_before_the_instrument() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -494,7 +488,6 @@ fn the_size_is_judged_before_the_instrument() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn an_unknown_stopped_or_foreign_agent_is_the_one_404() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -519,7 +512,6 @@ fn an_unknown_stopped_or_foreign_agent_is_the_one_404() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_live_workspace_is_live_unavailable_and_records_nothing() {
     let f = fixture("live");
     let cookie = signed_in(&f, alice());
@@ -535,7 +527,6 @@ fn a_live_workspace_is_live_unavailable_and_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_document_the_store_cannot_give_is_journal_unavailable() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -545,7 +536,6 @@ fn a_document_the_store_cannot_give_is_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn only_the_request_row_may_ask_and_a_stranger_is_404() {
     let f = fixture("paper");
     let viewer = signed_in(&f, bob());
@@ -572,7 +562,6 @@ fn only_the_request_row_may_ask_and_a_stranger_is_404() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn the_session_csrf_key_and_body_are_checked_first() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -614,7 +603,6 @@ fn the_session_csrf_key_and_body_are_checked_first() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_reduction_only_session_cannot_ask() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -632,7 +620,6 @@ fn a_reduction_only_session_cannot_ask() {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn a_failed_membership_or_control_read_records_nothing() {
     let f = fixture("paper");
     let cookie = signed_in(&f, alice());
@@ -659,7 +646,6 @@ struct Ordered {
 }
 
 #[test]
-#[ignore = "pending E10-30"]
 fn the_checks_are_judged_in_order() {
     let hold = format!(r#"{{"instrument":"{PINNED}","side":"hold","size":"1"}}"#).into_bytes();
     let cases = [

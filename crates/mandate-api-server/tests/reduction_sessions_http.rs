@@ -116,6 +116,7 @@ fn fixture_behind(signer: &Signer, signed_in: bool, ingress: Vec<IpAddr>) -> Fix
         reduction: Arc::clone(&reduction),
         folds: Arc::default(),
         bars: None,
+        chat: Default::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

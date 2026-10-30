@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use mandate_builder::{
-    AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
+    AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket, RequestedBy,
     RiskContext as BuilderRiskContext, buy_action,
 };
 use mandate_canon::{Digest, Value};
@@ -15,8 +15,8 @@ use mandate_gate_context::Freshness;
 use mandate_num::{CostBasis, FeeRate, Fraction, MarkPrice, Qty, Signed, SizeFraction, Unit, Usd};
 use mandate_ports::BuilderContext;
 use mandate_runtime::{
-    Autonomy, Classified, MandateView, ModelDirection, OrderExecution, OrderPlan, Proposal,
-    ProtectionPrices, SignalInputs, TimeInForce,
+    Autonomy, Classified, MandateView, ModelDirection, OrderExecution, OrderPlan, OwnerRequest,
+    Proposal, ProtectionPrices, SignalInputs, TimeInForce,
 };
 use mandate_spec::ValidationContext;
 use mandate_spec::condition::{Condition, ConditionField};
@@ -50,24 +50,36 @@ impl Plan {
     /// any is missing: the fold holds the opening, the agent holds the instrument or has an
     /// order working in it, the session admits no opening, or the mandate does not validate.
     fn context(&self, opened: Opened<'_>) -> Option<(ValidatedMandate, BuilderContext)> {
+        self.context_with(opened, Holding::Flat)
+    }
+
+    /// [`Plan::context`] for `holding`: an owner's request (DEC-2858 item 10) is clipped against
+    /// the position the fold says the agent holds, marked at the sane bid, where an opening
+    /// requires none; neither is sized while an order of the agent's works in the instrument.
+    fn context_with(
+        &self,
+        opened: Opened<'_>,
+        holding: Holding,
+    ) -> Option<(ValidatedMandate, BuilderContext)> {
         let instrument = opened.asset_id.as_str();
-        let (facts, flat, models) = self.facts.read(|journaled| {
-            let flat = !journaled.held().contains_key(instrument)
-                && !journaled
-                    .working()
-                    .values()
-                    .any(|named| named == instrument);
+        let (facts, held, working, models) = self.facts.read(|journaled| {
             (
                 journaled.facts(instrument, self.fresh),
-                flat,
+                journaled.held().get(instrument).copied(),
+                journaled
+                    .working()
+                    .values()
+                    .any(|named| named == instrument),
                 journaled.models(),
             )
         })?;
-        let facts = facts.ok().filter(|_| flat)?;
+        let admitted = !working && (holding == Holding::Held || held.is_none());
+        let facts = facts.ok().filter(|_| admitted)?;
         let session = opening_session(opened.asset_class, facts.now)?;
         let validation = validation_context(facts.account.equity, facts.now)?;
         let validated = ValidatedMandate::new(self.mandate.clone(), &validation, &[]).ok()?;
-        let builder = builder_context(&self.mandate, opened, &facts, session, &models)?;
+        let held = held.unwrap_or(Qty::ZERO);
+        let builder = builder_context(&self.mandate, opened, &facts, session, &models, held)?;
         Some((validated, builder))
     }
 }
@@ -84,7 +96,10 @@ impl OrderPlan for Plan {
     /// or one whose facts have gone, is denied, which never adds risk (`AGENTS.md` rule 3). The
     /// plan cannot see every fact an autonomy rule may read (drawdown, daily P&L, what the agent
     /// bought today, gross exposure), so it never answers `auto` for an opening: §6.2 step 5c with
-    /// `auto_allowed` false makes an `auto` opening `ask` (DEC-2378 item 10).
+    /// `auto_allowed` false makes an `auto` opening `ask` (DEC-2378 item 10). A null score is an
+    /// owner's or a client's request (journal spec rule 319, DEC-2858): it is classified unscored,
+    /// so a rule reading the score denies it, and as the owner's, the client ceiling being the
+    /// runtime's to apply after.
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         if !proposal.purpose.adds_risk() {
             return Classified {
@@ -94,6 +109,32 @@ impl OrderPlan for Plan {
         }
         self.classify_opening(view, proposal)
     }
+    /// An owner's or a client's request (DEC-2858) for the deployment's own pinned asset, clipped
+    /// by the order builder over the same journaled facts an opening is sized on, so only while the
+    /// agent is flat with nothing working and the session admits an opening. `None` for any other
+    /// instrument, an unpinned mandate's (whose one instrument is its thesis's), or a missing fact
+    /// (`AGENTS.md` rule 3).
+    fn requested(&self, _view: &MandateView, request: &OwnerRequest) -> Option<Proposal> {
+        let pinned = self
+            .mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .find(|pinned| pinned.asset_id.as_str() == request.instrument.as_str())?;
+        let (validated, builder) = self.context_with(Opened::pinned(pinned), Holding::Held)?;
+        mandate_ports::requested(&validated, &builder, request)
+            .ok()
+            .flatten()
+    }
+}
+
+/// What a context admits of the agent's position in the instrument: an opening only while the agent
+/// is flat, so it never sizes on a cost basis or a P&L the daemon cannot see; an owner's request on
+/// top of what it holds, which is clipped, never sized.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Holding {
+    Flat,
+    Held,
 }
 
 /// The instrument an opening is sized and classified for: a pin, or an unpinned mandate's
@@ -293,19 +334,28 @@ impl Plan {
 
 impl Plan {
     fn classified(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<Classified> {
-        let (validated, builder) = self.context(opened)?;
-        let Value::Str(score) = &proposal.combined_score else {
-            return None;
+        let score = match &proposal.combined_score {
+            Value::Null => None,
+            Value::Str(score) => Some(Unit::parse(score).ok()?),
+            _ => return None,
         };
-        let score = Unit::parse(score).ok()?;
-        let action = buy_action(
+        let holding = match score {
+            Some(_) => Holding::Flat,
+            None => Holding::Held,
+        };
+        let (validated, builder) = self.context_with(opened, holding)?;
+        let mut action = buy_action(
             &builder.account,
             &builder.market,
             &builder.risk,
-            score,
+            score.unwrap_or(Unit::ZERO),
             proposal.qty,
         )
         .ok()?;
+        if score.is_none() {
+            action.combined_score = None;
+            action.requested_by = RequestedBy::Owner;
+        }
         let classified = mandate_ports::classify(&validated, &action, proposal, false).ok()?;
         if proposal.purpose.adds_risk() && denies_on_an_unseen_fact(&self.mandate) {
             return Some(Classified {
@@ -402,7 +452,8 @@ fn validation_context(account_equity: Usd, now: UtcNanos) -> Option<ValidationCo
     })
 }
 
-/// The builder's facts for a first opening, flat and with nothing working (DEC-2378 item 10):
+/// The builder's facts for a first opening, flat and with nothing working (DEC-2378 item 10), or
+/// for an owner's request on top of the `held` position, which is its gross exposure at the bid:
 /// the agent's equity is its allocation, the risk mark is the sane bid, and the ask is that same
 /// bid, so a buy never pays above it. A whole share is the increment, which never buys a
 /// fraction the instrument may not admit.
@@ -412,16 +463,17 @@ fn builder_context(
     facts: &mandate_gate_context::Facts,
     session: MarketSession,
     models: &BTreeMap<(String, String), String>,
+    held: Qty,
 ) -> Option<BuilderContext> {
     let allocation = mandate.capital.allocation_usd.to_usd().ok()?;
     let bid = facts.mark.bid;
     let increment = Qty::parse("1").ok()?;
     let account = BuilderAccountSnapshot {
         agent_equity: allocation,
-        position_qty: Qty::ZERO,
+        position_qty: held,
         cost_basis: CostBasis::ZERO,
         risk_mark: MarkPrice::from(bid),
-        gross_usd: Usd::ZERO,
+        gross_usd: held.notional(bid).ok()?,
         working_opening_cost: Usd::ZERO,
         goal_spent_usd: Usd::ZERO,
     };

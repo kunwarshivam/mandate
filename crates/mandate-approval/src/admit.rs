@@ -289,7 +289,7 @@ mod tests {
             purpose: AskablePurpose::Open,
             mandate_version: "v1".to_owned(),
             decided_by: "default".to_owned(),
-            combined_score: Signed::parse("0.5")?,
+            combined_score: Some(Signed::parse("0.5")?),
             reference_mark: None,
             approvers_required: NonZeroU8::MIN,
             independent_required: true,

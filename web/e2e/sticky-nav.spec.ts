@@ -1,6 +1,5 @@
 import { type Page, expect, test } from "@playwright/test";
-import { AGENT_IDS } from "../src/fixtures/workspace";
-import { agentHref } from "../src/lib/screens";
+import { APPROVAL_IDS } from "../src/fixtures/workspace";
 
 /**
  * The desktop dock stays put: however far a long page scrolls, it floats centred at the bottom of the
@@ -11,7 +10,7 @@ import { agentHref } from "../src/lib/screens";
 
 const WIDTHS = [1024, 1280, 1920];
 const HEIGHT = 800;
-const ROUTE = agentHref(AGENT_IDS.swing, "overview");
+const ROUTE = `/approvals/${APPROVAL_IDS.swingXyz}`;
 
 async function scrollToBottom(page: Page) {
   const { scrollHeight, innerHeight } = await page.evaluate(() => ({
@@ -53,9 +52,9 @@ test.describe("The desktop dock stays pinned while a long page scrolls", () => {
       expect(found.lastBottom, "the page's last line ends above the dock").toBeLessThanOrEqual(found.box.top);
 
       const items = dock.locator("a[href], button");
-      expect(await items.count(), "six links, the More menu, and Stop (DEC-513 item 2)").toBe(8);
+      expect(await items.count(), "Home, New agent, Settings, and Stop (DEC-2293)").toBe(4);
       for (const item of await items.all()) await expect(item).toBeInViewport({ ratio: 1 });
-      await expect(dock.getByRole("link", { name: "Agents", exact: true }), "the current page's item").toHaveAttribute("aria-current", "page");
+      await expect(dock.locator("[aria-current=page]"), "a request is no dock screen, so no item is current").toHaveCount(0);
 
       const header = await page.locator("header").first().boundingBox();
       expect(header?.y, "the header stays at the top").toBe(0);

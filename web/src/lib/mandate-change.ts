@@ -22,8 +22,13 @@ import type {
   WorkingOrder,
   Workspace,
 } from "@/fixtures/types";
-import { LOSS_CEILING } from "@/components/new-agent/draft";
 import { type Dec, ONE, ZERO, abs, add, dec, div, fromInt, mul, sub, toDecimalString } from "./decimal";
+
+/**
+ * The retail profile's lifetime-loss ceiling (mandate spec §4.3: DEC-61's placeholder until counsel
+ * answers). Shown as a limit, never filled in as an answer.
+ */
+const LOSS_CEILING = dec("0.2");
 import { INDEPENDENT_APPROVAL_RULE, independentApprovalRequired, mandateVersion, unallocatedUsd } from "./fixture-journey";
 import { fixtureUlid } from "./fixture-ids";
 import { percent, price, quantity, seconds, usd } from "./format";

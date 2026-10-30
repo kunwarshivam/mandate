@@ -135,6 +135,18 @@ pub fn registry(
     Ok(registry)
 }
 
+/// [`hosted`] for a caller outside this crate: the live registry file's chat entries (DEC-2293)
+/// name their endpoint in the same members.
+///
+/// # Errors
+/// [`RecordedError::Malformed`] naming the first member that is missing, empty, or out of range.
+pub fn hosted_endpoint(
+    endpoint: &Value,
+    slug: &str,
+) -> Result<(Endpoint, Reported), RecordedError> {
+    hosted(&Field(endpoint), slug)
+}
+
 /// The hosted endpoint `endpoint` describes, and what it reports serving `slug`: the endpoint member
 /// of a recording, and of each entry of the live registry file.
 pub(crate) fn hosted(

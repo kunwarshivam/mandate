@@ -616,6 +616,30 @@ pub struct LiquidityRead {
     pub read_at: UtcNanos,
 }
 
+/// An owner's request for an order as the runtime copies it from the control stream's
+/// `OwnerRequestSubmitted` (journal spec §9.9, DEC-2858): a buy of `qty` of `instrument`, from the
+/// deployment's own working universe, that the plan clips to the mandate's caps and classifies
+/// ([`crate::OrderPlan::requested`]). The request is the decision's `causation_id`, and its
+/// `event_id` the copy's idempotency key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerRequest {
+    pub request: EventId,
+    pub instrument: InstrumentId,
+    pub qty: Qty,
+    pub requested_by: Requester,
+}
+
+/// Who asked for an owner request, from its authenticated actor and never its body (journal spec
+/// §9.9 rule 79, workspace API API-6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Requester {
+    /// The owner, through the web app or the CLI.
+    Owner,
+    /// An owner-connected client, by the id it was connected under (DEC-141). Its opening is
+    /// never AUTO (mandate spec §6.2 step 5a, MI-30).
+    Client { client_id: String },
+}
+
 /// How the mandate's autonomy rules classified a proposal (mandate spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Autonomy {

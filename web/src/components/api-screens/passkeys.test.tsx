@@ -2,10 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it } from "vitest";
 import { type Fetch } from "@/api/client";
 import { MOCK_PASSKEY_ID, MOCK_PRINCIPAL, createMockServer } from "@/api/mock-server";
-import { RegistryScreen } from "@/components/screens/account-screens";
+import { SettingsScreen } from "@/components/agent-chat/settings-screen";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { RoleProvider } from "@/lib/roles";
-import { findScreen } from "@/lib/screens";
 import { setPathname } from "@/test/navigation";
 import type { Authenticator } from "@/api/passkey";
 import { mockAuthenticator, mockCreator } from "@/test/set-up";
@@ -29,7 +28,7 @@ function mount(held: Array<{ passkey_id: string; cool_off_ends: string | null }>
     <RoleProvider initial="owner">
       <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5} creator={creator.create} authenticator={authenticator.get}>
         <main>
-          <RegistryScreen screen={findScreen("/settings/profile")!} />
+          <SettingsScreen />
         </main>
       </ApiRuntimeProvider>
     </RoleProvider>,
@@ -103,7 +102,7 @@ describe("your passkeys on the deployment, over the workspace API (§3.6, DEC-21
       <RoleProvider initial="owner">
         <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} creator={async () => Promise.reject(new DOMException("no", "NotAllowedError"))}>
           <main>
-            <RegistryScreen screen={findScreen("/settings/profile")!} />
+            <SettingsScreen />
           </main>
         </ApiRuntimeProvider>
       </RoleProvider>,

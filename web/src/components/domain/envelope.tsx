@@ -242,10 +242,10 @@ export function Headroom({ agent, className }: { agent: Agent; className?: strin
       <PendingBreaches agent={agent} />
       <p className="text-caption text-muted-foreground">{CAVEAT}</p>
       <Link
-        href={agentHref(agent.agent_id, "mandate")}
+        href={agentHref(agent.agent_id)}
         className="-mx-2 inline-flex min-h-11 w-fit items-center gap-1 rounded-md px-2 text-sm font-semibold underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
       >
-        View full mandate
+        Open its thread
         <ArrowRight aria-hidden className="size-6" />
       </Link>
     </section>
@@ -311,10 +311,10 @@ export function MandateCard({ agent, className }: { agent: Agent; className?: st
         <p className="text-caption text-mandate-muted">{CAVEAT}</p>
       </div>
       <Link
-        href={agentHref(agent.agent_id, "mandate")}
+        href={agentHref(agent.agent_id)}
         className="-mx-2 inline-flex min-h-9 w-fit items-center gap-1 rounded-md px-2 text-sm font-semibold text-mandate-strong underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
       >
-        View full mandate
+        Open its thread
         <ArrowRight aria-hidden className="size-6" />
       </Link>
     </section>

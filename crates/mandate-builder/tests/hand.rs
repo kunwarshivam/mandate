@@ -107,7 +107,7 @@ fn opening(order_usd: &str, combined_score: &str) -> ActionContext {
     ActionContext {
         purpose: Purpose::Open,
         order_usd: usd(order_usd),
-        combined_score: unit(combined_score),
+        combined_score: Some(unit(combined_score)),
         instrument: asset(BTC_INSTRUMENT),
         asset_class: AssetClass::Crypto,
         session: MarketSession::Crypto,
@@ -1330,13 +1330,13 @@ fn the_score_rounds_to_twelve_places_before_the_rule_compares_it() {
         }
         other => panic!("a buy of 9 at 100, not {other:?}"),
     };
-    assert_eq!(action.combined_score, unit("0.65"));
+    assert_eq!(action.combined_score, Some(unit("0.65")));
     let decided = classified(&base_policy(), &action);
     assert_eq!(decided.decision, AutonomyDecision::Auto);
     assert_eq!(decided.by, DecidedBy::Rule(rule_id("routine")));
 
     let unrounded = ActionContext {
-        combined_score: unit("0.649999999999"),
+        combined_score: Some(unit("0.649999999999")),
         ..action
     };
     assert_eq!(
@@ -2586,7 +2586,7 @@ fn buy_proposal(order_usd: &str, combined_score: &str) -> Proposal {
             order_usd: usd(order_usd),
             action: ActionContext {
                 order_usd: usd(order_usd),
-                combined_score: unit(combined_score),
+                combined_score: Some(unit(combined_score)),
                 instrument: asset(SWING_INSTRUMENT),
                 asset_class: AssetClass::UsEquity,
                 session: MarketSession::Regular,
@@ -2999,7 +2999,7 @@ fn the_after_values_a_rule_reads_include_this_order() {
         usd("550"),
         "250 bought today plus this 300"
     );
-    assert_eq!(action.combined_score, unit("0.74"));
+    assert_eq!(action.combined_score, Some(unit("0.74")));
     assert!(
         action.new_instrument,
         "the flag is the caller's, not derived"

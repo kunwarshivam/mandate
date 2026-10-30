@@ -9,13 +9,15 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use mandate_canon::parse;
+use mandate_canon::{Value, parse};
+use mandate_chat::ChatEntry;
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, SecretSource, Transport};
-use mandate_gateway::registry::{Locality, Registry};
+use mandate_gateway::registry::{Endpoint, Locality, Registry, RegistryError, Reported, Status};
 use mandate_gateway::{RateCaps, Settings};
 use mandate_research_run::live::{LiveEntry, Refused, live_registry, read_live};
+use mandate_research_run::recorded::hosted_endpoint;
 use mandate_store::Store;
 use mandate_store::meter::JournalMeter;
 
@@ -104,6 +106,23 @@ pub fn live_service<S: Store + 'static, C: Clock, T: Transport>(
     transport: T,
     key: Box<dyn SecretSource>,
 ) -> Result<LiveStart<S, C, T>, StartFailure> {
+    live_service_with_chat(config, entries, &[], parts, transport, key)
+}
+
+/// [`live_service`] with the file's chat entries offered beside the research entries (DEC-2293
+/// item 13): each is registered, offered, and given its one endpoint, whose identity every response
+/// is still checked against (INF-2), and its upstream is allowed.
+///
+/// # Errors
+/// As [`live_service`].
+pub fn live_service_with_chat<S: Store + 'static, C: Clock, T: Transport>(
+    config: &Config,
+    entries: &[LiveEntry],
+    chats: &[ChatLive],
+    parts: Parts<S, C>,
+    transport: T,
+    key: Box<dyn SecretSource>,
+) -> Result<LiveStart<S, C, T>, StartFailure> {
     unverified(entries)?;
     let held: Vec<LiveEntry> = entries
         .iter()
@@ -113,16 +132,94 @@ pub fn live_service<S: Store + 'static, C: Clock, T: Transport>(
             ..live
         })
         .collect();
-    let (registry, refused) = live_registry(&held, &mut |_, _| Vec::new());
+    let (mut registry, mut refused) = live_registry(&held, &mut |_, _| Vec::new());
+    refused.extend(register_chat(&mut registry, chats));
+    let mut settings = live_settings(&config.workspace, entries);
+    let allowed: BTreeSet<String> = upstreams(entries)
+        .into_iter()
+        .chain(chat_upstreams(chats))
+        .collect();
+    settings.policy = EndpointPolicy::new(BTreeSet::from([Locality::Hosted]), Some(allowed), None);
     let service = metered_service(
         config,
         parts,
         Served {
-            settings: live_settings(&config.workspace, entries),
+            settings,
             registry,
             transport,
             key,
         },
     )?;
     Ok((service, refused))
+}
+
+/// One chat entry of the live registry file (DEC-2293 item 13), offered on its one endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatLive {
+    pub entry: ChatEntry,
+    pub endpoint: Endpoint,
+}
+
+/// The file's optional `chat` entries, read strictly: each holds an `entry` with `model_id`,
+/// `model_version`, `provider`, `model_name`, a dated `snapshot`, `deadline_ms` and
+/// `max_output_tokens`, and an `endpoint` as a research entry's. A file with no `chat` member has
+/// none.
+///
+/// # Errors
+/// [`StartFailure::RegistryUnreadable`] when the file cannot be read, and
+/// [`StartFailure::RegistryMalformed`] when it is not strict JSON or an entry lacks a member.
+pub fn read_chat(path: &Path) -> Result<Vec<ChatLive>, StartFailure> {
+    let bytes = std::fs::read(path).map_err(|_| StartFailure::RegistryUnreadable)?;
+    let value = parse(&bytes).map_err(|_| StartFailure::RegistryMalformed)?;
+    chat_entries(&value).ok_or(StartFailure::RegistryMalformed)
+}
+
+/// The `chat` entries of a parsed registry file; `None` when one does not read.
+pub fn chat_entries(file: &Value) -> Option<Vec<ChatLive>> {
+    let Some(listed) = file.get("chat") else {
+        return Some(Vec::new());
+    };
+    listed
+        .as_array()?
+        .iter()
+        .map(|item| {
+            let entry = ChatEntry::from_registry(item.get("entry")?)?;
+            let (endpoint, _) =
+                hosted_endpoint(item.get("endpoint")?, &entry.identity.model_name).ok()?;
+            Some(ChatLive { entry, endpoint })
+        })
+        .collect()
+}
+
+/// The upstreams the chat entries' endpoints route through.
+pub fn chat_upstreams(chats: &[ChatLive]) -> BTreeSet<String> {
+    chats
+        .iter()
+        .map(|chat| chat.endpoint.route.upstream.clone())
+        .collect()
+}
+
+/// Registers each chat entry, offers it, and adds its endpoint as answering for the pinned identity
+/// (DEC-2293 item 13: no start probe; each response's reported identity is still checked against
+/// the pin). Each entry the registry refuses is listed with why.
+pub fn register_chat(registry: &mut Registry, chats: &[ChatLive]) -> Vec<Refused> {
+    chats
+        .iter()
+        .filter_map(|chat| {
+            let content = chat.entry.content();
+            let pin = content.model_ref();
+            let reported = Reported {
+                model: Some(chat.entry.identity.model_name.clone()),
+                provider: Some(chat.endpoint.route.reported_provider.clone()),
+            };
+            let taken: Result<(), RegistryError> = registry
+                .register(content)
+                .and_then(|_| registry.set_status(&pin, Status::Offered))
+                .and_then(|()| registry.add_endpoint(&pin, chat.endpoint.clone(), &[reported]));
+            taken.err().map(|error| Refused {
+                model_id: pin.model_id,
+                error,
+            })
+        })
+        .collect()
 }
