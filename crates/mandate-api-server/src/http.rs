@@ -180,6 +180,10 @@ pub fn api_shared(app: Arc<App>, drain: Arc<Drain>) -> Router {
             post(crate::chat::stop_run).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/messages/{message}/confirm",
+            post(crate::chat_confirm::confirm_order).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/agents/{agent}/goals",
             get(crate::chat::goals).fallback(otherwise.clone()),
         )

@@ -40,6 +40,9 @@ struct OwnerPlan {
     qty: &'static str,
     autonomy: Autonomy,
     prices: bool,
+    /// What `held_for_review` answers: whether a review ceiling or the two-approver threshold
+    /// holds the owner's request (DEC-2859).
+    held: bool,
     asked: RefCell<Vec<OwnerRequest>>,
 }
 
@@ -50,7 +53,15 @@ impl OwnerPlan {
             qty: "5",
             autonomy,
             prices: true,
+            held: false,
             asked: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn held(autonomy: Autonomy) -> Self {
+        Self {
+            held: true,
+            ..Self::classified(autonomy)
         }
     }
 
@@ -79,6 +90,10 @@ impl OrderPlan for OwnerPlan {
                 .to_owned(),
             ),
         }
+    }
+
+    fn held_for_review(&self, _view: &MandateView, _proposal: &Proposal) -> bool {
+        self.held
     }
 
     fn requested(&self, _view: &MandateView, request: &OwnerRequest) -> Option<Proposal> {
@@ -299,6 +314,64 @@ fn an_owners_request_the_mandate_would_ask_about_runs_as_the_owners_own() {
     assert_eq!(member(decision, "autonomy"), &text("auto"));
     assert_eq!(member(decision, "decided_by"), &text("owner_request"));
     assert_eq!(ran.handed.len(), 1, "the owner's order is handed at once");
+}
+
+/// DEC-2859, the founder's: an owner's request a reviewer holds (a review ceiling, the admission
+/// ceiling or the two-approver threshold) stays the ASK the mandate made, with its own label, and is
+/// asked for approval as any ASK is; nothing is handed until an approver says yes.
+#[test]
+fn an_owners_request_a_reviewer_holds_is_asked() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        OwnerPlan::held(Autonomy::Ask),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&ports);
+    let request = Request::owner_buy(1);
+    let ran = tail(&mut shell, &request.event(), &ports);
+    assert_eq!(
+        ran.draft_types(),
+        vec!["DecisionMade", "ApprovalRequested", "ApprovalDelivered"]
+    );
+    let decision = only(&ran, "DecisionMade");
+    assert_owner_decision(decision, &request.id(), "owner");
+    assert_eq!(member(decision, "autonomy"), &text("ask"));
+    assert_eq!(member(decision, "decided_by"), &text("rule:owner-ask"));
+    let asked = only(&ran, "ApprovalRequested");
+    assert_eq!(member(asked, "combined_score"), &Value::Null);
+    assert!(
+        ran.handed.is_empty(),
+        "a held request waits for its approver"
+    );
+}
+
+/// A held owner's request the dry run deferred is asked under the overlay's label, and one the
+/// mandate lets run is not asked at all: step 5d only ever keeps an ASK, it never makes one.
+#[test]
+fn a_held_owners_request_is_asked_only_when_something_asked() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        DeferGate,
+        OwnerPlan::held(Autonomy::Auto),
+        universe(&["AAPL"]),
+    );
+    let deferring = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&deferring);
+    let ran = tail(&mut shell, &Request::owner_buy(1).event(), &deferring);
+    let decision = only(&ran, "DecisionMade");
+    assert_eq!(member(decision, "autonomy"), &text("ask"));
+    assert_eq!(member(decision, "decided_by"), &text("policy_overlay"));
+    assert!(ran.handed.is_empty());
+    let allowed = OwnerPlan::held(Autonomy::Auto);
+    let allowing = ports(&ids, &AllowGate, &allowed, &view);
+    let mut shell = started(&allowing);
+    let ran = tail(&mut shell, &Request::owner_buy(1).event(), &allowing);
+    let decision = only(&ran, "DecisionMade");
+    assert_eq!(member(decision, "autonomy"), &text("auto"));
+    assert_eq!(member(decision, "decided_by"), &text("rule:owner-auto"));
+    assert_eq!(ran.handed.len(), 1);
 }
 
 /// A dry run that deferred checks to the binding gate asks about any other opening (mandate spec
@@ -627,10 +700,12 @@ enum Verdict {
     Denies,
 }
 
-/// A run: how the mandate classifies, what the dry run answers, and the steps.
+/// A run: how the mandate classifies, whether a reviewer holds the owner's requests, what the dry
+/// run answers, and the steps.
 #[derive(Debug, Clone)]
 struct Case {
     autonomy: Autonomy,
+    held: bool,
     verdict: Verdict,
     steps: Vec<Step>,
 }
@@ -651,13 +726,18 @@ fn cases() -> impl Strategy<Value = Case> {
         Just(Verdict::Defers),
         Just(Verdict::Denies)
     ];
-    (autonomy, verdict, proptest::collection::vec(step, 1..12)).prop_map(
-        |(autonomy, verdict, steps)| Case {
+    (
+        autonomy,
+        any::<bool>(),
+        verdict,
+        proptest::collection::vec(step, 1..12),
+    )
+        .prop_map(|(autonomy, held, verdict, steps)| Case {
             autonomy,
+            held,
             verdict,
             steps,
-        },
-    )
+        })
 }
 
 /// DEC-2858's invariants over every run, checked against the journal the shell kept rather than
@@ -667,12 +747,16 @@ fn cases() -> impl Strategy<Value = Case> {
 /// - no owner request's decision is ever `requested_by` `agent`, nor carries a score;
 /// - a client's opening is never `auto`, and an intent follows exactly the `auto` allowed decisions,
 ///   one each, caused by it, at the plan's quantity;
-/// - an owner's own request is never asked (DEC-2858 item 10): a deny stays a deny, the dry run's
-///   denial records no autonomy, and every ask, the rules' or the deferral's, runs `auto` as
-///   `owner_request`.
+/// - an owner's own request is asked only when a reviewer holds it (DEC-2858 item 10, DEC-2859,
+///   MI-35): a deny stays a deny, the dry run's denial records no autonomy, an ask a reviewer holds
+///   stays that ask under its own label, and every other ask, the rules' or the deferral's, runs
+///   `auto` as `owner_request`.
 fn one_run(case: &Case) -> Result<(), String> {
     let (ids, view) = (TestIds, universe(&["AAPL"]));
-    let plan = OwnerPlan::classified(case.autonomy);
+    let plan = OwnerPlan {
+        held: case.held,
+        ..OwnerPlan::classified(case.autonomy)
+    };
     let (allow, defer, deny) = (AllowGate, DeferGate, DenyGate("max_order_size"));
     let gate: &dyn mandate_runtime::GateDryRun = match case.verdict {
         Verdict::Allows => &allow,
@@ -736,12 +820,16 @@ fn one_run(case: &Case) -> Result<(), String> {
             return Err("a client's opening ran AUTO".to_owned());
         }
         let dry_run_denied = decision.payload.get("dry_run") != Some(&text("allow"));
-        let owners_expected = match (case.verdict, case.autonomy) {
+        let owners_expected = match (case.verdict, case.autonomy, case.held) {
             _ if dry_run_denied => (Value::Null, Value::Null),
-            (_, Autonomy::Deny) => (text("deny"), text("rule:owner-deny")),
-            (Verdict::Allows, Autonomy::Auto) => (text("auto"), text("rule:owner-auto")),
-            (Verdict::Allows | Verdict::Defers, _) => (text("auto"), text("owner_request")),
-            (Verdict::Denies, _) => {
+            (_, Autonomy::Deny, _) => (text("deny"), text("rule:owner-deny")),
+            (Verdict::Allows, Autonomy::Auto, _) => (text("auto"), text("rule:owner-auto")),
+            (Verdict::Allows | Verdict::Defers, Autonomy::Ask, true) => {
+                (text("ask"), text("rule:owner-ask"))
+            }
+            (Verdict::Defers, Autonomy::Auto, true) => (text("ask"), text("policy_overlay")),
+            (Verdict::Allows | Verdict::Defers, _, false) => (text("auto"), text("owner_request")),
+            (Verdict::Denies, _, _) => {
                 return Err("a request the dry run denied is recorded allowed".to_owned());
             }
         };

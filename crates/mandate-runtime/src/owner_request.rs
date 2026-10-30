@@ -8,7 +8,8 @@
 //! Its `DecisionMade` names the request as `causation_id` and records `requested_by` and
 //! `client_id`, with no conviction, score or model output (journal spec §9.1 rule 8); the mode,
 //! the dry run and the autonomy rules then decide as for any opening, a client's never AUTO and an
-//! owner's never asked (DEC-2858 item 10): the owner's Send is the confirmation. A
+//! owner's asked only when a reviewer holds it (DEC-2858 item 10, DEC-2859): the owner's own
+//! confirmation answers every other ask. A
 //! client's request arrives with an actor of kind `user` and `requested_by` `client` (journal spec
 //! §9.9 rule 79), so who asked is read from `requested_by` and `client_id`.
 
@@ -63,6 +64,7 @@ pub(crate) fn requested(
     let classified = ceiling(
         step::overlaid(ports.plan.classify(ports.view, &proposal), &verdict),
         &request.requested_by,
+        || ports.plan.held_for_review(ports.view, &proposal),
     );
     let (verdict, then) = step::next(
         state,
@@ -151,16 +153,22 @@ fn mode_denial(mode: Mode) -> Option<&'static str> {
 
 /// Mandate spec §6.2 steps 5a and 5d: a client's opening is never AUTO (MI-30), so an `auto`
 /// becomes an `ask` labelled `client_ceiling`; an owner's own request is its own approval
-/// (DEC-2858 item 10, founder-ruled), so an `ask` from the rules, the default or a deferred check
-/// becomes an `auto` labelled `owner_request`. Neither touches a `deny`, and the binding gate judges
-/// every check at submission as for any opening.
-fn ceiling(classified: Classified, requested_by: &Requester) -> Classified {
+/// (DEC-2858 item 10, founder-ruled), so an `ask` from the rules, the default, the policy overlay
+/// or a deferred check becomes an `auto` labelled `owner_request`, unless `held` says a reviewer
+/// holds it (the admission ceiling, the review ceiling, or the two-approver threshold; DEC-2859,
+/// MI-35), when it stays the `ask` it was. `held` is asked only for an owner's `ask`. Neither step
+/// touches a `deny`, and the binding gate judges every check at submission as for any opening.
+fn ceiling(
+    classified: Classified,
+    requested_by: &Requester,
+    held: impl FnOnce() -> bool,
+) -> Classified {
     match (requested_by, classified.autonomy) {
         (Requester::Client { .. }, Autonomy::Auto) => Classified {
             autonomy: Autonomy::Ask,
             decided_by: Some(CLIENT_CEILING.to_owned()),
         },
-        (Requester::Owner, Autonomy::Ask) => Classified {
+        (Requester::Owner, Autonomy::Ask) if !held() => Classified {
             autonomy: Autonomy::Auto,
             decided_by: Some(OWNER_REQUEST.to_owned()),
         },

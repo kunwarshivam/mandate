@@ -1603,9 +1603,10 @@ fn the_owner_s_actions_commit_through_the_owner_s_own_routes() {
         names,
         [name::BUY, name::SELL, name::RESUME, name::STOP, name::KILL]
     );
+    assert_eq!(found[0].1, AWAITING_OWNER, "a buy waits for the owner's tap");
+    assert!(owner_requests(&f).is_empty(), "no buy is committed by the chat");
     let prefix = r#"{"accepted":true,"note":"Recorded. The platform sizes, checks and places it; watch the order card for the result.","ok":true,"record":""#;
-    for ((tool, result), journaled) in found.iter().zip([
-        "OwnerRequestSubmitted",
+    for ((tool, result), journaled) in found.iter().skip(1).zip([
         "OwnerCommandIssued",
         "OwnerCommandIssued",
         "OwnerCommandIssued",
@@ -1627,6 +1628,11 @@ fn the_owner_s_actions_commit_through_the_owner_s_own_routes() {
             .ends_with("\nNote: a sale exits the whole position in AAPL."),
         "{}",
         found[1].1
+    );
+    assert_eq!(
+        confirm_cards(&f).len(),
+        1,
+        "the sale, resume, Stop and kill switch commit at once and post no card (rules 2 and 13)"
     );
 }
 
@@ -2678,17 +2684,13 @@ fn a_buy_the_owner_did_not_name_commits_nothing() {
         found[0].1, r#"{"ok":false,"refused":"not_in_owner_message"}"#,
         "a quantity the owner never typed"
     );
-    assert!(found[1].1.contains(r#""accepted":true"#), "{found:?}");
-    let requests = f
-        .journal
-        .streams
-        .lock()
-        .expect("unpoisoned")
-        .values()
-        .flatten()
-        .filter(|row| row.event_type == "OwnerRequestSubmitted")
-        .count();
-    assert_eq!(requests, 1, "only the named buy is the owner's request");
+    assert_eq!(found[1].1, AWAITING_OWNER, "{found:?}");
+    assert_eq!(
+        owner_requests(&f).len(),
+        0,
+        "the named buy waits for the owner's tap (DEC-2859)"
+    );
+    assert_eq!(confirm_cards(&f).len(), 1, "only the named buy is carded");
 }
 
 #[test]
@@ -3039,4 +3041,186 @@ fn another_day_another_member_or_an_agent_s_chat_does_not_count_toward_the_setup
 #[test]
 fn a_setup_spend_that_does_not_read_holds_the_setup_run() {
     assert!(setup_capped(&[(ALICE, None, "not money", 0)]));
+}
+
+/// What the chat's `order.buy` answers the model once its card is posted (DEC-2859).
+const AWAITING_OWNER: &str = r#"{"awaiting_owner":true,"ok":true}"#;
+
+/// Every `OwnerRequestSubmitted` on any stream.
+fn owner_requests(f: &Fixture) -> Vec<StoredEvent> {
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .values()
+        .flatten()
+        .filter(|row| row.event_type == "OwnerRequestSubmitted")
+        .cloned()
+        .collect()
+}
+
+/// Each `confirm_order` card the agent posted, with its message's id, in journal order.
+fn confirm_cards(f: &Fixture) -> Vec<(String, Value)> {
+    f.journal
+        .rows_of(&ctl())
+        .into_iter()
+        .filter(|row| row.event_type == "ChatMessagePosted")
+        .filter_map(|row| {
+            let body = parse(&row.body).ok()?;
+            let card = body.get("payload")?.get("card")?.clone();
+            (card.get("kind").and_then(Value::as_str) == Some("confirm_order"))
+                .then(|| (row.event_id.clone(), card))
+        })
+        .collect()
+}
+
+fn confirm_path(message: &str) -> String {
+    format!("/v1/workspaces/{WORKSPACE}/agents/agt_a/messages/{message}/confirm")
+}
+
+/// The owner's tap on the card `message`, under `key`.
+fn tap(f: &Fixture, cookie: &str, message: &str, key: &str) -> Reply {
+    let cookie = format!("{COOKIE_NAME}={cookie}");
+    send(
+        f.addr,
+        "POST",
+        &confirm_path(message),
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Content-Type", "application/json"),
+            ("Cookie", &cookie),
+            ("Idempotency-Key", key),
+        ],
+        b"{}",
+    )
+}
+
+/// A run whose model asks to buy 2 AAPL once, after the owner wrote "buy 2 AAPL".
+fn carded() -> (Fixture, String) {
+    let gateway = gateway_service(vec![
+        turn(&[(name::BUY, r#"{"quantity":"2","symbol":"aapl"}"#)], None),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    seed_catalogue(&f);
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "buy 2 AAPL").status, 202);
+    settled(&f, &cookie);
+    (f, cookie)
+}
+
+/// DEC-2859, the founder's: the chat's buy submits nothing. It posts a `confirm_order` card naming
+/// the instrument, the side, the quantity the owner asked for, the reference price and estimate
+/// (none here, with no bar store), a fresh card id and the builder's note, journaled before the
+/// thread serves it, and answers the model that the owner's tap is awaited.
+#[test]
+fn a_chat_buy_posts_a_confirmation_card_and_submits_nothing() {
+    let (f, cookie) = carded();
+    assert_eq!(
+        results(&f),
+        vec![(name::BUY.to_owned(), AWAITING_OWNER.to_owned())]
+    );
+    assert!(owner_requests(&f).is_empty(), "nothing is submitted before the tap");
+    let cards = confirm_cards(&f);
+    let [(message, card)] = cards.as_slice() else {
+        panic!("one card, not {cards:?}");
+    };
+    let text = |name: &str| card.get(name).and_then(Value::as_str);
+    assert_eq!(text("symbol"), Some("AAPL"));
+    assert_eq!(text("instrument_id"), Some(AAPL));
+    assert_eq!(text("side"), Some("buy"));
+    assert_eq!(text("qty"), Some("2"));
+    assert_eq!(text("reference_kind"), Some("last trusted daily close"));
+    assert_eq!(card.get("reference_price"), Some(&Value::Null));
+    assert_eq!(card.get("estimated_cost_usd"), Some(&Value::Null));
+    assert!(text("card_id").is_some_and(|id| id.len() == 26), "{card:?}");
+    assert!(text("note").is_some_and(|n| n.contains("clip")), "{card:?}");
+    let served = thread(&f, &cookie);
+    let shown = served
+        .get("messages")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .find(|m| m.get("id").and_then(Value::as_str) == Some(message.as_str()))
+        .and_then(|m| m.get("card").cloned());
+    assert_eq!(shown.as_ref(), Some(card), "the thread serves the journaled card");
+}
+
+/// The owner's tap submits the owner request the card shows, naming the card as its cause, and a
+/// second tap under another key replays the first: one `OwnerRequestSubmitted`, one answer.
+#[test]
+fn the_owners_tap_submits_the_card_once_however_often_it_is_tapped() {
+    let (f, cookie) = carded();
+    let cards = confirm_cards(&f);
+    let [(message, _)] = cards.as_slice() else {
+        panic!("one card, not {cards:?}");
+    };
+    let first = tap(&f, &cookie, message, "tap-one-aaaaaaaaaaaa");
+    assert!(
+        (200..300).contains(&first.status),
+        "{}: {}",
+        first.status,
+        String::from_utf8_lossy(&first.body)
+    );
+    let second = tap(&f, &cookie, message, "tap-two-bbbbbbbbbbbb");
+    assert_eq!(second.status, first.status);
+    let id = |reply: &Reply| {
+        parse(&reply.body)
+            .ok()
+            .and_then(|b| b.get("command_id").and_then(Value::as_str).map(str::to_owned))
+    };
+    assert!(id(&first).is_some(), "{}", String::from_utf8_lossy(&first.body));
+    assert_eq!(id(&first), id(&second), "a second tap replays the first");
+    let requests = owner_requests(&f);
+    let [request] = requests.as_slice() else {
+        panic!("one request, not {}", requests.len());
+    };
+    let body = parse(&request.body).expect("JSON");
+    assert_eq!(
+        body.get("causation_id").and_then(Value::as_str),
+        Some(message.as_str()),
+        "the request names the card it confirms"
+    );
+    let payload = body.get("payload").expect("a payload");
+    let text = |name: &str| payload.get(name).and_then(Value::as_str);
+    assert_eq!(text("instrument_id"), Some(AAPL));
+    assert_eq!(text("quantity"), Some("2"));
+    assert_eq!(text("side"), Some("buy"));
+    assert_eq!(text("requested_by"), Some("owner"));
+    Draft::parse(&request.body).expect("the journal's own schema admits the request");
+}
+
+/// A tap after the owner signed out is refused and submits nothing; so is a tap on a message that
+/// holds no `confirm_order` card, the owner's own, or one no thread holds.
+#[test]
+fn a_tap_without_a_session_or_on_no_card_submits_nothing() {
+    let (f, cookie) = carded();
+    let cards = confirm_cards(&f);
+    let [(message, _)] = cards.as_slice() else {
+        panic!("one card, not {cards:?}");
+    };
+    let owners = f
+        .journal
+        .rows_of(&ctl())
+        .into_iter()
+        .find(|row| {
+            row.event_type == "ChatMessagePosted"
+                && String::from_utf8_lossy(&row.body).contains(r#""author":"owner""#)
+        })
+        .expect("the owner's message")
+        .event_id;
+    for refused in [owners.as_str(), "01JBH3BTZ8K2M4N6P8R0S2C999"] {
+        assert_eq!(
+            tap(&f, &cookie, refused, "tap-none-cccccccccccc").status,
+            404,
+            "{refused}"
+        );
+    }
+    f.sessions.end(&cookie).expect("signed out");
+    assert_eq!(
+        tap(&f, &cookie, message, "tap-late-dddddddddddd").status,
+        401
+    );
+    assert!(owner_requests(&f).is_empty());
 }

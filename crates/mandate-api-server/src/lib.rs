@@ -71,6 +71,7 @@ pub mod cache;
 pub mod catalogue;
 pub mod challenges;
 pub mod chat;
+pub mod chat_confirm;
 pub mod chat_run;
 pub mod chat_watch;
 pub mod clock;

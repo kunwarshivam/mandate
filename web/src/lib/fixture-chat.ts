@@ -109,5 +109,7 @@ export function fixtureChat(ws: Workspace): ChatPort {
       settings.set(agentId, next);
       return ok<ChatSettings>(next);
     },
+    confirmOrder: (agentId, messageId) =>
+      ws.agents.some((a) => a.agent_id === agentId) ? ok({ command_id: `fx_request_${messageId}` }) : Promise.resolve({ ok: false, reason: "not_found", effect: "none" }),
   };
 }

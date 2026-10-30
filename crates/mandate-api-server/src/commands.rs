@@ -392,6 +392,14 @@ pub struct Issued<'a> {
 /// The canonical draft of `issued`'s event; `None` only for a value the canonical form cannot
 /// hold.
 pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
+    caused_draft(issued, None)
+}
+
+/// [`draft`] with `causation_id` the event `cause` names: an owner request the owner's tap on the
+/// chat's confirmation card submits names that card's message ([DEC-2859] item 8).
+///
+/// [DEC-2859]: ../../../docs/project/decisions/DEC-2859.md
+pub fn caused_draft(issued: &Issued<'_>, cause: Option<&str>) -> Option<Vec<u8>> {
     let secs = issued.now.secs();
     let second = u64::try_from(secs).ok().and_then(Int::new)?;
     let risk_clock = UtcNanos::from_parts(secs, 0).ok()?.to_string();
@@ -406,7 +414,7 @@ pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
         artifact_refs: issued.command.artifact_refs(),
         config_refs: Vec::new(),
     };
-    envelope(&Writer::of(issued), &event)
+    caused_envelope(&Writer::of(issued), &event, cause)
 }
 
 /// Who writes an event, where, under which id, and when.

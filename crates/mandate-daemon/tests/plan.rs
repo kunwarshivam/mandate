@@ -1365,3 +1365,39 @@ fn an_owners_request_while_holding_is_clipped_against_the_held_position() {
         }
     );
 }
+
+/// The demo mandate with `edit` applied to its `autonomy` block.
+fn autonomy_with(edit: impl FnOnce(&mut serde_json::Value)) -> Value {
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&mandate_canon::to_canonical(&document())).unwrap();
+    edit(&mut document["autonomy"]);
+    mandate_canon::parse(&serde_json::to_vec(&document).unwrap()).unwrap()
+}
+
+/// Mandate spec §6.2 step 5d's reviewers on the plan's own facts (DEC-2859, MI-35): the demo, with
+/// no review date and no two-approver threshold, holds nothing, and neither does a review date on
+/// the risk day itself, the last day `auto` stands. A proposal for an instrument the mandate does
+/// not pin is held, since the plan cannot judge it. A date already past, or a threshold, would not
+/// validate against this fixture's context (V-046, V-024), so `mandate-builder`'s own tests pin
+/// those reviewers.
+#[test]
+fn the_plan_holds_an_owners_request_only_when_a_reviewer_does() {
+    let rows = journaled(REGULAR);
+    let held = |document: &Value| {
+        let plan = plan_with(&rows, document);
+        let proposal = plan
+            .requested(&view(), &owners("5"))
+            .expect("the owner's buy");
+        plan.held_for_review(&view(), &proposal)
+    };
+    assert!(!held(&document()), "the demo holds nothing");
+    assert!(!held(&autonomy_with(|a| {
+        a["review_by"] = serde_json::json!("2026-10-26");
+    })));
+    let plan = plan_over(&rows);
+    let mut elsewhere = plan
+        .requested(&view(), &owners("5"))
+        .expect("the owner's buy");
+    elsewhere.instrument = InstrumentId::new("11111111-2222-4333-8444-555555555555").unwrap();
+    assert!(plan.held_for_review(&view(), &elsewhere));
+}

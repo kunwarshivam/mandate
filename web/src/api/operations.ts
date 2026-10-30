@@ -101,6 +101,7 @@ const CHAT: readonly DocumentedOperation[] = [
   { id: "chat_thread", method: "GET", route: "/agents/{agent}/messages", query: ["after"], section: "§4.6.2" },
   { id: "chat_send", method: "POST", route: "/agents/{agent}/messages", query: [], section: "§4.6.2" },
   { id: "chat_stop", method: "POST", route: "/agents/{agent}/runs/{run}/stop", query: [], section: "§4.6.2" },
+  { id: "chat_confirm_order", method: "POST", route: "/agents/{agent}/messages/{message}/confirm", query: [], section: "§4.6.2" },
   { id: "chat_goals", method: "GET", route: "/agents/{agent}/goals", query: [], section: "§4.6.2" },
   { id: "chat_models", method: "GET", route: "/models", query: [], section: "§4.6.2" },
   { id: "chat_settings", method: "GET", route: "/agents/{agent}/settings", query: [], section: "§4.6.2" },

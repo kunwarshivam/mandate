@@ -30,12 +30,18 @@
 //! and match both; an AUTO or a DENY carries no approval (§6.4), so a case that states either member
 //! for one fails rather than having it ignored.
 //!
-//! **Every case is the order builder's own request** (DEC-262). No family-A case states who
-//! asked, and §6.2 step 5a defines the order builder's own proposal as `requested_by: agent`, so
-//! the harness passes [`RequestedBy::Agent`]; a case that stated `requested_by` would fail as an
-//! unread member. The client ceiling is `mandate-builder`'s own tests' to pin.
+//! **Every family-A case is the order builder's own request** (DEC-262). No family-A case states
+//! who asked, and §6.2 step 5a defines the order builder's own proposal as `requested_by: agent`,
+//! so the harness passes [`RequestedBy::Agent`]. The client ceiling is `mandate-builder`'s own
+//! tests' to pin. A `kind: review` case may state `requested_by: owner` (MC-D28 to MC-D33,
+//! DEC-2859): its action then carries `combined_score: null`, as an owner's request does
+//! (DEC-2858), and is decided through §6.2 step 5d, [`owner_request`], after `classify`; its ASK's
+//! `trigger` names the owner as who asked. Any other `requested_by`, a score on an owner's request,
+//! or a null score on the agent's fails the case.
 
-use mandate_builder::{ActionContext, BuilderError, Classification, RequestedBy, classify};
+use mandate_builder::{
+    ActionContext, BuilderError, Classification, RequestedBy, classify, owner_request,
+};
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Signed, Unit, Usd};
 use mandate_spec::document::OnTimeout;
@@ -118,7 +124,13 @@ pub(super) fn review_case(fixture: &Json, case: &Json) -> Result<(), String> {
         .map_err(|e| format!("`now` has no risk day: {}", e.code()))?
         .day;
     let action = action(str_at(case, "id")?, at_of(case, "action")?, day)?;
-    let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
+    let classified = classify(&mandate.autonomy, &action).map_err(builder)?;
+    let decided = match action.requested_by {
+        RequestedBy::Owner => {
+            owner_request(&mandate.autonomy, &action, classified).map_err(builder)?
+        }
+        RequestedBy::Agent | RequestedBy::Client => classified,
+    };
     let expect = at_of(case, "expect")?;
     let mut rest = expect.clone();
     let trigger = rest
@@ -132,7 +144,7 @@ pub(super) fn review_case(fixture: &Json, case: &Json) -> Result<(), String> {
                 .version()
                 .map_err(|e| format!("the mandate version: {}", e.code()))?;
             let version = format!("sha256:{}", version.digest());
-            compare_trigger(&trigger, &decided, &version, &rules)
+            compare_trigger(&trigger, &decided, &version, &rules, action.requested_by)
         }
         (AutonomyDecision::Ask, None) => {
             Err("an ASK states the approval content's `trigger`".to_owned())
@@ -147,6 +159,7 @@ fn compare_trigger(
     decided: &Classification,
     version: &str,
     rules: &Json,
+    requested_by: RequestedBy,
 ) -> Result<(), String> {
     unknown_members(trigger, TRIGGER_KEYS)
         .map_err(|unknown| format!("`trigger` members not interpreted: {unknown}"))?;
@@ -161,9 +174,13 @@ fn compare_trigger(
         label.as_str(),
         str_at(trigger, "decided_by")?,
     )?;
+    let asked_by = match requested_by {
+        RequestedBy::Owner => "owner",
+        RequestedBy::Agent | RequestedBy::Client => "agent",
+    };
     expect_eq(
         "trigger.requested_by",
-        "agent",
+        asked_by,
         str_at(trigger, "requested_by")?,
     )?;
     expect_eq("trigger.client", &Json::Null, at(trigger, "client")?)?;
@@ -194,7 +211,12 @@ pub(super) fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionCo
             ..unread_facts(risk_day)?
         });
     }
-    unknown_members(stated, OPENING_KEYS)
+    let keys: Vec<&str> = OPENING_KEYS
+        .iter()
+        .copied()
+        .chain(["requested_by"])
+        .collect();
+    unknown_members(stated, &keys)
         .map_err(|unknown| format!("`action` members not interpreted: {unknown}"))?;
     let usd = |key: &str| num(Usd::parse(str_at(stated, key)?), key);
     let unit = |key: &str| num(Unit::parse(str_at(stated, key)?), key);
@@ -204,6 +226,24 @@ pub(super) fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionCo
             .as_bool()
             .ok_or_else(|| format!("`{key}` is not a boolean"))
     };
+    let requested_by = match stated.get("requested_by").map(Json::as_str) {
+        None => RequestedBy::Agent,
+        Some(Some("owner")) => RequestedBy::Owner,
+        Some(other) => {
+            return Err(format!(
+                "{id}: `requested_by` {other:?} is not a request this harness decides"
+            ));
+        }
+    };
+    let combined_score = match (requested_by, at(stated, "combined_score")?) {
+        (RequestedBy::Owner, Json::Null) => None,
+        (RequestedBy::Owner, _) => {
+            return Err(format!(
+                "{id}: an owner's request carries no score (DEC-2858)"
+            ));
+        }
+        _ => Some(unit("combined_score")?),
+    };
     let instrument = AssetId::parse(str_at(stated, "instrument")?)
         .map_err(|e| format!("`instrument`: {}", e.code()))?;
     ensure(instrument != unread_instrument()?, || {
@@ -212,7 +252,7 @@ pub(super) fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionCo
     Ok(ActionContext {
         purpose,
         order_usd: usd("order_usd")?,
-        combined_score: Some(unit("combined_score")?),
+        combined_score,
         instrument,
         asset_class: AssetClass::parse(str_at(stated, "asset_class")?)
             .map_err(|e| format!("`asset_class`: {}", e.code()))?,
@@ -227,7 +267,7 @@ pub(super) fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionCo
         gross_usd_after: usd("gross_usd_after")?,
         bought_today_usd: usd("bought_today_usd")?,
         position_pnl_fraction: signed("position_pnl_fraction")?,
-        requested_by: RequestedBy::Agent,
+        requested_by,
         risk_day,
     })
 }
@@ -336,7 +376,7 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use mandate_builder::{Classification, DecidedBy};
+    use mandate_builder::{Classification, DecidedBy, RequestedBy};
     use mandate_domain::AutonomyDecision;
     use mandate_num::Ratio;
     use mandate_spec::condition::{ConditionField, Facts, FieldKind};
@@ -677,6 +717,40 @@ mod tests {
         Ok(())
     }
 
+    /// The owner's cases (MC-D28 to MC-D33, DEC-2859) pass only as an owner's: each passes as
+    /// written; MC-D28 decided as the agent's request, with a score, as a client's, or with its
+    /// expectation edited fails; MC-D29's ASK credited to the agent fails, and so does MC-D31 shown
+    /// one approver.
+    #[test]
+    fn an_owners_case_passes_only_as_the_owners() -> Result<(), String> {
+        let fixture = fixture()?;
+        for id in ["MC-D28", "MC-D29", "MC-D30", "MC-D31", "MC-D32", "MC-D33"] {
+            run(fixture.clone(), id)?;
+        }
+        let edits: [(&str, &str, Json); 6] = [
+            ("MC-D28", "/action/requested_by", json!("client")),
+            ("MC-D28", "/action/combined_score", json!("0.8")),
+            ("MC-D28", "/expect/by", json!("rule:large_orders")),
+            ("MC-D28", "/expect/decision", json!("ask")),
+            ("MC-D29", "/expect/trigger/requested_by", json!("agent")),
+            ("MC-D31", "/expect/approvers_required", json!(1)),
+        ];
+        for (id, pointer, value) in edits {
+            let edited = doctored(&fixture, id, pointer, |slot| *slot = value)?;
+            crate::ensure(run(edited, id).is_err(), || {
+                format!("{id} with {pointer} edited still passed")
+            })?;
+        }
+        let agents = doctored(&fixture, "MC-D28", "/action", |action| {
+            if let Some(members) = action.as_object_mut() {
+                members.remove("requested_by");
+            }
+        })?;
+        crate::ensure(run(agents, "MC-D28").is_err(), || {
+            "MC-D28 decided as the agent's request, with no score, still passed".to_owned()
+        })
+    }
+
     /// §6.4's `trigger`, compared member by member: an ASK the review ceiling raised shows no rule,
     /// an ASK a rule reached shows that rule verbatim, and each member edited alone fails naming it.
     #[test]
@@ -696,12 +770,40 @@ mod tests {
             &asked(DecidedBy::ReviewCeiling),
             "sha256:v",
             &rules,
+            RequestedBy::Agent,
         )?;
         let large =
             mandate_spec::document::RuleId::parse("large_orders").map_err(|e| e.to_string())?;
         let ruled = json!({"mandate_version": "sha256:v", "decided_by": "rule:large_orders",
                            "requested_by": "agent", "client": null, "rule": large_orders.clone()});
-        super::compare_trigger(&ruled, &asked(DecidedBy::Rule(large)), "sha256:v", &rules)?;
+        super::compare_trigger(
+            &ruled,
+            &asked(DecidedBy::Rule(large.clone())),
+            "sha256:v",
+            &rules,
+            RequestedBy::Agent,
+        )?;
+        let owners = json!({"mandate_version": "sha256:v", "decided_by": "rule:large_orders",
+                            "requested_by": "owner", "client": null, "rule": large_orders.clone()});
+        super::compare_trigger(
+            &owners,
+            &asked(DecidedBy::Rule(large.clone())),
+            "sha256:v",
+            &rules,
+            RequestedBy::Owner,
+        )?;
+        let failure = super::compare_trigger(
+            &owners,
+            &asked(DecidedBy::Rule(large)),
+            "sha256:v",
+            &rules,
+            RequestedBy::Agent,
+        )
+        .err()
+        .ok_or("an owner's trigger compared equal for the agent's request")?;
+        crate::ensure(failure.contains("requested_by"), || {
+            format!("an owner's trigger failed without naming `requested_by`: {failure}")
+        })?;
         for (member, value) in [
             ("mandate_version", json!("sha256:w")),
             ("decided_by", json!("default")),
@@ -719,6 +821,7 @@ mod tests {
                 &asked(DecidedBy::ReviewCeiling),
                 "sha256:v",
                 &rules,
+                RequestedBy::Agent,
             )
             .err()
             .ok_or_else(|| format!("`trigger.{member}` edited still compared equal"))?;

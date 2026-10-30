@@ -165,11 +165,14 @@ pub enum DecidedBy {
     /// §6.2 step 5b raised the decision to ASK because the mandate's review date has passed
     /// (MI-32). Reported only when the ceiling changed the decision, as for the other two.
     ReviewCeiling,
+    /// §6.2 step 5d turned an owner's own ASK that no reviewer holds into AUTO (DEC-2159,
+    /// DEC-2859, MI-35). Only [`owner_request`] reports it, and only for an AUTO.
+    OwnerRequest,
 }
 
 impl DecidedBy {
     /// The form the reference cases and the journal write: `builtin_risk_reducing`, `rule:<id>`,
-    /// `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`.
+    /// `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`, `owner_request`.
     pub fn label(&self) -> String {
         match self {
             Self::BuiltinRiskReducing => "builtin_risk_reducing".to_owned(),
@@ -178,6 +181,7 @@ impl DecidedBy {
             Self::AdmissionCeiling => "admission_ceiling".to_owned(),
             Self::ClientCeiling => "client_ceiling".to_owned(),
             Self::ReviewCeiling => "review_ceiling".to_owned(),
+            Self::OwnerRequest => "owner_request".to_owned(),
         }
     }
 }
@@ -352,6 +356,54 @@ fn review_ceiling(
     } else {
         (ceiled, DecidedBy::ReviewCeiling)
     }
+}
+
+/// §6.2 step 5d's reviewers (DEC-2859, the founder's; MI-35): whether someone other than the
+/// owner must look at an owner's own request for `action`. A reviewer holds it when, for this
+/// order:
+/// - the admission ceiling applies: `new_instrument` and an `ask` admission setting (step 5);
+/// - the review ceiling applies: the action's risk day is after `review_by` (step 5b, MI-32); or
+/// - the ask needs two approvers: `order_usd` is above `two_approver_above_usd` (§6.4).
+///
+/// Each is judged from the mandate and the action, never from the label of what asked: a ceiling
+/// names itself only when it changed the decision, so a rule's ASK past the review date carries the
+/// rule's label although the review ceiling applies to it.
+///
+/// # Errors
+/// [`BuilderError`] when the two-approver threshold is not a dollar amount.
+pub fn held_for_review(policy: &Autonomy, action: &ActionContext) -> Result<bool, BuilderError> {
+    let admission = action.new_instrument && policy.admission == AutonomyDecision::Ask;
+    let review = policy
+        .review_by
+        .is_some_and(|review_by| action.risk_day > review_by);
+    let two_approvers = approvers_required(&policy.approval, action.order_usd)? > NonZeroU8::MIN;
+    Ok(admission || review || two_approvers)
+}
+
+/// §6.2 step 5d (DEC-2159, DEC-2858 item 10, DEC-2859; MI-35): an owner's own opening or increase
+/// that the steps before left ASK becomes AUTO, labelled [`DecidedBy::OwnerRequest`], unless
+/// [`held_for_review`] holds it, when it stays the ASK it was, its label and approver count
+/// unchanged. It applies last and only to an ASK, so an AUTO and a DENY pass through, as does every
+/// request but the owner's. The runtime applies it again after the policy overlay, which this crate
+/// does not hold; on an AUTO it changes nothing, so applying it twice is applying it once.
+///
+/// # Errors
+/// [`BuilderError`] as [`held_for_review`] refuses.
+pub fn owner_request(
+    policy: &Autonomy,
+    action: &ActionContext,
+    classification: Classification,
+) -> Result<Classification, BuilderError> {
+    let owners_ask = action.requested_by == RequestedBy::Owner
+        && classification.decision == AutonomyDecision::Ask;
+    if !owners_ask || held_for_review(policy, action)? {
+        return Ok(classification);
+    }
+    Ok(Classification {
+        decision: AutonomyDecision::Auto,
+        by: DecidedBy::OwnerRequest,
+        approval: None,
+    })
 }
 
 /// §6.2 step 2 and then steps 3 to 6: the gate's verdict in, an outcome out.

@@ -367,7 +367,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const send = method === "POST" && (/^\/agents\/[^/]+\/messages$/.test(route) || route === "/setup/messages");
     const stop = method === "POST" && /^\/agents\/[^/]+\/runs\/[^/]+\/stop$/.test(route);
     const save = method === "PUT" && /^\/agents\/[^/]+\/settings$/.test(route);
-    if (!send && !stop && !save) return null;
+    const confirm = method === "POST" && /^\/agents\/[^/]+\/messages\/[^/]+\/confirm$/.test(route);
+    if (!send && !stop && !save && !confirm) return null;
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     if (!isIdempotencyKey(headers.get("Idempotency-Key") ?? "")) return problem(422, "invalid", "none");
     let members: Record<string, unknown> = {};
@@ -380,6 +381,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const agent = route.startsWith("/agents/") ? decodeURIComponent(route.split("/")[2] ?? "") : null;
     if (agent !== null && !agentOf(agent)) return problem(404, "not_found", "none");
     if (stop) return respond(202, { run_id: decodeURIComponent(route.split("/")[4] ?? "") });
+    if (confirm) {
+      const answer = await chat.confirmOrder(agent ?? "", decodeURIComponent(route.split("/")[4] ?? ""));
+      return answer.ok ? respond(202, answer.value) : problem(503, "journal_unavailable", "none");
+    }
     if (save) {
       const cap = typeof members.daily_cap_usd === "string" ? members.daily_cap_usd : "";
       const model = typeof members.chat_model === "string" ? members.chat_model : "";

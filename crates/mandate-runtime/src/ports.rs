@@ -37,6 +37,15 @@ pub trait OrderPlan {
     fn requested(&self, _view: &MandateView, _request: &OwnerRequest) -> Option<Proposal> {
         None
     }
+
+    /// Mandate spec §6.2 step 5d's reviewers for an owner's own request (DEC-2859, MI-35): whether
+    /// the admission ceiling or the review ceiling applies to `proposal`, or its order is above the
+    /// two-approver threshold, so that its ASK stays an ASK. Judged from the mandate and the
+    /// proposal's facts, never from the label of what asked. The default holds every request: a
+    /// plan that cannot tell never lets an ASK run unasked (`AGENTS.md` rule 3).
+    fn held_for_review(&self, _view: &MandateView, _proposal: &Proposal) -> bool {
+        true
+    }
 }
 
 /// `mandate-risk`'s agent flatten (family F): the orders to cancel by `client_order_id`, the sells of

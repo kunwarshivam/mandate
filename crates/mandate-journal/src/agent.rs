@@ -652,12 +652,16 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
         "payload.decided_by",
     )?;
     ensure(
+        decided_by != "review_ceiling" || asked,
+        schema,
+        "payload.decided_by",
+    )?;
+    ensure(
         decided_by != "policy_overlay" || autonomy != "auto",
         schema,
         "payload.decided_by",
     )?;
     let owners_own = p.text("requested_by") == "owner" && p.adds_risk();
-    ensure(!(owners_own && asked), schema, "payload.autonomy")?;
     ensure(
         decided_by != "owner_request" || (owners_own && autonomy == "auto"),
         schema,
@@ -886,6 +890,7 @@ fn is_label(label: &str) -> bool {
         "default",
         "admission_ceiling",
         "client_ceiling",
+        "review_ceiling",
         "policy_overlay",
         "owner_request",
     ]

@@ -1083,8 +1083,11 @@ impl Tools<'_> {
         )])
     }
 
-    /// The owner's buy (DEC-2159): the instrument the symbol names, then the owner request route's
-    /// own checks and command, under a fresh authorization of the owner's session.
+    /// The owner's buy (DEC-2159, DEC-2859): the instrument the symbol names and the owner request
+    /// route's own checks, under the owner's session admitted again now, then a `confirm_order`
+    /// card and nothing committed. Only the owner's tap on the card submits the request (workspace
+    /// API §4.6.2's *Confirm an order*), so the model's reading of the message never places an
+    /// order the owner did not see.
     fn buy(&mut self, symbol: &str, quantity: Option<String>) -> String {
         let Some(deployment) = self.deployment() else {
             return refusal("no_agent");
@@ -1113,12 +1116,73 @@ impl Tools<'_> {
         if !owner_named(&self.start.message, &snapshot.symbol, &quantity) {
             return refusal("not_in_owner_message");
         }
-        let command = Command::OwnerRequest {
-            agent: deployment.0.clone(),
-            instrument: snapshot.instrument_id.clone(),
-            quantity,
-        };
-        self.commit(&command, Permission::OwnerRequest)
+        let now = self.app.clock.now().unwrap_or(self.start.now);
+        let admitted = self.start.gate.as_ref().is_some_and(|session| {
+            self.app
+                .sessions
+                .readmit(
+                    session.admitted.reference,
+                    session_request(Permission::OwnerRequest),
+                    now,
+                )
+                .is_ok()
+        });
+        if !admitted {
+            return refusal("no_session");
+        }
+        let card = self.order_card(&snapshot, &quantity, now);
+        let posted = self.post(None, Some(card), &[]);
+        if !posted.contains(r#""message_id""#) {
+            return posted;
+        }
+        ok(vec![("awaiting_owner", Value::Bool(true))])
+    }
+
+    /// The `confirm_order` card of an owner's buy (agent harness spec §15.13, DEC-2859 item 7):
+    /// what the owner would submit, a fresh card id, the last trusted daily close as the reference
+    /// price and the quantity at it as the estimated cost, both `null` when no close is served, and
+    /// the note that the order builder may clip the quantity and sets the limit price, since no
+    /// route sizes an order without submitting it.
+    fn order_card(
+        &self,
+        snapshot: &crate::versions::Snapshot,
+        quantity: &str,
+        now: UtcNanos,
+    ) -> Value {
+        let close = crate::prices::last_close(
+            self.app.bars.as_deref(),
+            &snapshot.symbol,
+            snapshot.asset_class.as_deref(),
+            now,
+        )
+        .ok()
+        .map(|close| close.close);
+        let cost = close
+            .as_deref()
+            .and_then(|close| estimated_cost(quantity, close));
+        object(vec![
+            ("kind", string(crate::chat_confirm::CONFIRM_ORDER)),
+            ("card_id", string(&self.app.chat.ulid(now))),
+            ("symbol", string(&snapshot.symbol)),
+            ("instrument_id", string(&snapshot.instrument_id)),
+            ("side", string("buy")),
+            ("qty", string(quantity)),
+            (
+                "reference_price",
+                close.as_deref().map_or(Value::Null, string),
+            ),
+            ("reference_kind", string("last trusted daily close")),
+            (
+                "estimated_cost_usd",
+                cost.as_deref().map_or(Value::Null, string),
+            ),
+            (
+                "note",
+                string(
+                    "Nothing is placed until you confirm. The platform may clip the quantity to your mandate's caps and sets the limit price when it places the order.",
+                ),
+            ),
+        ])
     }
 
     fn pins(&self, deployment: &Deployment, instrument: &str) -> bool {
@@ -1300,6 +1364,14 @@ impl Tools<'_> {
     }
 }
 
+/// The card's estimate: `quantity` × `close`, exact, in dollars; `None` when either does not read
+/// as a decimal of its kind.
+fn estimated_cost(quantity: &str, close: &str) -> Option<String> {
+    let qty = mandate_num::Qty::parse(quantity).ok()?;
+    let price = mandate_num::Price::parse(close).ok()?;
+    Some(qty.notional(price).ok()?.to_string())
+}
+
 /// The example mandate document a setup starts from ([`mandate_chat::entry::TEMPLATE`]).
 fn template() -> String {
     match parse(mandate_chat::entry::TEMPLATE.as_bytes()) {
@@ -1360,8 +1432,8 @@ mod pure {
     use mandate_identity::Permission;
 
     use super::{
-        RESULT_BYTES, THREAD_MESSAGES, Thread, counts_toward, cut, micros, owner_named, references,
-        session_request, transcript,
+        RESULT_BYTES, THREAD_MESSAGES, Thread, counts_toward, cut, estimated_cost, micros,
+        owner_named, references, session_request, transcript,
     };
 
     #[test]
@@ -1421,6 +1493,14 @@ mod pure {
             owner_named("buy 5. AAPL", "AAPL", "5"),
             "a trailing point is punctuation"
         );
+    }
+
+    #[test]
+    fn a_card_s_estimate_is_the_quantity_at_the_close_exactly() {
+        assert_eq!(estimated_cost("2", "189.5").as_deref(), Some("379"));
+        assert_eq!(estimated_cost("0.5", "100.01").as_deref(), Some("50.005"));
+        assert_eq!(estimated_cost("two", "189.5"), None);
+        assert_eq!(estimated_cost("2", "a price"), None);
     }
 
     #[test]
