@@ -1561,6 +1561,10 @@ fn figures_are_runs_of_digits_without_their_formatting() {
     want.sort();
     assert_eq!(found.into_iter().collect::<Vec<_>>(), want);
     assert!(figures("step 1, then 2.").is_empty());
+    assert!(
+        figures("up .5 today").is_empty(),
+        "a point with no digit before it starts no figure"
+    );
     assert_eq!(
         figures("0.50 and 007 and 1,000"),
         ["0.5", "1000"].iter().map(|s| (*s).to_owned()).collect()

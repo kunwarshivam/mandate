@@ -663,14 +663,13 @@ pub fn run_gate<T: Transport, S: MeterStore, C: Clock>(
     let own = gateway.replace_registry(registry);
     let mut session = Session {
         gateway,
-        ids,
         ceiling,
         workspace,
         chat,
         run: IDENTITY_RUN.to_owned(),
         calls: Vec::new(),
     };
-    let (stopped, identity, runs) = session.all(set);
+    let (stopped, identity, runs) = session.all(set, ids);
     let calls = std::mem::take(&mut session.calls);
     let _gate_registry = session.gateway.replace_registry(own);
     let report = report(chat, digest, identity, calls, &runs, set, stopped);
@@ -700,14 +699,13 @@ pub fn identity_probe<T: Transport, S: MeterStore, C: Clock>(
     let own = gateway.replace_registry(registry);
     let mut session = Session {
         gateway,
-        ids,
         ceiling,
         workspace,
         chat,
         run: IDENTITY_RUN.to_owned(),
         calls: Vec::new(),
     };
-    let passed = session.probe(set);
+    let passed = session.probe(set, ids.next_id());
     let _gate_registry = session.gateway.replace_registry(own);
     passed
 }
@@ -754,7 +752,6 @@ fn room<T: Transport, S: MeterStore, C: Clock>(
 /// The gate's calls through the gateway, and what it saw of them.
 struct Session<'g, T, S, C> {
     gateway: &'g mut Gateway<T, S, C>,
-    ids: &'g mut dyn IdSource,
     ceiling: Usd6,
     workspace: &'g str,
     chat: &'g ChatLive,
@@ -772,9 +769,13 @@ impl<T: Transport, S: MeterStore, C: Clock> Session<'_, T, S, C> {
         .text()
     }
 
-    /// The identity probe, then every run in order, until a stop.
-    fn all(&mut self, set: &ProbeSet) -> (Option<Stopped>, bool, Vec<RunVerdict>) {
-        let identity = self.probe(set);
+    /// The identity probe, then every run in order, until a stop, each call's id from `ids`.
+    fn all(
+        &mut self,
+        set: &ProbeSet,
+        ids: &mut dyn IdSource,
+    ) -> (Option<Stopped>, bool, Vec<RunVerdict>) {
+        let identity = self.probe(set, ids.next_id());
         if !identity {
             let stopped = self
                 .calls
@@ -798,7 +799,10 @@ impl<T: Transport, S: MeterStore, C: Clock> Session<'_, T, S, C> {
                 key_owner: KeyOwner::Platform,
                 call_deadline_ms: self.chat.entry.deadline_ms,
             };
-            let mut host = Seen::default();
+            let mut host = Seen {
+                calls: Vec::new(),
+                ids: &mut *ids,
+            };
             let end = run(
                 &spec,
                 probe.max_turns,
@@ -806,7 +810,7 @@ impl<T: Transport, S: MeterStore, C: Clock> Session<'_, T, S, C> {
                 &mut Fixtures(probe),
                 &mut host,
             );
-            runs.push(probe.verdict(&end, &host.0));
+            runs.push(probe.verdict(&end, &host.calls));
             let stopped = match end {
                 End::Model(outcome) => Stopped::of(outcome),
                 _ => None,
@@ -821,11 +825,11 @@ impl<T: Transport, S: MeterStore, C: Clock> Session<'_, T, S, C> {
 
     /// The identity probe: a fixed request with no tools, which passes only on an `ok` reply that
     /// reports exactly the pin's identity.
-    fn probe(&mut self, set: &ProbeSet) -> bool {
+    fn probe(&mut self, set: &ProbeSet, call_id: String) -> bool {
         let mut inputs = set.identity.clone();
         inputs.insert("kind".to_owned(), AGENT.to_owned());
         let request = CallRequest {
-            call_id: String::new(),
+            call_id,
             workspace_id: self.workspace.to_owned(),
             agent_id: None,
             purpose: Purpose::Evaluation,
@@ -883,8 +887,8 @@ impl<T: Transport, S: MeterStore, C: Clock> Session<'_, T, S, C> {
 
 impl<T: Transport, S: MeterStore, C: Clock> Model for Session<'_, T, S, C> {
     /// The loop's call made the gate's: an `evaluation` with no agent, under the gate's ceiling,
-    /// with its id and times from the service's own ids and clock. A call the gateway's own rate
-    /// cap refused, which reserved nothing, waits and is tried again.
+    /// with its times from the service's own clock. A call the gateway's own rate cap refused,
+    /// which reserved nothing, waits and is tried again under the same id.
     fn call(&mut self, request: &CallRequest) -> Reply {
         let mut request = request.clone();
         request.purpose = Purpose::Evaluation;
@@ -893,7 +897,6 @@ impl<T: Transport, S: MeterStore, C: Clock> Model for Session<'_, T, S, C> {
         let mut tries = 0u32;
         loop {
             let now = self.gateway.clock_mut().now();
-            request.call_id = self.ids.next_id();
             request.as_of = now;
             request.deadline = after_ms(now, self.chat.entry.deadline_ms);
             let reply = self.gateway.call(&request);
@@ -915,18 +918,21 @@ impl<T: Transport, S: MeterStore, C: Clock> Model for Session<'_, T, S, C> {
     }
 }
 
-/// The run's tool calls and their results, as the loop hands them over; nothing is journaled, since
-/// the gate's records are its report's (inference spec §3.6).
-#[derive(Default)]
-struct Seen(Vec<(ToolCall, String)>);
+/// The run's tool calls and their results, as the loop hands them over, and the ids its calls
+/// draw from; nothing is journaled, since the gate's records are its report's (inference spec
+/// §3.6).
+struct Seen<'i> {
+    calls: Vec<(ToolCall, String)>,
+    ids: &'i mut dyn IdSource,
+}
 
-impl Host for Seen {
+impl Host for Seen<'_> {
     fn invoked(&mut self, _turn: u32, _record: &CallRecord) -> Result<(), Halt> {
         Ok(())
     }
 
     fn results(&mut self, _turn: u32, calls: &[ToolCall], results: &[String]) -> Result<(), Halt> {
-        self.0
+        self.calls
             .extend(calls.iter().cloned().zip(results.iter().cloned()));
         Ok(())
     }
@@ -944,7 +950,7 @@ impl Host for Seen {
     }
 
     fn call_id(&mut self) -> String {
-        String::new()
+        self.ids.next_id()
     }
 }
 
