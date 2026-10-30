@@ -2,7 +2,7 @@ import type { Capability } from "./roles";
 
 /**
  * Every screen the navigation can reach, with what it is for (DEC-2293: two screens and one
- * settings page). The dock, the phone's More sheet, the breadcrumbs, the command palette, and the
+ * settings page; DEC-2413 adds Portfolio). The dock, the phone's More sheet, the breadcrumbs, the command palette, and the
  * route-coverage test all read this list, so a link cannot point at a screen that does not exist.
  */
 export type ScreenGroup = "main" | "workspace";
@@ -30,6 +30,7 @@ export const GROUP_NEEDS: Record<ScreenGroup, Capability> = {
 
 export const SCREENS: readonly Screen[] = [
   { key: "home", href: "/", label: "Home", purpose: "Your agents as conversations: what each said last, and which need you.", group: "main", built: true, needs: "agents.view" },
+  { key: "portfolio", href: "/portfolio", label: "Portfolio", purpose: "The account as a whole: its value over time, cash and invested, every holding, and the breakdowns by agent, instrument and asset class.", group: "main", built: true, needs: "agents.view" },
   { key: "new", href: "/new", label: "New agent", purpose: "Describe an agent in your own words; it asks what it needs, then you confirm it and deploy it to paper.", group: "main", built: true, needs: "agents.view" },
   { key: "settings", href: "/settings", label: "Settings", purpose: "Connections, each agent's chat model and daily AI spending cap, notifications, and your passkeys.", group: "workspace", built: true, needs: "workspace.view" },
 ];

@@ -17,11 +17,11 @@ function dock() {
 }
 
 describe("the desktop dock", () => {
-  it("labels every item under its icon: Home, New agent and Settings, then Stop (DEC-2293)", () => {
+  it("labels every item under its icon: Home, Portfolio, New agent and Settings, then Stop (DEC-2293, DEC-2413)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
-    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/new", "/settings"]);
-    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "New", "Settings"]);
+    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/portfolio", "/new", "/settings"]);
+    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Portfolio", "New", "Settings"]);
     expect(within(dock()).getAllByRole("button").filter((b) => b.getAttribute("data-slot") !== "stop-control")).toEqual([]);
     for (const label of dock().querySelectorAll("[data-slot=dock-label]")) {
       expect(label, "the current item is marked by a semibold label (DEC-478 item 4)").toHaveClass("group-data-current:font-semibold");
@@ -104,5 +104,7 @@ describe("what the dock reaches", () => {
     expect(isCurrent("/settings", "/settings")).toBe(true);
     expect(isCurrent("/connections/con_1/stop-all", "/settings")).toBe(true);
     expect(isCurrent("/newx", "/new")).toBe(false);
+    expect(isCurrent("/portfolio", "/portfolio")).toBe(true);
+    expect(isCurrent("/portfolio", "/")).toBe(false);
   });
 });
