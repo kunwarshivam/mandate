@@ -1,8 +1,10 @@
 import type { AgentHolding } from "@/api/activity";
 import type { CatalogueInstrument } from "@/api/catalogue";
+import { type AgentPnl, BUCKET_SECONDS, type Dashboard, type EquityHistory, type HistoryRange } from "@/api/portfolio";
 import type { AgentDetail } from "@/api/read-models";
 import type { AgentMode, AssetClass, ShownEnvironment, Workspace } from "@/fixtures/types";
-import { type Dec, ZERO, add, dec, div, sub, toFixed } from "./decimal";
+import type { EquityRange } from "./chart-data";
+import { type Dec, ZERO, add, dec, div, sub, toDecimalString, toFixed } from "./decimal";
 
 /**
  * The Portfolio page's figures (DEC-2413), from the fixtures or from the workspace API's served reads,
@@ -37,8 +39,15 @@ export interface PortfolioAgent {
 
 export interface Portfolio {
   environment: ShownEnvironment;
-  /** The account's value at the broker. */
+  /** The account's value at the broker: over the API, every account's latest snapshot `equity` summed. */
   total: string | null;
+  /**
+   * The broker's cash, every account's snapshot `cash` summed. Absent (`undefined`) where the source
+   * holds no such figure, as the fixtures do, so the page leaves it out rather than say "not reported".
+   */
+  accountCash?: string | null;
+  /** When the broker's figures were observed: the oldest account snapshot's `observed_at`. Absent over the fixtures. */
+  observedAt?: string | null;
   /** What the agents hold, at market value. */
   invested: string | null;
   /** The agents' cash: each agent's equity less what it holds. */
@@ -47,6 +56,8 @@ export interface Portfolio {
   unmanaged: string | null;
   today: string | null;
   pnl: string | null;
+  /** The P&L is gross, before fees: over the API, which attributes no fee to an agent (§4.7). */
+  pnlGross: boolean;
   unrealized: string | null;
   agents: PortfolioAgent[];
   holdings: Holding[];
@@ -54,10 +65,110 @@ export interface Portfolio {
 
 const money = (value: Dec): string => toFixed(value, 2);
 
-/** The sum of every value, or `null` when any one is not reported. An empty list sums to zero. */
+/** A served decimal as a fixed-point value, or `null` when it has more places than the arithmetic keeps: such a figure is not reported, never rounded in silence. */
+function readDec(value: string): Dec | null {
+  try {
+    return dec(value);
+  } catch {
+    return null;
+  }
+}
+
+/** The exact sum of every value, or `null` when any one is not reported or cannot be read. An empty list sums to zero. */
+function exactSum(values: ReadonlyArray<string | null>): Dec | null {
+  const read = values.map((v) => (v === null ? null : readDec(v)));
+  return read.some((v) => v === null) ? null : add(...(read as Dec[]));
+}
+
+/** The sum of every value to the cent, or `null` when any one is not reported. An empty list sums to zero. */
 export function sumReported(values: ReadonlyArray<string | null>): string | null {
-  if (values.some((v) => v === null)) return null;
-  return money(add(...(values as string[]).map(dec)));
+  const sum = exactSum(values);
+  return sum === null ? null : money(sum);
+}
+
+/** A served read, or why it was not: absent until it answers. */
+export type ServedRead<T> = { ok: true; value: T } | { ok: false; reason: string };
+
+/** The broker's figures across every account the dashboard serves. */
+export interface AccountFigures {
+  total: string | null;
+  cash: string | null;
+  today: string | null;
+  observedAt: string | null;
+}
+
+/**
+ * The accounts' value, cash and change on the day (DEC-2413), each summed in fixed point over every
+ * account's latest snapshot. An account with no snapshot, a read that failed or has not answered, a
+ * `day_change` a version 1 snapshot does not give, and a workspace with no account each make the sum
+ * `null`: no part is ever read as zero.
+ */
+export function accountFigures(read: ServedRead<Dashboard> | undefined): AccountFigures {
+  const none = { total: null, cash: null, today: null, observedAt: null };
+  if (!read?.ok || read.value.accounts.length === 0) return none;
+  const snapshots = read.value.accounts.map((a) => a.snapshot);
+  if (snapshots.some((s) => s === null)) return none;
+  const all = snapshots as NonNullable<(typeof snapshots)[number]>[];
+  return {
+    total: sumReported(all.map((s) => s.equity)),
+    cash: sumReported(all.map((s) => s.cash)),
+    today: sumReported(all.map((s) => s.day_change)),
+    observedAt: all.map((s) => s.observed_at).reduce((oldest, at) => (at < oldest ? at : oldest)),
+  };
+}
+
+/**
+ * The agents' total P&L, gross: each agent's `realized_gross` plus its `unrealized_pnl`, summed in
+ * fixed point. An agent whose read failed or has not answered, or whose figure is `null`, makes the
+ * total `null`. Fees are the account's and no agent's (§4.7), so this is never a net figure.
+ */
+export function grossPnl(agents: readonly { agent_id: string }[], reads: Readonly<Record<string, ServedRead<AgentPnl> | undefined>>): string | null {
+  const parts = agents.flatMap((a) => {
+    const read = reads[a.agent_id];
+    return read?.ok ? [read.value.realized_gross, read.value.unrealized_pnl] : [null];
+  });
+  return sumReported(parts);
+}
+
+/** The page's ranges as the history read names them. */
+export const HISTORY_RANGE_OF: Readonly<Record<EquityRange, HistoryRange>> = { "1D": "1d", "1W": "1w", "1M": "1m", "3M": "3m", "1Y": "1y", All: "all" };
+
+/** One point of the account's line: the exact equity, and its time in Unix seconds for drawing. */
+export interface AccountPoint {
+  at: string;
+  time: number;
+  equity: string;
+}
+
+const unixSeconds = (at: string) => Date.parse(`${at.slice(0, 19)}Z`) / 1000;
+
+/**
+ * The account's line over the range read (DEC-2413): with one account, its points; with more, one
+ * point for each bucket where every account has one, their equity summed in fixed point and timed at
+ * the latest of them. A bucket missing an account is left out, since no snapshot is carried into a
+ * bucket it is not in (§4.7). `null` when nothing is reported: no account, or an equity that cannot be read.
+ */
+export function accountLine(history: EquityHistory): AccountPoint[] | null {
+  if (history.accounts.length === 0) return null;
+  const width = BUCKET_SECONDS[history.range];
+  const byBucket = history.accounts.map((a) => new Map(a.points.map((p) => [Math.floor(unixSeconds(p.at) / width), p])));
+  const buckets = [...byBucket[0].keys()].filter((b) => byBucket.every((m) => m.has(b))).sort((x, y) => x - y);
+  const line: AccountPoint[] = [];
+  for (const b of buckets) {
+    const parts = byBucket.map((m) => m.get(b) as { at: string; equity: string });
+    const sum = exactSum(parts.map((p) => p.equity));
+    if (sum === null) return null;
+    const at = parts.map((p) => p.at).reduce((latest, t) => (t > latest ? t : latest));
+    line.push({ at, time: unixSeconds(at), equity: toDecimalString(sum) });
+  }
+  return line;
+}
+
+/** The change over the line, last less first, to the cent; `null` with fewer than two points. */
+export function lineChange(line: readonly AccountPoint[], upTo: AccountPoint | null = null): string | null {
+  const last = upTo ?? line.at(-1);
+  if (line.length < 2 || !last) return null;
+  return money(sub(dec(last.equity), dec(line[0].equity)));
 }
 
 /** The workspace's figures over the fixtures, where every one is given. */
@@ -88,6 +199,7 @@ export function fixturePortfolio(ws: Workspace): Portfolio {
     unmanaged: money(sub(total, equity)),
     today: money(add(...ws.agents.map((a) => dec(a.pnl_today)))),
     pnl: money(add(...ws.agents.map((a) => dec(a.pnl_total)))),
+    pnlGross: false,
     unrealized: sumReported(holdings.map((h) => h.unrealized)),
     agents: ws.agents.map((a) => ({ agentId: a.agent_id, name: a.label, mode: a.mode, unread: null })),
     holdings,
@@ -97,18 +209,29 @@ export function fixturePortfolio(ws: Workspace): Portfolio {
 /** One agent's `GET /agents/{id}/positions`, as the runtime answered it; absent until it answers. */
 export type HoldingsRead = { ok: true; items: AgentHolding[] } | { ok: false; reason: string };
 
+/** The Portfolio reads beside the positions (§4.7, DEC-2413): the dashboard's snapshots and each agent's P&L, each absent until it answers. */
+export interface PortfolioReads {
+  dashboard?: ServedRead<Dashboard>;
+  pnl: Readonly<Record<string, ServedRead<AgentPnl> | undefined>>;
+}
+
+const NO_READS: PortfolioReads = { pnl: {} };
+
 /**
  * The workspace's figures over the workspace API (DEC-2413 item 3): only what the served reads give.
- * The account's value, cash, today's change and total P&L have no served read, so they are `null`;
- * what is invested and unrealized is summed from the agents' positions only when every agent's list
- * was read and every figure in it is reported. The average cost is the sub-ledger's basis over its
- * quantity, and the last price the latest risk mark, only when it is sane.
+ * The account's value, cash and change today are the dashboard's snapshots summed; the total P&L is
+ * each agent's gross P&L summed (`grossPnl`). What is invested and unrealized is summed from the
+ * agents' positions only when every agent's list was read and every figure in it is reported. The
+ * agents' cash and what no agent manages need each agent's equity, which no read serves, so they stay
+ * `null`. The average cost is the sub-ledger's basis over its quantity, and the last price the latest
+ * risk mark, only when it is sane.
  */
 export function apiPortfolio(
   environment: ShownEnvironment,
   agents: readonly AgentDetail[],
   reads: Readonly<Record<string, HoldingsRead | undefined>>,
   instruments: readonly CatalogueInstrument[] | null,
+  served: PortfolioReads = NO_READS,
 ): Portfolio {
   const byId = new Map((instruments ?? []).map((i) => [i.instrument_id, i]));
   const holdings: Holding[] = [];
@@ -137,14 +260,18 @@ export function apiPortfolio(
     return { agentId: a.agent_id, name: a.label, mode: a.mode, unread: read === undefined ? "Reading…" : read.ok ? null : read.reason };
   });
   const allRead = listed.every((a) => a.unread === null);
+  const account = accountFigures(served.dashboard);
   return {
     environment,
-    total: null,
+    total: account.total,
+    accountCash: account.cash,
+    observedAt: account.observedAt,
     invested: allRead ? sumReported(holdings.map((h) => h.marketValue)) : null,
     cash: null,
     unmanaged: null,
-    today: null,
-    pnl: null,
+    today: account.today,
+    pnl: grossPnl(agents, served.pnl),
+    pnlGross: true,
     unrealized: allRead ? sumReported(holdings.map((h) => h.unrealized)) : null,
     agents: listed,
     holdings,
