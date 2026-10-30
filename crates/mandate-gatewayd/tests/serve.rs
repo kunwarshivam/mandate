@@ -188,9 +188,25 @@ fn a_connection_past_the_cap_is_closed_unread() {
     assert!(server.answered.try_recv().is_err(), "nothing answered");
     drop(holding);
     assert!(server.lines.wait_for("request refused: truncated"));
-    let reply = frame::call(&mut connect(server.address), &request("fits")).unwrap();
-    assert_eq!(reply, Err(RequestError::Tools));
+    assert_eq!(
+        fits_once_freed(server.address, "fits"),
+        Some(Err(RequestError::Tools)),
+        "a call fits once the held connection's slot is given back"
+    );
     server.stop();
+}
+
+/// The first call that fits, within two seconds: the server logs a connection's refusal while the
+/// connection's thread still holds its slot, and gives the slot back only when that thread ends,
+/// so a call right after the log line may still be over the cap and closed unread.
+fn fits_once_freed(address: SocketAddr, id: &str) -> Option<Reply> {
+    (0..100).find_map(|_| match frame::call(&mut connect(address), &request(id)) {
+        Ok(reply) => Some(reply),
+        Err(_) => {
+            thread::sleep(Duration::from_millis(20));
+            None
+        }
+    })
 }
 
 /// DEC-2265 item 2: a length past the request bound is refused unread, and a body that is not a
