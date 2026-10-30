@@ -1912,7 +1912,9 @@ gateway service.
      becomes the owner's request, and the model may offer it as an `order.propose` card instead.
      Each acting tool also admits the owner's session again at its own instant, so a session
      signed out, expired or narrowed to risk reduction since the message acts no more (only a
-     pause and the kill switch pass a reduction-only one).
+     pause and the kill switch pass a reduction-only one). With no cookie the run cannot make the
+     outage refresh a route makes, so a session whose access lapsed refuses even the chat's pause
+     and kill switch; the owner's own pause and kill-switch routes still serve them.
    - `order.sell` is an owner exit of the whole position.
    - The four agent controls are pause, resume, Stop and the agent's kill switch.
    - `mandate.propose` creates a draft version through the version route, which validates it. The
