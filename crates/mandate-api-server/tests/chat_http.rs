@@ -1603,8 +1603,14 @@ fn the_owner_s_actions_commit_through_the_owner_s_own_routes() {
         names,
         [name::BUY, name::SELL, name::RESUME, name::STOP, name::KILL]
     );
-    assert_eq!(found[0].1, AWAITING_OWNER, "a buy waits for the owner's tap");
-    assert!(owner_requests(&f).is_empty(), "no buy is committed by the chat");
+    assert_eq!(
+        found[0].1, AWAITING_OWNER,
+        "a buy waits for the owner's tap"
+    );
+    assert!(
+        owner_requests(&f).is_empty(),
+        "no buy is committed by the chat"
+    );
     let prefix = r#"{"accepted":true,"note":"Recorded. The platform sizes, checks and places it; watch the order card for the result.","ok":true,"record":""#;
     for ((tool, result), journaled) in found.iter().skip(1).zip([
         "OwnerCommandIssued",
@@ -3121,7 +3127,10 @@ fn a_chat_buy_posts_a_confirmation_card_and_submits_nothing() {
         results(&f),
         vec![(name::BUY.to_owned(), AWAITING_OWNER.to_owned())]
     );
-    assert!(owner_requests(&f).is_empty(), "nothing is submitted before the tap");
+    assert!(
+        owner_requests(&f).is_empty(),
+        "nothing is submitted before the tap"
+    );
     let cards = confirm_cards(&f);
     let [(message, card)] = cards.as_slice() else {
         panic!("one card, not {cards:?}");
@@ -3144,7 +3153,11 @@ fn a_chat_buy_posts_a_confirmation_card_and_submits_nothing() {
         .iter()
         .find(|m| m.get("id").and_then(Value::as_str) == Some(message.as_str()))
         .and_then(|m| m.get("card").cloned());
-    assert_eq!(shown.as_ref(), Some(card), "the thread serves the journaled card");
+    assert_eq!(
+        shown.as_ref(),
+        Some(card),
+        "the thread serves the journaled card"
+    );
 }
 
 /// The owner's tap submits the owner request the card shows, naming the card as its cause, and a
@@ -3166,11 +3179,17 @@ fn the_owners_tap_submits_the_card_once_however_often_it_is_tapped() {
     let second = tap(&f, &cookie, message, "tap-two-bbbbbbbbbbbb");
     assert_eq!(second.status, first.status);
     let id = |reply: &Reply| {
-        parse(&reply.body)
-            .ok()
-            .and_then(|b| b.get("command_id").and_then(Value::as_str).map(str::to_owned))
+        parse(&reply.body).ok().and_then(|b| {
+            b.get("command_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
     };
-    assert!(id(&first).is_some(), "{}", String::from_utf8_lossy(&first.body));
+    assert!(
+        id(&first).is_some(),
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
     assert_eq!(id(&first), id(&second), "a second tap replays the first");
     let requests = owner_requests(&f);
     let [request] = requests.as_slice() else {
