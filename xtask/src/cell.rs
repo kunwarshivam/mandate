@@ -4026,7 +4026,7 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
             "networks": ["journal"],
             "healthcheck": {
-                "test": ["CMD", "pg_isready", "-U", "postgres", "-d", "mandate"],
+                "test": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "mandate"],
                 "interval": "2s",
                 "retries": 30
             },
