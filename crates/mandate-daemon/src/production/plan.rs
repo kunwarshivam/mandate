@@ -113,13 +113,26 @@ impl OrderPlan for Plan {
     /// Mandate spec §6.2 step 5d's reviewers (DEC-2859) over the same facts [`Plan::classified`]
     /// classifies the request on. A proposal for an instrument the mandate does not pin, or one
     /// whose facts do not build, is held, so an ASK on it never runs unasked (`AGENTS.md` rule 3).
+    ///
+    /// The plan validates its mandate at the risk day of the facts, with one approver user and no
+    /// previous version, so a validated mandate can have neither a review date already past (V-046)
+    /// nor a two-approver threshold (V-024), and a pinned request is never an admission: on today's
+    /// facts the answer for a pinned request is `false`. The judgement is the builder's all the
+    /// same, so a validation context that admits a reviewer is held by it.
     fn held_for_review(&self, _view: &MandateView, proposal: &Proposal) -> bool {
         self.mandate
             .universe
             .pinned_instruments
             .iter()
             .find(|pinned| pinned.asset_id.as_str() == proposal.instrument.as_str())
-            .and_then(|pinned| self.reviewed(Opened::pinned(pinned), proposal))
+            .and_then(|pinned| {
+                let (validated, action) = self.action_for(Opened::pinned(pinned), proposal)?;
+                mandate_builder::held_for_review(
+                    mandate_builder::autonomy_policy(&validated),
+                    &action,
+                )
+                .ok()
+            })
             .unwrap_or(true)
     }
     /// An owner's or a client's request (DEC-2858) for the deployment's own pinned asset, clipped
@@ -346,13 +359,6 @@ impl Plan {
 }
 
 impl Plan {
-    /// Whether a reviewer holds `proposal` (mandate spec §6.2 step 5d), on the facts it is
-    /// classified on; `None` when they do not build.
-    fn reviewed(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<bool> {
-        let (validated, action) = self.action_for(opened, proposal)?;
-        mandate_builder::held_for_review(mandate_builder::autonomy_policy(&validated), &action).ok()
-    }
-
     /// The validated mandate and the §6.3 facts `proposal` presents: an owner's or a client's
     /// request, which carries no score, on the agent's held position, and the builder's own
     /// opening on a flat one.

@@ -907,3 +907,40 @@ fn owner_requests_hold_dec_2858s_invariants() -> Result<(), String> {
         })
         .map_err(|e| e.to_string())
 }
+
+/// A plan that sizes and classifies as [`OwnerPlan`] does but keeps the port's default for step
+/// 5d's reviewers, as a plan that cannot judge them would.
+struct Unjudging(OwnerPlan);
+
+impl OrderPlan for Unjudging {
+    fn plan(&self, view: &MandateView, inputs: &SignalInputs) -> Option<Proposal> {
+        self.0.plan(view, inputs)
+    }
+
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
+        self.0.classify(view, proposal)
+    }
+
+    fn requested(&self, view: &MandateView, request: &OwnerRequest) -> Option<Proposal> {
+        self.0.requested(view, request)
+    }
+}
+
+/// `AGENTS.md` rule 3 on step 5d (DEC-2859): a plan that cannot say whether a reviewer holds the
+/// owner's request holds it, so the ASK stays an ASK and nothing is handed.
+#[test]
+fn a_plan_that_cannot_judge_the_reviewers_holds_the_owners_ask() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        Unjudging(OwnerPlan::classified(Autonomy::Ask)),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = started(&ports);
+    let ran = tail(&mut shell, &Request::owner_buy(1).event(), &ports);
+    let decision = only(&ran, "DecisionMade");
+    assert_eq!(member(decision, "autonomy"), &text("ask"));
+    assert_eq!(member(decision, "decided_by"), &text("rule:owner-ask"));
+    assert!(ran.handed.is_empty());
+}
