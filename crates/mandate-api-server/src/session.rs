@@ -443,6 +443,48 @@ impl Sessions {
         }
     }
 
+    /// Admits `request` again on the session `reference` names, with no cookie: an action a chat
+    /// run takes for its owner (DEC-2293), which acts only while the session that started the run
+    /// would still admit it. A signed-out, expired, idle or lapsed session refuses, and a
+    /// reduction-only one refuses all but a pause and the kill switch. It never refreshes a
+    /// session, and an admitted action counts as the owner's activity, as their own request would.
+    ///
+    /// # Errors
+    /// [`Unauthenticated`] for every refusal.
+    pub fn readmit(
+        &self,
+        reference: SessionRef,
+        request: Request,
+        now: UtcNanos,
+    ) -> Result<Authenticated, Unauthenticated> {
+        let limits = self.limits.map_err(|_| Unauthenticated)?;
+        let mut store = self.store();
+        let (id, entry) = store
+            .entries
+            .iter_mut()
+            .find(|(_, entry)| entry.reference == reference)
+            .ok_or(Unauthenticated)?;
+        let id = *id;
+        let admitted = live(entry, now.secs(), limits.idle_s())
+            && entry.record.authorize(request, now).is_ok();
+        if admitted {
+            entry.last_active = entry.last_active.max(now.secs());
+            return Ok(Authenticated {
+                principal: entry.principal,
+                reference: entry.reference,
+                signed_in: entry.signed_in,
+                kind: match entry.record.reach() {
+                    Reach::Full => SessionKind::Full,
+                    Reach::Outage | Reach::ReductionOnly => SessionKind::ReductionOnly,
+                },
+            });
+        }
+        if entry.record.ended().is_some() {
+            store.entries.remove(&id);
+        }
+        Err(Unauthenticated)
+    }
+
     /// Whether the session `cookie` names is live but reaches only pause and the kill switch (an
     /// outage or reduction-only session), so a refused ordinary request answers `reduction_only`
     /// rather than the one 401 (§3.5). It changes nothing.
