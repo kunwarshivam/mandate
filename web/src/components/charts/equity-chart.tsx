@@ -196,7 +196,7 @@ function changePercent(change: string, first: AccountPoint): string | null {
 function describeLine(line: readonly AccountPoint[], words: string, environment: ShownEnvironment): string {
   const first = line[0];
   const last = line.at(-1);
-  const funds = environment === "live" ? "" : " Simulated funds.";
+  const funds = environment === "paper" ? " Simulated funds." : "";
   if (!first || !last) return `No account value recorded ${words}.`;
   const change = lineChange(line);
   if (change === null) return `One account value recorded ${words}: ${usd(first.equity)}, so no change to measure.${funds}`;
@@ -248,7 +248,7 @@ export function ApiAccountChart({ total, observedAt, environment, agree = true }
   const trend: Direction = lineMove === null ? "flat" : direction(lineMove);
   const series = useMemo<ChartSeries>(() => ({ kind: "area", tone: "account", points, trend }), [points, trend]);
   const pct = change !== null && line?.[0] ? changePercent(change, line[0]) : null;
-  const unreported = read === undefined ? null : !read.ok ? read.reason : !agree ? "your accounts are not all in this environment" : drawn && !drawn.ok ? drawn.reason : null;
+  const unreported = read === undefined ? null : !read.ok ? read.reason : environment === "unknown" ? "the account's environment is not reported" : !agree ? "your accounts are not all in this environment" : drawn && !drawn.ok ? drawn.reason : null;
 
   let plot: ReactNode;
   if (read === undefined) plot = <ChartSkeleton height={ACCOUNT_HEIGHT} label="Loading the account's history" />;
@@ -293,7 +293,7 @@ export function ApiAccountChart({ total, observedAt, environment, agree = true }
       {plot}
       <RangePicker label="Account value range" value={range} options={EQUITY_RANGES} onChange={setRange} />
       <div className="text-caption leading-6 text-muted-foreground *:mr-1.5 *:align-middle">
-        {environment === "live" ? null : <span>Simulated funds on paper.</span>}
+        {environment === "paper" ? <span>Simulated funds on paper.</span> : null}
         <AsOf at={observedAt} now={now} />
         <ChartCredit className="mt-1" />
       </div>

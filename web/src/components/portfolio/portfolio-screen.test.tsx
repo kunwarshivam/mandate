@@ -216,6 +216,17 @@ describe("the Portfolio page over the workspace API (DEC-2413 item 3)", () => {
     expect(within(hero).queryByRole("img")).toBeNull();
   });
 
+  it("draws no line and claims no paper funds when the workspace's environment is not known", async () => {
+    mountApi({
+      rewrite: (path, body) =>
+        path.endsWith("/connections") ? { ...body, connections: [] } : path.endsWith(`/agents/${AGENT_IDS.btc}`) ? { ...body, agent: { ...(body.agent as Body), environment: "live" } } : body,
+    });
+    const hero = await screen.findByRole("region", { name: "Account value" });
+    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent("Not reported: the account's environment is not reported."));
+    expect(within(hero).queryByRole("img")).toBeNull();
+    expect(hero.textContent).not.toMatch(/Simulated funds on paper/);
+  });
+
   it("draws a one-point line with no direction, and says one value was recorded, never no change", async () => {
     mountApi({
       rewrite: (path, body) => {
