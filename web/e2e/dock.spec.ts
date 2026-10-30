@@ -5,7 +5,7 @@ import { SCREENS } from "../src/lib/screens";
 /**
  * From 1024 px the dock carries the navigation: a floating glass bar centred at the bottom, every
  * item an icon over its name, the current section on a pill, and every screen one press away: Home,
- * New agent and Settings (DEC-2293). It never covers a
+ * Portfolio, New agent and Settings (DEC-2293, DEC-2413). It never covers a
  * focused control, an approval's choices or the header, and Stop ends it (DEC-452). Below 1024 px the
  * tab bar carries it instead.
  */
@@ -53,7 +53,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
   expect(found.radius3xl).toBeGreaterThan(0);
   expect(found.radius, "the dock takes the 3xl corner DESIGN.md gives it").toBe(found.radius3xl);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
-  expect(found.items, "Home, New agent and Settings, Stop aside (DEC-2293)").toHaveLength(3);
+  expect(found.items, "Home, Portfolio, New agent and Settings, Stop aside (DEC-2293, DEC-2413)").toHaveLength(4);
   expect(found.stop, "Stop, at the dock's end, is as tall as its items").toBe(50);
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);
@@ -92,7 +92,7 @@ test("the labels name every item: no tooltip on hover or focus, and a visible fo
   await open(page, "/");
   const items = dock(page).locator("a, button:not([data-slot=stop-control])");
   const names = await items.evaluateAll((els) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent));
-  expect(names).toEqual(["Home", "New", "Settings"]);
+  expect(names).toEqual(["Home", "Portfolio", "New", "Settings"]);
   await items.nth(1).hover();
   await page.waitForTimeout(600);
   await expect(page.locator(".kumo-tooltip-popup")).toHaveCount(0);

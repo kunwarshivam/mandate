@@ -23,6 +23,7 @@ const HEIGHT = 844;
 const ROUTES = [
   { name: "home", path: "/" },
   { name: "an agent", path: agentHref(AGENT_IDS.btc) },
+  { name: "the portfolio", path: "/portfolio" },
   { name: "a new agent", path: "/new" },
   { name: "settings", path: "/settings" },
   { name: "an approval request", path: `/approvals/${APPROVAL_IDS.swingXyz}` },

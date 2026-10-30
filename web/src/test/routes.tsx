@@ -5,6 +5,7 @@ import Loading from "@/app/(app)/loading";
 import NotFound from "@/app/(app)/not-found";
 import Setup from "@/app/(app)/new/page";
 import Home from "@/app/(app)/page";
+import Portfolio from "@/app/(app)/portfolio/page";
 import Settings from "@/app/(app)/settings/page";
 import { recordHref } from "@/components/stop/commands";
 import { StopRecordScreen } from "@/components/stop/record-screen";
@@ -15,6 +16,7 @@ const CONNECTION = buildWorkspace("normal").connection.connection_id;
 /** Every screen the app renders, by the pathname the shell sees for it. */
 export const ROUTES: Array<[string, ComponentType]> = [
   ["/", Home],
+  ["/portfolio", Portfolio],
   ["/new", Setup],
   ["/settings", Settings],
   ["/design", Design],

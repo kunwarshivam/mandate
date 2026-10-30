@@ -49,7 +49,7 @@ const SCREENS = [
   ["agents", "/agents"],
   ["approvals", "/approvals"],
   ["alerts", "/alerts"],
-  ["positions", "/positions"],
+  ["portfolio", "/portfolio"],
   ["messages", "/messages"],
   ["messages-agent", `/messages/${AGENT}`],
   ["audit", "/audit"],

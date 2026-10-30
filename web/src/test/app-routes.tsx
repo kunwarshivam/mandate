@@ -9,6 +9,7 @@ import * as stopAll from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import * as design from "@/app/(app)/design/page.dev";
 import * as setup from "@/app/(app)/new/page";
 import * as home from "@/app/(app)/page";
+import * as portfolio from "@/app/(app)/portfolio/page";
 import * as settings from "@/app/(app)/settings/page";
 import { recordHref } from "@/components/stop/commands";
 import type { Scenario } from "@/fixtures/types";
@@ -26,6 +27,9 @@ export async function pageFor(path: string): Promise<ReactNode> {
     case "new":
       if (second) throw new Error(`no page for ${path}`);
       return <setup.default />;
+    case "portfolio":
+      if (second) throw new Error(`no page for ${path}`);
+      return <portfolio.default />;
     case "agents":
       if (!second) throw new Error(`no page for ${path}`);
       if (rest.length === 0) return agent.default(params({ agentId: second }));

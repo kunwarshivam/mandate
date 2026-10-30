@@ -170,17 +170,17 @@ describe("the phone frame (DEC-207)", () => {
     expect(within(header).queryByRole("button", { name: /sidebar/i })).toBeNull();
   });
 
-  it("offers three tabs: Home with the count of requests waiting, New agent and More, then Stop at the bar's end", () => {
+  it("offers four tabs: Home with the count of requests waiting, Portfolio, New agent and More, then Stop at the bar's end (DEC-2413)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const tabs = screen.getByRole("navigation", { name: "Main" });
     expect(tabs.parentElement).toHaveClass("lg:hidden");
     const items = phoneControls(tabs);
-    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "New agent", "More", "Stop"]);
-    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/new", null, null]);
+    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Portfolio", "New agent", "More", "Stop"]);
+    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/portfolio", "/new", null, null]);
     expect(items[0].querySelector("[data-slot=approvals-count]")?.textContent).toMatch(/^\d+ open$/);
-    expect(items[2]).toHaveAttribute("aria-haspopup", "dialog");
-    expect(items[2]).toHaveAttribute("aria-expanded", "false");
-    expect(items[3]).toHaveAttribute("data-slot", "stop-control");
+    expect(items[3]).toHaveAttribute("aria-haspopup", "dialog");
+    expect(items[3]).toHaveAttribute("aria-expanded", "false");
+    expect(items[4]).toHaveAttribute("data-slot", "stop-control");
     for (const item of items) expect(item).toHaveClass("h-(--tab-bar)");
     expect(tabs).toHaveClass("pb-[env(safe-area-inset-bottom)]");
   });
