@@ -1943,6 +1943,374 @@ mod tests {
     const SIGNED_PUBLISH_JOBS: [&str; 2] =
         ["release-signing-publish", "release-signing-publish-index"];
 
+    /// The founder-signed path's jobs, on a dispatch from `main` that is not post-merge (DEC-2024,
+    /// DEC-2026, DEC-2651).
+    const SIGNING_JOBS: [&str; 5] = [
+        "release-signing-build",
+        "release-signing",
+        "release-signing-check",
+        "release-signing-publish",
+        "release-signing-publish-index",
+    ];
+
+    /// The condition of every job on the push's publish path: a push to `main`, or `merge.yml`'s
+    /// post-merge dispatch on `main` in its place (DEC-2651).
+    const PUSH_PATH_IF: &str = "${{ (github.event_name == 'push' || (github.event_name == \
+         'workflow_dispatch' && inputs.post_merge == true)) && github.ref == 'refs/heads/main' }}";
+
+    /// The condition of every job on the founder-signed path: a dispatch on `main` that is not
+    /// post-merge. It holds no negation, which leak-guard L12 refuses on the job with an
+    /// `environment:` (DEC-2651).
+    const SIGNING_PATH_IF: &str = "${{ github.event_name == 'workflow_dispatch' && \
+         inputs.post_merge == false && github.ref == 'refs/heads/main' }}";
+
+    /// A value of the GitHub Actions expression language, as far as release.yml's job conditions
+    /// and concurrency group use it.
+    #[derive(Clone, Debug, PartialEq)]
+    enum Value {
+        Null,
+        Bool(bool),
+        Str(String),
+    }
+
+    impl Value {
+        fn truthy(&self) -> bool {
+            match self {
+                Value::Null => false,
+                Value::Bool(value) => *value,
+                Value::Str(text) => !text.is_empty(),
+            }
+        }
+
+        /// GitHub's coercion for comparing values of different types; `None` is `NaN`, which
+        /// equals nothing.
+        fn number(&self) -> Option<i64> {
+            match self {
+                Value::Null | Value::Bool(false) => Some(0),
+                Value::Bool(true) => Some(1),
+                Value::Str(text) if text.trim().is_empty() => Some(0),
+                Value::Str(text) => text.trim().parse().ok(),
+            }
+        }
+
+        fn text(&self) -> String {
+            match self {
+                Value::Null => String::new(),
+                Value::Bool(value) => value.to_string(),
+                Value::Str(text) => text.clone(),
+            }
+        }
+
+        fn equals(&self, other: &Value) -> bool {
+            match (self, other) {
+                (Value::Str(a), Value::Str(b)) => a.eq_ignore_ascii_case(b),
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                (Value::Null, Value::Null) => true,
+                _ => matches!((self.number(), other.number()), (Some(a), Some(b)) if a == b),
+            }
+        }
+    }
+
+    /// The event a run of release.yml answers: its name, its ref, and the `post_merge` input,
+    /// which only a dispatch has.
+    #[derive(Clone, Copy, Debug)]
+    struct Run {
+        event: &'static str,
+        git_ref: &'static str,
+        post_merge: Option<bool>,
+    }
+
+    /// An evaluator of GitHub's expression language for the operators, literals, contexts and the
+    /// one function release.yml's job conditions and concurrency group use, with GitHub's
+    /// precedence (`!`, then `==` and `!=`, then `&&`, then `||`) and its value-returning `&&` and
+    /// `||`. Anything else, a context or a function it does not model included, is an error, so a
+    /// condition it cannot judge fails the test instead of passing it: the independent oracle for
+    /// `the_post_merge_dispatch_publishes_and_never_signs`.
+    struct Expression<'a> {
+        tokens: Vec<String>,
+        at: usize,
+        run: &'a Run,
+    }
+
+    impl Expression<'_> {
+        fn evaluate(source: &str, run: &Run) -> Result<Value> {
+            let inner = source
+                .trim()
+                .strip_prefix("${{")
+                .and_then(|rest| rest.strip_suffix("}}"))
+                .unwrap_or(source);
+            let mut expression = Expression {
+                tokens: Self::tokens(inner)?,
+                at: 0,
+                run,
+            };
+            let value = expression.or()?;
+            ensure!(
+                expression.at == expression.tokens.len(),
+                "trailing tokens in {source:?}"
+            );
+            Ok(value)
+        }
+
+        fn tokens(text: &str) -> Result<Vec<String>> {
+            let chars: Vec<char> = text.chars().collect();
+            let mut out = Vec::new();
+            let mut index = 0;
+            while let Some(&c) = chars.get(index) {
+                let pair: String = chars.iter().skip(index).take(2).collect();
+                if c.is_whitespace() {
+                    index += 1;
+                } else if ["&&", "||", "==", "!="].contains(&pair.as_str()) {
+                    out.push(pair);
+                    index += 2;
+                } else if "()!,".contains(c) {
+                    out.push(c.to_string());
+                    index += 1;
+                } else if c == '\'' {
+                    let end = chars
+                        .iter()
+                        .skip(index + 1)
+                        .position(|&q| q == '\'')
+                        .with_context(|| format!("an unterminated string in {text:?}"))?;
+                    out.push(chars[index..index + end + 2].iter().collect());
+                    index += end + 2;
+                } else if c.is_ascii_alphanumeric() || c == '_' {
+                    let len = chars
+                        .iter()
+                        .skip(index)
+                        .take_while(|&&w| w.is_ascii_alphanumeric() || "_.-".contains(w))
+                        .count();
+                    out.push(chars[index..index + len].iter().collect());
+                    index += len;
+                } else {
+                    bail!("an unmodelled character {c:?} in {text:?}");
+                }
+            }
+            Ok(out)
+        }
+
+        fn peek(&self) -> Option<&str> {
+            self.tokens.get(self.at).map(String::as_str)
+        }
+
+        fn next(&mut self) -> Result<String> {
+            let token = self
+                .tokens
+                .get(self.at)
+                .context("the expression ends early")?;
+            self.at += 1;
+            Ok(token.clone())
+        }
+
+        fn expect(&mut self, wanted: &str) -> Result<()> {
+            let token = self.next()?;
+            ensure!(token == wanted, "expected {wanted:?}, found {token:?}");
+            Ok(())
+        }
+
+        fn or(&mut self) -> Result<Value> {
+            let mut left = self.and()?;
+            while self.peek() == Some("||") {
+                self.at += 1;
+                let right = self.and()?;
+                left = if left.truthy() { left } else { right };
+            }
+            Ok(left)
+        }
+
+        fn and(&mut self) -> Result<Value> {
+            let mut left = self.comparison()?;
+            while self.peek() == Some("&&") {
+                self.at += 1;
+                let right = self.comparison()?;
+                left = if left.truthy() { right } else { left };
+            }
+            Ok(left)
+        }
+
+        fn comparison(&mut self) -> Result<Value> {
+            let left = self.unary()?;
+            match self.peek() {
+                Some("==") => {
+                    self.at += 1;
+                    Ok(Value::Bool(left.equals(&self.unary()?)))
+                }
+                Some("!=") => {
+                    self.at += 1;
+                    Ok(Value::Bool(!left.equals(&self.unary()?)))
+                }
+                _ => Ok(left),
+            }
+        }
+
+        fn unary(&mut self) -> Result<Value> {
+            if self.peek() == Some("!") {
+                self.at += 1;
+                return Ok(Value::Bool(!self.unary()?.truthy()));
+            }
+            self.primary()
+        }
+
+        fn primary(&mut self) -> Result<Value> {
+            let token = self.next()?;
+            if token == "(" {
+                let value = self.or()?;
+                self.expect(")")?;
+                return Ok(value);
+            }
+            if let Some(text) = token
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+            {
+                return Ok(Value::Str(text.to_owned()));
+            }
+            if token == "format" && self.peek() == Some("(") {
+                self.at += 1;
+                let mut text = self.or()?.text();
+                let mut index = 0;
+                while self.peek() == Some(",") {
+                    self.at += 1;
+                    text = text.replace(&format!("{{{index}}}"), &self.or()?.text());
+                    index += 1;
+                }
+                self.expect(")")?;
+                return Ok(Value::Str(text));
+            }
+            match token.as_str() {
+                "true" => Ok(Value::Bool(true)),
+                "false" => Ok(Value::Bool(false)),
+                "null" => Ok(Value::Null),
+                "github.event_name" => Ok(Value::Str(self.run.event.to_owned())),
+                "github.ref" => Ok(Value::Str(self.run.git_ref.to_owned())),
+                "inputs.post_merge" => Ok(self.run.post_merge.map_or(Value::Null, Value::Bool)),
+                other => bail!("the oracle does not model {other:?}"),
+            }
+        }
+    }
+
+    /// DEC-2651: `merge.yml`'s post-merge dispatch on `main` runs the push's publish path, in the
+    /// pushes' concurrency group, and never the founder-signed path; a dispatch without the input
+    /// still runs only the signing path, in a group of its own; a push runs only the publish path;
+    /// and nothing runs either path off `main`. Each job's condition and the concurrency group are
+    /// read from release.yml and judged by [`Expression`], and the conditions the change replaced
+    /// are judged too, to show the oracle catches the bug it fixed.
+    #[test]
+    fn the_post_merge_dispatch_publishes_and_never_signs() -> Result<()> {
+        let push_main = Run {
+            event: "push",
+            git_ref: "refs/heads/main",
+            post_merge: None,
+        };
+        let post_merge = Run {
+            event: "workflow_dispatch",
+            git_ref: "refs/heads/main",
+            post_merge: Some(true),
+        };
+        let dispatch = Run {
+            event: "workflow_dispatch",
+            git_ref: "refs/heads/main",
+            post_merge: Some(false),
+        };
+        let push_branch = Run {
+            git_ref: "refs/heads/dev",
+            ..push_main
+        };
+        let post_merge_branch = Run {
+            git_ref: "refs/heads/dev",
+            ..post_merge
+        };
+        let dispatch_branch = Run {
+            git_ref: "refs/heads/dev",
+            ..dispatch
+        };
+        let runs = [
+            (push_main, true, false, "release-refs/heads/main"),
+            (post_merge, true, false, "release-refs/heads/main"),
+            (dispatch, false, true, "release-dispatch-refs/heads/main"),
+            (push_branch, false, false, "release-refs/heads/dev"),
+            (post_merge_branch, false, false, "release-refs/heads/dev"),
+            (
+                dispatch_branch,
+                false,
+                false,
+                "release-dispatch-refs/heads/dev",
+            ),
+        ];
+        let jobs = release_jobs()?;
+        let condition = |name: &str| -> Result<String> {
+            let job = jobs
+                .get(name)
+                .with_context(|| format!("release.yml has no {name}"))?;
+            job.lines()
+                .find_map(|line| line.strip_prefix("    if: "))
+                .map(str::to_owned)
+                .with_context(|| format!("{name} has no condition"))
+        };
+        for (name, body) in &jobs {
+            let named = body.contains("inputs.") || body.contains("github.event_name ==");
+            let pathed =
+                PUBLISH_JOBS.contains(&name.as_str()) || SIGNING_JOBS.contains(&name.as_str());
+            assert_eq!(
+                named, pathed,
+                "{name}: only the publish and signing jobs choose by event or input"
+            );
+        }
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/release.yml"),
+        )?;
+        let group = text
+            .split_once("\nconcurrency:\n  group: release-")
+            .and_then(|(_, rest)| rest.lines().next())
+            .context("release.yml has no concurrency group")?;
+        let cancel = text
+            .split_once("\n  cancel-in-progress: ")
+            .and_then(|(_, rest)| rest.lines().next())
+            .context("release.yml has no cancel-in-progress")?;
+        for (run, publishes, signs, wanted_group) in runs {
+            for name in PUBLISH_JOBS {
+                assert_eq!(
+                    Expression::evaluate(&condition(name)?, &run)?.truthy(),
+                    publishes,
+                    "{name} on {run:?}"
+                );
+            }
+            for name in SIGNING_JOBS {
+                assert_eq!(
+                    Expression::evaluate(&condition(name)?, &run)?.truthy(),
+                    signs,
+                    "{name} on {run:?}"
+                );
+            }
+            assert_eq!(
+                format!("release-{}", Expression::evaluate(group, &run)?.text()),
+                wanted_group,
+                "the concurrency group on {run:?}"
+            );
+            assert!(
+                !Expression::evaluate(cancel, &run)?.truthy(),
+                "a release on {run:?} cancels nothing"
+            );
+        }
+        let replaced_signing = "${{ github.event_name == 'workflow_dispatch' && github.ref == \
+             'refs/heads/main' }}";
+        let replaced_publish =
+            "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+        let replaced_group = "${{ github.event_name == 'pull_request' && github.ref || \
+             github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref) || \
+             github.ref }}";
+        assert!(Expression::evaluate(replaced_signing, &post_merge)?.truthy());
+        assert!(!Expression::evaluate(replaced_publish, &post_merge)?.truthy());
+        assert_eq!(
+            Expression::evaluate(replaced_group, &post_merge)?.text(),
+            "dispatch-refs/heads/main"
+        );
+        let truthy_input = "${{ github.event_name == 'workflow_dispatch' && inputs.post_merge }}";
+        assert!(Expression::evaluate(truthy_input, &post_merge)?.truthy());
+        assert!(!Expression::evaluate(truthy_input, &dispatch)?.truthy());
+        assert!(Expression::evaluate("${{ hashFiles('x') }}", &post_merge).is_err());
+        Ok(())
+    }
+
     /// Only the publish jobs may write packages or mint an OIDC token for keyless signing, and
     /// they run only on a push to `main`: never from a pull request or a branch (ES-12, E21-35).
     /// The release-signed publish jobs are the one other pair, pinned to a dispatch from `main` by
@@ -1963,9 +2331,7 @@ mod tests {
                 .get(name)
                 .with_context(|| format!("release.yml has no {name}"))?;
             assert!(
-                job.contains(
-                    "    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n"
-                ),
+                job.contains(&format!("    if: {PUSH_PATH_IF}\n")),
                 "{name}: {job}"
             );
             for permission in ["contents: read", "packages: write", "id-token: write"] {
@@ -2037,10 +2403,10 @@ mod tests {
                 .get(name)
                 .with_context(|| format!("release.yml has no {name}"))?;
             for line in [
-                "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}\n",
-                "    permissions:\n      contents: read\n    defaults:\n",
+                format!("    if: {SIGNING_PATH_IF}\n"),
+                "    permissions:\n      contents: read\n    defaults:\n".to_owned(),
             ] {
-                assert!(job.contains(line), "{name} lacks {line:?}");
+                assert!(job.contains(&line), "{name} lacks {line:?}");
             }
         }
         let build = jobs
@@ -2170,7 +2536,7 @@ mod tests {
     #[test]
     fn the_signed_images_are_published_only_from_a_checked_dispatch() -> Result<()> {
         let jobs = release_jobs()?;
-        let dispatch = "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}\n";
+        let dispatch = format!("    if: {SIGNING_PATH_IF}\n");
         let token = "    permissions:\n      contents: read\n      packages: write\n      id-token: write\n    defaults:\n";
         for (name, needs, run) in [
             (
@@ -2188,7 +2554,7 @@ mod tests {
                 .get(name)
                 .with_context(|| format!("release.yml has no {name}"))?;
             for line in [
-                dispatch,
+                dispatch.as_str(),
                 token,
                 needs,
                 run,
@@ -2224,7 +2590,7 @@ mod tests {
                 "{name}"
             );
             if signed {
-                assert!(job.contains(dispatch), "{name}");
+                assert!(job.contains(dispatch.as_str()), "{name}");
             }
         }
         Ok(())
@@ -2607,7 +2973,8 @@ mod tests {
         let block = concat!(
             "\nconcurrency:\n",
             "  group: release-${{ github.event_name == 'pull_request' && github.ref || ",
-            "github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref) || ",
+            "github.event_name == 'workflow_dispatch' && !inputs.post_merge && ",
+            "format('dispatch-{0}', github.ref) || ",
             "github.ref }}\n",
             "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
         );

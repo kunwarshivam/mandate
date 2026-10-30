@@ -10,8 +10,10 @@
 # Nothing here checks out or runs the pull request's code: `pull_request_target`, `workflow_run`
 # and `schedule` run this file and the script as they are on the default branch. A merge made
 # here pushes to `main` with this workflow's own token, which starts no workflow, so after any
-# merge it dispatches `ci` on `main` once, the post-merge run every other merge gets from its push
-# (DEC-2610). The dispatch is its own job, `ci-on-main`, the only one holding `actions: write`.
+# merge it dispatches on `main` once each workflow a push to `main` would have started: `ci`, the
+# post-merge run (DEC-2610), `release`, which publishes main's keyless-signed images and charts,
+# and `web-deploy`, which deploys main's web app once its own switch is on (DEC-2651). The
+# dispatches are their own job, `post-merge`, the only one holding `actions: write`.
 name: merge
 
 on:
@@ -86,9 +88,13 @@ jobs:
           fi
           exit "$failed"
 
-  # DEC-2610: after a run that merged at least one pull request, even when another failed to,
-  # dispatch `ci` on `main` once. It holds `actions: write` and nothing else, and runs no code.
-  ci-on-main:
+  # DEC-2610, DEC-2651: after a run that merged at least one pull request, even when another
+  # failed to, dispatch `ci`, `release` and `web-deploy` on `main` once each, as a push would have
+  # started them. `ci` and `release` get `post_merge`, which makes each run its push path: for
+  # `release`, publishing and never the founder-signed path. `web-deploy` runs on every such merge,
+  # not only one that touched `web/`: it deploys only `main`'s web, and only while
+  # `WEB_DEPLOY_ENABLED` is on. It holds `actions: write` and nothing else, and runs no code.
+  post-merge:
     needs: merge
     if: ${{ always() && needs.merge.outputs.merged == 'true' }}
     runs-on: ubuntu-24.04
@@ -100,3 +106,9 @@ jobs:
     steps:
       - name: Dispatch ci on main after this run's merges (DEC-2610)
         run: gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main -f "inputs[post_merge]=true"
+      - name: Dispatch release on main after this run's merges (DEC-2651)
+        if: ${{ !cancelled() }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" -f ref=main -f "inputs[post_merge]=true"
+      - name: Dispatch web-deploy on main after this run's merges (DEC-2651)
+        if: ${{ !cancelled() }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/web-deploy.yml/dispatches" -f ref=main
