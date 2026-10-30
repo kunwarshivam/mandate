@@ -117,7 +117,10 @@ jobs:
       # repository's branches (DEC-2075). A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
       # runners. A fork's pull request brings its own workflow, so this keeps honest runs off them;
       # what stops a fork is the approval setting and the runners' own job-started hook.
-      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
+      # DEC-2087: and only while CI_RUNNER_POLICY_ENFORCED is `true`, which the founder sets once the
+      # self-hosted runners enforce the cell's NetworkPolicy; until then every cell job's workspace
+      # pods refuse to start there (their egress gate), so the cell jobs run on GitHub's runners.
+      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER_POLICY_ENFORCED == 'true' && vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -187,10 +190,10 @@ jobs:
       - run: cargo xtask ci spec-guard
         if: steps.change.outputs.docs_only != 'true'
 
-  # DEC-871, DEC-2325, DEC-2639. The workspace's nextest run, in nextest's counted partitions: each shard
-  # builds every test binary and runs its sixth of the tests, and together they run every test once. The shards
-  # and `fast-pending` build the same test profile, so they share one cache, which only the first
-  # shard saves.
+  # DEC-871, DEC-2325, DEC-2639. The workspace's nextest run, split by package: each shard builds and
+  # runs only the packages `cargo xtask ci test-nextest` gives it, and every package is in exactly
+  # one shard, so together they run every test once. Each shard keeps the dependency cache of its
+  # own build.
   fast-test:
     name: fast-test (${{ matrix.shard }})
     needs: select
@@ -232,7 +235,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fast-test
-          save-if: ${{ matrix.shard == '1/6' }}
+          # Each shard builds only its own packages (DEC-871), so each keeps the dependency
+          # cache of its own build.
+          key: ${{ strategy.job-index }}
       - run: cargo xtask ci test-nextest
         env:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
@@ -1325,9 +1330,9 @@ jobs:
           path: target/mutant-costs/mutant-costs.json
           retention-days: 14
 
-  # DEC-688, DEC-1004, DEC-2637. The workspace API schemas' mutation sweep
+  # DEC-688, DEC-1004, DEC-2637, DEC-2649. The workspace API schemas' mutation sweep
   # (`schemas/workspace-api/mutate_schemas.py`) runs here beside `full-checks`, which stays under ten
-  # minutes (DEC-464), as ten fixed shards of about 137 mutants, about six minutes each on the
+  # minutes (DEC-464), as twenty fixed shards of about 90 mutants, about five minutes each on the
   # slowest runner; `full` needs every one. Each shard runs the three checkers on the unmutated tree
   # first; they alone also run inside `full-checks`.
   schema-mutants:
@@ -1341,7 +1346,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/10", "1/10", "2/10", "3/10", "4/10", "5/10", "6/10", "7/10", "8/10", "9/10"]
+        shard: ["0/20", "1/20", "2/20", "3/20", "4/20", "5/20", "6/20", "7/20", "8/20", "9/20", "10/20", "11/20", "12/20", "13/20", "14/20", "15/20", "16/20", "17/20", "18/20", "19/20"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
