@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -575,7 +575,7 @@ fn chart_renders() -> Result<()> {
 const CHART_TESTS_LOG: &str = "target/cell/chart-tests.log";
 
 /// The charts' invariant tests (deploy/tests/), with helm required, running as a child process.
-struct ChartTests(std::process::Child);
+struct ChartTests(Child);
 
 impl ChartTests {
     fn start() -> Result<Self> {
