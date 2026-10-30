@@ -4,7 +4,7 @@ A **path brief** in the sense of the [first live trade brief](first-live-trade.m
 stories, in lanes, that take the product from today's binaries to one managed cell. Each slice is
 one story's tests PR or implementation PR under DEC-77. Docs only: it writes no code.
 
-**Status.** This plan rests on [DEC-967](../decisions/DEC-967.md), Accepted by the founder on
+**Status.** This plan rests on [DEC-967](../decisions/earlier-900-1999.md#dec-967), Accepted by the founder on
 2026-10-17. Lanes start now; nothing is bought until the local-cell gate passes, and no lane
 touches an R0 file until R0 closes.
 
@@ -405,7 +405,7 @@ flowchart LR
 - **After R0 closes**: P5, and any queued change to the R0 files.
 - **The local-cell gate**: every C1 drill passes in CI on `main` (DEC-967 item 16), and, as this
   plan's own tightening, keeps passing for a week of merges. Then the founder buys H1 (the VMs) and H3 (R2), and S1's check against R2 itself runs
-  before anything is stored there. **If the founder confirms [DEC-990](../decisions/DEC-990.md)
+  before anything is stored there. **If the founder confirms [DEC-990](../decisions/earlier-900-1999.md#dec-990)
   item 2** (rush the hosted cell for the 2026-10-26 demo), the plan's week is dropped: H1 and H3 are
   bought when every C1 drill has first passed in CI on `main`; the cell carries paper and demo data
   only; S1's check still runs first; and B3 keeps its own conditions above. Whether cell #1 also
@@ -455,7 +455,7 @@ because live needs the standby in a second failure domain (OPS-2).
 Each is a `docs/dependencies.md` row, added in the slice that first uses it, which the founder
 approves by merging the row (the registry is founder-owned). The lane names alternatives in the
 row; these are the expected first rows. **If the founder confirms
-[DEC-990](../decisions/DEC-990.md) item 1**, these seven kinds are pre-approved: the coordinator
+[DEC-990](../decisions/earlier-900-1999.md#dec-990) item 1**, these seven kinds are pre-approved: the coordinator
 checks that each row matches its kind and merges it, and anything outside them still goes to the
 founder.
 

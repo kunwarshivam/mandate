@@ -1,7 +1,7 @@
 # Harness research loop (E19-2, E19-3)
 
-The agent harness's research loop ([DEC-996](../../../../docs/project/decisions/DEC-996.md),
-[DEC-1120](../../../../docs/project/decisions/DEC-1120.md)): a confirmed version's research agent
+The agent harness's research loop ([DEC-996](../../../../docs/project/decisions/earlier-900-1999.md#dec-996),
+[DEC-1120](../../../../docs/project/decisions/earlier-900-1999.md#dec-1120)): a confirmed version's research agent
 runs on a schedule, reads only its pinned retrieval plan, journals every item before the model reads
 it, makes one call through `mandate-gateway` (over its recorded fake unless the vault holds the
 OpenRouter key and the cell supplies a hosted transport), and its answer is checked, filled with
@@ -31,7 +31,7 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   cancellations, the call record, and a lost exchange with the model-gateway service, DEC-2397 item
   3: the run ends, the operator is alerted naming its latest record, and the pin is kept) and `crates/mandate-runtime/src/research/judge.rs` (the harness
   checks, the platform fill, admission, and the judging batch).
-  In `mandate-research-driver`, the shell's research driver ([DEC-2204](../../../../docs/project/decisions/DEC-2204.md), not yet
+  In `mandate-research-driver`, the shell's research driver ([DEC-2204](../../../../docs/project/decisions/intelligence.md#dec-2204), not yet
   wired into the run path, which waits for R0): `crates/mandate-research-driver/src/trigger.rs`
   (the per-agent trigger queue) and `crates/mandate-research-driver/src/driver.rs` (the step
   machine: commit, check, fold back, then hand on; hold on an unknown append; abandon and halt on a

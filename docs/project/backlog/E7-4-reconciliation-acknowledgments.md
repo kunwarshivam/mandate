@@ -3,7 +3,7 @@
   acknowledgment the journal admits, so that an agent held for one trades again once I have seen
   why. Today none can be lifted. The executor's fold used to clear these holds by a pre-§9.28
   `OwnerAcknowledged` with a `subject` member, but `append` has refused that shape since journal
-  spec §9.28 closed the schema. [DEC-2828](../decisions/DEC-2828.md) removed the reader, so every
+  spec §9.28 closed the schema. [DEC-2828](../decisions/trading-core.md#dec-2828) removed the reader, so every
   such hold stays: the reading that lifts nothing. *Accepted when:* the journal spec names an
   acknowledgment `subject` for each hold kind and the record each one names (as
   [DEC-2824](../decisions/DEC-2824.md)'s `subject` names a restriction); the executor judges it

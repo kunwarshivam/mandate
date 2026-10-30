@@ -68,7 +68,7 @@ flowchart TD
 | M12 Billing | Organization billing, plans, agent counts, hybrid license keys | M8 | Test organization billed correctly across plan changes |
 | M13 Hardening + release | Security review, penetration test, runbooks, terms and disclosures, soak | M10, M11, M12 | [Phase 2 release gate](07-quality-and-release.md#release-gates) passes |
 
-### Placement of the 2026-10-08 product stories ([DEC-528](decisions/DEC-528.md))
+### Placement of the 2026-10-08 product stories ([DEC-528](decisions/earlier-303-599.md#dec-528))
 
 The four stories and adoption come after the first real paper trade (DEC-502). None changes the
 work tracker's current "Next, in order". Each waits on a spec change that is not yet written, and

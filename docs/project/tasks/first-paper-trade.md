@@ -4,7 +4,7 @@ Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). One ta
 story; this brief is a **path brief** over the stories below, and each slice it lists is one
 story's tests PR or implementation PR under DEC-77. Docs only: it writes no code.
 
-The first trade is on **SPY** ([DEC-509](../decisions/DEC-509.md)), which supersedes DEC-450's
+The first trade is on **SPY** ([DEC-509](../decisions/earlier-303-599.md#dec-509)), which supersedes DEC-450's
 BTC/USD: on Alpaca's crypto feed BTC/USD's 30-day median daily dollar volume is about 127,900 USD,
 below the gate's 1,000,000 USD floor. BTC/USD follows as a mandate input once the slices in
 "BTC/USD follow-up" land.
@@ -17,9 +17,9 @@ below the gate's 1,000,000 USD floor. BTC/USD follows as a mandate input once th
   and the paper confirmation commands), E19-11 (the deployment input from the control stream). **For the BTC/USD follow-up:** E7-21 (crypto
   minute bars), E7-22 (crypto pairs in the production assembly), and E7-4's crypto protection
   ([backlog](../06-backlog-v1.md)).
-- **Acceptance criteria (verbatim, [DEC-502](../decisions/DEC-502.md) item 1):** "The first real
+- **Acceptance criteria (verbatim, [DEC-502](../decisions/earlier-303-599.md#dec-502) item 1):** "The first real
   paper trade is one order on the founder's Alpaca paper account that reaches the broker only
-  through the production cycle API ([DEC-475](../decisions/DEC-475.md)), where: the deployment
+  through the production cycle API ([DEC-475](../decisions/earlier-303-599.md#dec-475)), where: the deployment
   input is built from a **confirmed mandate version**, not a test fixture; the model output comes
   from a **pinned signal model** (mandate spec §8.1, V-007), run outside the production cycle and
   the shell, and handed to the cycle as its typed `ModelOutput`; the Alpaca paper adapter calls
@@ -289,7 +289,7 @@ E7-7's recorded tests and the existing dry run passing until E3 deletes them (DE
 | D1 | E10-16 | T, I | `mandate-cli` | `config::register` (the instrument snapshot with `etp_source`, exactly DEC-523's object) and `config::register_model` (content and hash from `mandate_modelhost::content`): stored objects and `ConfigSnapshotRegistered` v1 and v2, paper only, as library functions (DEC-526) | P0, M2 (content object), M2b (the pinned hash) | T 300–400, I 250–350 |
 | D1b | E10-16 | T, I | `mandate-cli` | The `clap` commands `config register` and `model register` over P0's `--journal` and `--store`, the source of the `Owner` they run as, and a binary test against Postgres (DEC-526 item 1) | D1 | T 150–250, I 100–200 |
 | D1c | E10-16 | T, I | `mandate-cli` | `mandate workspace open`: commits only `StreamOpened` on `ctl:{workspace}` as the vectors' `control_services` opener, paper only, refused if the stream holds any event (DEC-527 item 7) | D1b | T 100–200, I 80–150 |
-| D2a | E10-16 | T, I | `mandate-cli` | `version::create` and `version::confirm` (`cli_confirm`) with their records, as library functions; split three ways because the formatted tests for these two alone are about 350 lines ([DEC-530](../decisions/DEC-530.md)) | D1 | T 350–400, I 250–350 |
+| D2a | E10-16 | T, I | `mandate-cli` | `version::create` and `version::confirm` (`cli_confirm`) with their records, as library functions; split three ways because the formatted tests for these two alone are about 350 lines ([DEC-530](../decisions/earlier-303-599.md#dec-530)) | D1 | T 350–400, I 250–350 |
 | D2b | E10-16 | T, I | `mandate-cli` | `agent deploy` as a library function, with its record (DEC-530 item 9) | D2a | T 250–350, I 150–250 |
 | D2c | E10-16 | T, I | `mandate-cli` | The `clap` commands `version create`, `version confirm` and `agent deploy` over DEC-527's owner flags, the read-only display of a gesture's code and warnings, and a binary test against Postgres; no message names the DSN | D1b, D2b | T 200–300, I 150–250 |
 | D3 | E19-11 | T, I | `mandate-shell` | The deployment input from the control stream (DEC-505), replacing `--mandate` and `--config-dir`; the selection rule for registrations; the reader of D1's instrument snapshot (DEC-523); V-007 checked (X-7). Three tests PRs to stay under 400 lines: D3a (the confirmed version: deployment, stop, document, V-rules with the registry, DEC-505 item 3's two facts, V-002 in a second phase), D3b (the registrations: latest by `seq` with the two narrowings, every object re-hashed, the fee date) and D3c (below) | — (builds its own control-stream fixtures) | T 300–400 each, I 300–400 |
@@ -334,7 +334,7 @@ only its own commands.
 
 Only the founder runs it, with paper credentials and data keys the agents never see
 (`AGENTS.md` rule 8), except that the coordinator session may run it with the paper key and secret
-the founder placed in its environment ([DEC-2372](../decisions/DEC-2372.md)):
+the founder placed in its environment ([DEC-2372](../decisions/trading-core.md#dec-2372)):
 
 1. `mandate download` SPY daily bars covering at least max(20, `slow_periods`) sessions through
    the last completed regular session, then `mandate inspect`: zero problems, zero true gaps,

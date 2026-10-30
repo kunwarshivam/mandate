@@ -52,7 +52,7 @@ These come on top of AGENTS.md.
 7. **Never rewrite shared history.** No force-push to `main` or to a branch someone else is
    working on. On your own branch, merge `origin/main` with a merge commit rather than rebasing
    once a review has started.
-8. **`Co-authored-by` trailers are allowed on branches** ([DEC-2601](docs/project/decisions/DEC-2601.md)).
+8. **`Co-authored-by` trailers are allowed on branches** ([DEC-2601](docs/project/decisions/process.md#dec-2601)).
    The merge workflow builds `main`'s commit message from the PR description and drops them there.
 
 ## Setting up

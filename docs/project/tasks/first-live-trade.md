@@ -5,7 +5,7 @@ story; this brief is a **path brief** over the stories below, and each slice it 
 story's tests PR or implementation PR under DEC-77. Docs only: it writes no code.
 
 The founder decided on 2026-10-08 that paper trading stays on Alpaca paper
-([DEC-502](../decisions/DEC-502.md), [DEC-509](../decisions/DEC-509.md)), and that before
+([DEC-502](../decisions/earlier-303-599.md#dec-502), [DEC-509](../decisions/earlier-303-599.md#dec-509)), and that before
 **2026-11-02** they want one real-money order on their own Robinhood agentic account, through the
 same production path. They also ruled that it be built **the product way, fast**: no
 broker-specific rules in code, nothing built only for this order, every safety gate kept.
@@ -221,7 +221,7 @@ limits.
 | C4 | Robinhood | E7-6 | T, I | `mandate-robinhood` | The preflight facts and the account snapshot from `get_accounts`, `get_portfolio`, `get_equity_positions`, `get_equity_orders`, quotes and tradability, mapped to what DEC-470 item 1 checks (no position, no open order, cash, buying power); any unknown or missing field refuses (rule 3) | C2 | after C2 | T 250–350, I 200–300 |
 | K1a | Live | M7 | T, I | `mandate-cli` | The `inbox` and `grant` commands (M7's clap remainder) over the existing approval path, on P0's Postgres control journal | P0 (merged) | after D1b settles | T 200–300, I 200–300 |
 | K1b | Live | E7-11 | T, I | `mandate-cli` | `connection record`: a Robinhood `ConnectionEstablished` (scopes the allowlist, the account number by reference, the 1× attestation), and `live` accepted by `version confirm` and `agent deploy` for that connection only (DEC-529 item 3) | D2 (#708 tests in review; its implementation follows) | after D2 | T 200–300, I 150–250 |
-| G1a | Live | E7-26 | T, I | the runner (`mandate-paper`) | The connector chosen from the connection record and the environment from the confirmed mandate; the `live` feature; LT-1's build test; the lapse check: refuse unless the account is flat and the connection record is unspent (DEC-529 item 3). **Precondition ([DEC-854](../decisions/DEC-854.md)):** before deployment calls `mandate_builder::deployable` or the cycle calls `propose_on`, `mandate-alpaca`'s profile declares trading spec §5.2's crypto `limit` cells; without them an Alpaca crypto mandate is refused and an Alpaca crypto buy has no form, which breaks LT-14 | E1b, K1b, C4, O1b, X1 | after E1b | T 250–350, I 200–300 |
+| G1a | Live | E7-26 | T, I | the runner (`mandate-paper`) | The connector chosen from the connection record and the environment from the confirmed mandate; the `live` feature; LT-1's build test; the lapse check: refuse unless the account is flat and the connection record is unspent (DEC-529 item 3). **Precondition ([DEC-854](../decisions/earlier-600-899.md#dec-854)):** before deployment calls `mandate_builder::deployable` or the cycle calls `propose_on`, `mandate-alpaca`'s profile declares trading spec §5.2's crypto `limit` cells; without them an Alpaca crypto mandate is refused and an Alpaca crypto buy has no form, which breaks LT-14 | E1b, K1b, C4, O1b, X1 | after E1b | T 250–350, I 200–300 |
 | G1b | Live | E7-26 | T, I | the runner | `ask` openings wait for the grant (LT-4); the quote cross-check (DEC-529 item 12); bounded reads until LT-10; then `journal export` | G1a, K1a, B2a, B3, C3 | after G1a | T 250–350, I 200–300 |
 | R0 | — | — | run, then D | — | The founder's rehearsal and live run (below); a docs PR records the evidence | G1b, the paper path's E2, DEC-529 Accepted | — | — |
 
@@ -290,7 +290,7 @@ sees its output during the run (`AGENTS.md` rule 8).
 
 1. Build `mandate-paper` with `--features live` from a commit on `main`, and `mandate-rh-sim`.
 2. **Rehearsal (DEC-124).** Start `mandate-rh-sim`; open a live workspace on a separate journal
-   (`mandate workspace open --environment live`, [DEC-952](../decisions/DEC-952.md)); run the
+   (`mandate workspace open --environment live`, [DEC-952](../decisions/earlier-900-1999.md#dec-952)); run the
    connect check against the simulator (`mandate-paper --connect-check`, DEC-946) and record the
    connection with the id it prints; register (the fee schedule is the live Robinhood one,
    DEC-958), confirm and deploy a rehearsal mandate, every

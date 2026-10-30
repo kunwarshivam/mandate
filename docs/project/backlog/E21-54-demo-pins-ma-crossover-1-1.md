@@ -1,5 +1,5 @@
 - **E21-54 (Should, M9, debt; DR)** The cell demo's envelopes pin `quant.ma_crossover` 1.1.0, whose
-  crossover down is an exit ([DEC-2801](../decisions/DEC-2801.md) item 6), so the always-on agent
+  crossover down is an exit ([DEC-2801](../decisions/trading-core.md#dec-2801) item 6), so the always-on agent
   sells on a signal. Deferred past the 2026-10-27 demo: the cell's recording only rises, so 1.1.0
   answers `Long` as 1.0.0 does and no signal exit can fire there, while the pin moves fixtures that
   several crates test against:

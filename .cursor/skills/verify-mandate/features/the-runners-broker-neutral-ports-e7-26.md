@@ -3,7 +3,7 @@
 - **Spec:** `docs/project/tasks/first-live-trade.md` rows G1a ("the connector chosen from the
   connection record"; "the `live` feature"; "LT-1's build test"), LT-1 and LT-9 (with the risk
   table's "the runner disables core dumps at start"); `docs/project/decisions/DEC-922.md`
-  items 1 to 3; `docs/project/decisions/DEC-924.md` item 3; `docs/project/decisions/DEC-928.md`
+  items 1 to 3; `docs/project/decisions/earlier-900-1999.md#dec-924` item 3; `docs/project/decisions/earlier-900-1999.md#dec-928`
   item 2; `docs/project/decisions/DEC-937.md` (this row's choices).
 - **Code:** `mandate-paper`, `crates/mandate-paper/` (layer 9, safety-critical):
   `src/lib.rs` — `Ports` (`Session`, `connect` given the door's `Connection`, and `harden`),

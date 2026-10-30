@@ -1,6 +1,6 @@
 # New backlog rows
 
-Since [DEC-2373](../decisions/DEC-2373.md), a new backlog row, a story or a debt row, is one file
+Since [DEC-2373](../decisions/trading-core.md#dec-2373), a new backlog row, a story or a debt row, is one file
 here, not a line added to [06-backlog-v1.md](../06-backlog-v1.md). Adding a row adds a file, so
 two PRs adding rows never touch the same lines and never conflict.
 

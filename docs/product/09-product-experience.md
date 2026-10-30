@@ -5,7 +5,7 @@
 | **Owner** | Product (web stream W1) |
 | **Status** | Draft v0.1. The founder decided to start web design ahead of M9 ([DEC-134](../project/04-decision-log.md#decisions)); the product decisions in §6 were decided by the founder on 2026-09-27 ([DEC-135](../project/04-decision-log.md#decisions), [DEC-136](../project/04-decision-log.md#decisions)) |
 | **Related** | [PRD](04-prd-v1.md) · [Personas](02-personas-and-journeys.md) · [Compliance](08-compliance-and-regulatory.md) · [HLD](../HLD.md) · [Mandate spec](../specs/mandate.md) · [Trading domain spec](../specs/trading-domain.md) · [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) · [ADR-0003](../adr/0003-earned-autonomy.md) |
-| **Additions** | 2026-09-30, from [ADR-0003](../adr/0003-earned-autonomy.md): goal-first onboarding (A0, the contract card on A2), delegations on the approval screen (D6), the plan view (D12), the daily brief (D13), the chat thread (D14), autonomy settings (D15), and PX-15 to PX-18. The founder accepted [DEC-181](../project/04-decision-log.md#decisions) (delegations) and PX-15 to PX-18 ([DEC-198](../project/04-decision-log.md#decisions)) on 2026-09-30. 2026-10-08, from the founder's [DEC-528](../project/decisions/DEC-528.md): the journey from Home (signed-in, D1) with connected accounts (J-H), holdings (H1), instrument search, the instrument page and watchlists (I1 to I3), and the monitor agent (D16); all after the first paper trade |
+| **Additions** | 2026-09-30, from [ADR-0003](../adr/0003-earned-autonomy.md): goal-first onboarding (A0, the contract card on A2), delegations on the approval screen (D6), the plan view (D12), the daily brief (D13), the chat thread (D14), autonomy settings (D15), and PX-15 to PX-18. The founder accepted [DEC-181](../project/04-decision-log.md#decisions) (delegations) and PX-15 to PX-18 ([DEC-198](../project/04-decision-log.md#decisions)) on 2026-09-30. 2026-10-08, from the founder's [DEC-528](../project/decisions/earlier-303-599.md#dec-528): the journey from Home (signed-in, D1) with connected accounts (J-H), holdings (H1), instrument search, the instrument page and watchlists (I1 to I3), and the monitor agent (D16); all after the first paper trade |
 
 This brief records the product-experience decisions that the designs and, later, the web code are
 built from: the principles that settle trade-offs, the journeys, every screen with its states, the
@@ -223,7 +223,7 @@ Policies that only tighten [X1], members and roles [X2], notification channels, 
 and quiet hours [X3], deployment health [X4], billing [X5], and disclosures [X6].
 
 **J-H. Home, finding an instrument, and asking an agent** (Jordan, Alex;
-[DEC-528](../project/decisions/DEC-528.md), after the first paper trade). "Home" here is the
+[DEC-528](../project/decisions/earlier-303-599.md#dec-528), after the first paper trade). "Home" here is the
 signed-in Home (D1); the landing page stays the public site (DEC-212, DEC-213).
 
 1. **Arrive** [D1, H1]. The owner signs in with one or more connected accounts. Home (signed-in, D1)
@@ -397,7 +397,7 @@ exists.
   only as description text. For a new agent (DEC-477), A2 and A5 are one summary card in the
   conversation: every value in compact form, each drafted one marked *proposed* or *default*.
 - *Primary action:* Under the card, three steps, each recorded on its own and each offered only once
-  the one before it is recorded (DEC-477, [DEC-2401](../project/decisions/DEC-2401.md)): create the
+  the one before it is recorded (DEC-477, [DEC-2401](../project/decisions/web.md#dec-2401)): create the
   version, confirm it with a passkey (A5), and deploy it to paper with a passkey (B3). Saying a change
   before the confirmation shows a new card, and the earlier one can no longer be set up.
 - *States:* Loading (the compiler is a model call): "Reading your message…", and no second message

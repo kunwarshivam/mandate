@@ -266,7 +266,7 @@ These steps are for the hosted staging cell (DigitalOcean, `api-staging.owlhead.
 host above. The same rule holds: never paste a secret, a token or an address into chat, an issue,
 a commit or a command line.
 
-## H. The Alpaca paper OAuth app ([DEC-2636](../docs/project/decisions/DEC-2636.md))
+## H. The Alpaca paper OAuth app ([DEC-2636](../docs/project/decisions/process.md#dec-2636))
 
 The web connect sends an Alpaca user through Alpaca's own consent page, and staging's token
 exchange redeems the code. That needs an OAuth app registered by you, for paper.
@@ -402,7 +402,7 @@ again. A Job that fails leaves the challenge unconfirmed and adds nothing; the c
 its own. The code is short-lived, but it is still not for chat or an
 issue.
 
-## K. The OpenRouter key, for research with a real model ([DEC-997](../docs/project/decisions/DEC-997.md), [DEC-2116](../docs/project/decisions/DEC-2116.md), [DEC-2396](../docs/project/decisions/DEC-2396.md))
+## K. The OpenRouter key, for research with a real model ([DEC-997](../docs/project/decisions/DEC-997.md), [DEC-2116](../docs/project/decisions/workspace.md#dec-2116), [DEC-2396](../docs/project/decisions/DEC-2396.md))
 
 Research calls a real model only through staging's model-gateway service, which reads the
 OpenRouter key once from the vault, at `platform/model-provider-key`, and from nowhere else
@@ -435,7 +435,7 @@ nothing until IAC runs the gate, which costs at most $7.56 for both models.
    call then ends `credential_invalid`, the safe default, with no output, so no proposal and no
    order.
 
-## L. Does Alpaca's free data plan carry halts? (trading spec §4.4, [DEC-2380](../docs/project/decisions/DEC-2380.md) item 2)
+## L. Does Alpaca's free data plan carry halts? (trading spec §4.4, [DEC-2380](../docs/project/decisions/trading-core.md#dec-2380) item 2)
 
 The executor's binding gate holds every Alpaca paper opening while the instrument's halt status is
 unread (`crates/mandate-executord/src/gate.rs`, `DeployedGate::input`): no halt is ever assumed
@@ -504,7 +504,7 @@ on without it.
    every fetch then fails with no item, so research goes on without news, and no order depends on
    it.
 
-## N. Staging's research agent ([DEC-2081](../docs/project/decisions/DEC-2081.md), [DEC-2282](../docs/project/decisions/DEC-2282.md))
+## N. Staging's research agent ([DEC-2081](../docs/project/decisions/infrastructure.md#dec-2081), [DEC-2282](../docs/project/decisions/DEC-2282.md))
 
 Staging's model gateway serves the hosted workspace, so the research agent runs there, on your
 existing paper connection (section H). A second workspace for it, as the local cell's demo has,
@@ -524,7 +524,7 @@ waits on backlog E21-54h.
    call is answered `policy_denied` and nothing is spent. The agent holds no position it did not
    already have.
 
-## O. One staging apply for the data process and the model gateway ([DEC-2081](../docs/project/decisions/DEC-2081.md), [DEC-2082](../docs/project/decisions/DEC-2082.md))
+## O. One staging apply for the data process and the model gateway ([DEC-2081](../docs/project/decisions/infrastructure.md#dec-2081), [DEC-2082](../docs/project/decisions/infrastructure.md#dec-2082))
 
 One `apply` writes both keys to the staging vault. Neither process is promoted until it has, since
 each stops at start without its key and would hold the whole workspace release unready. This apply
@@ -576,7 +576,7 @@ that is missing.
 research goes on without fresh bars and no order depends on it.
 
 
-## P. Pointing app.owlhead.ai at staging ([DEC-975](../docs/project/decisions/DEC-975.md), [DEC-2108](../docs/project/decisions/DEC-2108.md))
+## P. Pointing app.owlhead.ai at staging ([DEC-975](../docs/project/decisions/earlier-900-1999.md#dec-975), [DEC-2108](../docs/project/decisions/DEC-2108.md))
 
 Until now the deployed web app has shown the fixtures. These steps make it read and command
 staging's workspace instead, so app.owlhead.ai shows only what staging reports. They spend nothing

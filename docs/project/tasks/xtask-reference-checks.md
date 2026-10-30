@@ -16,7 +16,7 @@ Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). Claim
 - **PRD / HLD / spec anchors:** ADR-0001 ES-10 (the frozen reference implementations and their
   pinned environment), ES-12 (every CI job is one `cargo xtask ci <job>`), ES-22 (protected
   paths); the quality and release process ([07](../07-quality-and-release.md)).
-- **Decisions that apply:** DEC-79, DEC-464 and DEC-473. Taken here: [DEC-493](../decisions/DEC-493.md).
+- **Decisions that apply:** DEC-79, DEC-464 and DEC-473. Taken here: [DEC-493](../decisions/earlier-303-599.md#dec-493).
 
 ## Scope
 
