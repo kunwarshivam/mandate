@@ -26,9 +26,9 @@ use crate::backtests::paper;
 use crate::commands::Command;
 use crate::http::{App, invalid, problem, problem_body};
 use crate::reads::{Deployment, deployed};
-use crate::routes::{Refused, Unreadable, authorized, path_refused};
+use crate::routes::{Reader, Refused, Unreadable, authorized, path_refused};
 use crate::versions::stored;
-use crate::writes::{asset_text, committed, decimal_text, strictly};
+use crate::writes::{Gate, asset_text, committed, committed_caused, decimal_text, strictly};
 
 /// The route: §3.3's checks and the strict body, the "Make an owner request" row for a user, then
 /// the agent, the environment, the side, the size, and the instrument, in item 13's order.
@@ -81,7 +81,29 @@ pub async fn owner_request(
     let Some(instrument) = asset_text(&request.instrument) else {
         return invalid(vec![violation("/instrument", "asset")]);
     };
-    match pins(&app, &deployment, &instrument) {
+    submit(
+        &app,
+        &gate,
+        &reader,
+        (deployment, instrument, quantity),
+        None,
+    )
+    .await
+}
+
+/// Item 13's last check and the commit, which the chat's *Confirm an order* shares (workspace API
+/// §4.6.2, [DEC-2859] item 8): the instrument must be one the deployed mandate pins, and the
+/// `OwnerRequestSubmitted` names `cause` as its `causation_id` when there is one.
+///
+/// [DEC-2859]: ../../../docs/project/decisions/DEC-2859.md
+pub(crate) async fn submit(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    (deployment, instrument, quantity): (Deployment, String, String),
+    cause: Option<&str>,
+) -> Response {
+    match pins(app, &deployment, &instrument) {
         Some(true) => {}
         Some(false) => return invalid(vec![violation("/instrument", "not_pinned")]),
         None => return Refused::JournalUnavailable.response(),
@@ -91,11 +113,17 @@ pub async fn owner_request(
         instrument,
         quantity,
     };
-    committed(&app, &gate, &reader, &command, &[], None).await
+    match cause {
+        Some(cause) => committed_caused(app, gate, reader, &command, cause).await,
+        None => committed(app, gate, reader, &command, &[], None).await,
+    }
 }
 
 /// The agent's deployment, when an `AgentDeployed` names it and no `AgentStopped` follows.
-fn live_deployment(control: &[mandate_journal::StoredEvent], agent: &str) -> Option<Deployment> {
+pub(crate) fn live_deployment(
+    control: &[mandate_journal::StoredEvent],
+    agent: &str,
+) -> Option<Deployment> {
     deployed(control)
         .into_iter()
         .find(|deployment| deployment.0 == agent && !deployment.4)
@@ -103,7 +131,7 @@ fn live_deployment(control: &[mandate_journal::StoredEvent], agent: &str) -> Opt
 
 /// Whether a canonical decimal is greater than zero: canonical text writes zero as `0` and a
 /// negative value with a leading `-`.
-fn positive(canonical: &str) -> bool {
+pub(crate) fn positive(canonical: &str) -> bool {
     !canonical.starts_with('-') && canonical != "0"
 }
 

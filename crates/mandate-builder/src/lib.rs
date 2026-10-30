@@ -53,7 +53,7 @@ mod opening;
 
 pub use autonomy::{
     ActionContext, ApprovalRequest, Classification, DecidedBy, GateVerdict, Outcome, RequestedBy,
-    classify, decide,
+    classify, decide, held_for_review, owner_request,
 };
 pub use builder::{
     AccountSnapshot, AccumulateGoal, Action, BuilderMandate, Clip, Combined, Direction, GoalKind,

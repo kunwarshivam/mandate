@@ -39,7 +39,29 @@ export type Card =
   | { kind: "approval"; approval_id: string; side: string; symbol: string; qty: string; limit: string | null }
   | { kind: "proposal"; side: string; symbol: string; qty: string | null; reason: string }
   | { kind: "confirm_mandate"; version: string; name: string | null; lines: { label: string; value: string }[] }
+  | ConfirmOrderCard
   | { kind: "unknown" };
+
+/**
+ * The owner's buy the chat prepared and did not send (`confirm_order`, DEC-2859): the instrument, the
+ * quantity the owner asked for, the last trusted close and the estimate at it, or `null` when no
+ * close is served, and the server's note. Only the owner's tap on it submits the request.
+ */
+export interface ConfirmOrderCard {
+  kind: "confirm_order";
+  card_id: string;
+  symbol: string;
+  instrument_id: string;
+  qty: string;
+  reference_price: string | null;
+  estimated_cost_usd: string | null;
+  note: string;
+}
+
+/** What the owner's tap on a `confirm_order` card came to: the owner request it recorded. */
+export interface Confirmed {
+  command_id: string;
+}
 
 /** A thread as read: its messages after the cursor asked for, whether a run is in flight, and the next cursor. */
 export interface ThreadRead {
@@ -100,6 +122,8 @@ export interface ChatPort {
   models: () => Promise<Answer<ChatModel[]>>;
   settings: (agentId: string) => Promise<Answer<ChatSettings>>;
   saveSettings: (agentId: string, settings: { chat_model: string; daily_cap_usd: string }) => Promise<Answer<ChatSettings>>;
+  /** The owner's tap on the `confirm_order` card of `messageId` (§4.6.2's *Confirm an order*). */
+  confirmOrder: (agentId: string, messageId: string) => Promise<Answer<Confirmed>>;
 }
 
 /** The longest message the server takes, in characters (§4.6.2). */
@@ -128,6 +152,22 @@ export function cardOf(value: unknown): Card | null {
     }
     case "proposal":
       return { kind: "proposal", side: text(value, "side"), symbol: text(value, "symbol"), qty: optional(value, "qty"), reason: text(value, "reason") };
+    case "confirm_order": {
+      const id = optional(value, "card_id");
+      const instrument = optional(value, "instrument_id");
+      const qty = optional(value, "qty");
+      if (id === null || instrument === null || qty === null || value.side !== "buy") return { kind: "unknown" };
+      return {
+        kind: "confirm_order",
+        card_id: id,
+        symbol: text(value, "symbol"),
+        instrument_id: instrument,
+        qty,
+        reference_price: optional(value, "reference_price"),
+        estimated_cost_usd: optional(value, "estimated_cost_usd"),
+        note: text(value, "note"),
+      };
+    }
     case "confirm_mandate": {
       const version = optional(value, "version");
       if (version === null) return { kind: "unknown" };
@@ -211,6 +251,8 @@ export const settingsRead = object<ChatSettings>({ chat_model: nullable(string),
 
 const sentRead = object<Sent>({ message_id: string, run_id: string, setup_id: nullable(string) });
 
+const confirmedRead = object<Confirmed>({ command_id: string });
+
 /** The route of `target`'s thread under the workspace. */
 export function threadRoute(target: ChatTarget): `/${string}` {
   if ("agent" in target) return `/agents/${encodeURIComponent(target.agent)}/messages`;
@@ -279,5 +321,6 @@ export function apiChat(client: WorkspaceClient, fetch: Fetch, baseUrl: string):
     },
     settings: (agentId) => read(`/agents/${encodeURIComponent(agentId)}/settings`, settingsRead),
     saveSettings: (agentId, settings) => write("PUT", `/agents/${encodeURIComponent(agentId)}/settings`, settings, settingsRead),
+    confirmOrder: (agentId, messageId) => write("POST", `/agents/${encodeURIComponent(agentId)}/messages/${encodeURIComponent(messageId)}/confirm`, {}, confirmedRead),
   };
 }

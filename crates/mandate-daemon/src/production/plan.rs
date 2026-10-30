@@ -109,6 +109,32 @@ impl OrderPlan for Plan {
         }
         self.classify_opening(view, proposal)
     }
+
+    /// Mandate spec §6.2 step 5d's reviewers (DEC-2859) over the same facts [`Plan::classified`]
+    /// classifies the request on. A proposal for an instrument the mandate does not pin, or one
+    /// whose facts do not build, is held, so an ASK on it never runs unasked (`AGENTS.md` rule 3).
+    ///
+    /// The plan validates its mandate at the risk day of the facts, with one approver user and no
+    /// previous version, so a validated mandate can have neither a review date already past (V-046)
+    /// nor a two-approver threshold (V-024), and a pinned request is never an admission: on today's
+    /// facts the answer for a pinned request is `false`. The judgement is the builder's all the
+    /// same, so a validation context that admits a reviewer is held by it.
+    fn held_for_review(&self, _view: &MandateView, proposal: &Proposal) -> bool {
+        self.mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .find(|pinned| pinned.asset_id.as_str() == proposal.instrument.as_str())
+            .and_then(|pinned| {
+                let (validated, action) = self.action_for(Opened::pinned(pinned), proposal)?;
+                mandate_builder::held_for_review(
+                    mandate_builder::autonomy_policy(&validated),
+                    &action,
+                )
+                .ok()
+            })
+            .unwrap_or(true)
+    }
     /// An owner's or a client's request (DEC-2858) for the deployment's own pinned asset, clipped
     /// by the order builder over the same journaled facts an opening is sized on, so only while the
     /// agent is flat with nothing working and the session admits an opening. `None` for any other
@@ -333,7 +359,14 @@ impl Plan {
 }
 
 impl Plan {
-    fn classified(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<Classified> {
+    /// The validated mandate and the §6.3 facts `proposal` presents: an owner's or a client's
+    /// request, which carries no score, on the agent's held position, and the builder's own
+    /// opening on a flat one.
+    fn action_for(
+        &self,
+        opened: Opened<'_>,
+        proposal: &Proposal,
+    ) -> Option<(ValidatedMandate, mandate_builder::ActionContext)> {
         let score = match &proposal.combined_score {
             Value::Null => None,
             Value::Str(score) => Some(Unit::parse(score).ok()?),
@@ -356,6 +389,11 @@ impl Plan {
             action.combined_score = None;
             action.requested_by = RequestedBy::Owner;
         }
+        Some((validated, action))
+    }
+
+    fn classified(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<Classified> {
+        let (validated, action) = self.action_for(opened, proposal)?;
         let classified = mandate_ports::classify(&validated, &action, proposal, false).ok()?;
         if proposal.purpose.adds_risk() && denies_on_an_unseen_fact(&self.mandate) {
             return Some(Classified {

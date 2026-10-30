@@ -3,10 +3,10 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { Card } from "@/api/chat";
+import type { Card, ConfirmOrderCard } from "@/api/chat";
 import { confirmStepUpDigest } from "@/api/confirm";
-import { KEY } from "@/components/kumo/key";
-import { price, quantity } from "@/lib/format";
+import { DECISION_KEY, KEY } from "@/components/kumo/key";
+import { price, quantity, usd } from "@/lib/format";
 import { type SetUp, type SetUpStep, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
@@ -108,8 +108,64 @@ export function ConfirmCard({ card }: { card: Extract<Card, { kind: "confirm_man
   );
 }
 
+/** Where a tap on the order card stands: nothing yet, sent, recorded, refused, or dismissed here. */
+type Tap = { phase: "idle" } | { phase: "sending" } | { phase: "confirmed" } | { phase: "refused"; reason: string; unknown: boolean } | { phase: "dismissed" };
+
+/**
+ * The owner's buy the chat prepared and did not send (`confirm_order`, DEC-2859): what would be
+ * placed, and nothing placed until the owner taps Confirm, which submits the owner request under
+ * their own session. The server reads the order from its own card and derives the request's id from
+ * it, so a second tap submits nothing more. Dismiss only hides the buttons here; nothing was sent.
+ * A refusal says why, and an answer that was lost is never shown as sent (API-13).
+ */
+export function ConfirmOrderView({ card, agentId, messageId }: { card: ConfirmOrderCard; agentId: string | null; messageId: string }) {
+  const { chat } = useRuntime();
+  const [tap, setTap] = useState<Tap>({ phase: "idle" });
+  const confirm = () => {
+    if (agentId === null || tap.phase === "sending" || tap.phase === "confirmed") return;
+    setTap({ phase: "sending" });
+    void chat.confirmOrder(agentId, messageId).then((answer) => setTap(answer.ok ? { phase: "confirmed" } : { phase: "refused", reason: answer.reason, unknown: answer.effect === "unknown" }));
+  };
+  const open = tap.phase === "idle" || (tap.phase === "refused" && tap.unknown);
+  return (
+    <Shell kind="confirm_order" title="Confirm your order">
+      <p className="tabular">
+        Buy {quantity(card.qty)} {card.symbol}
+      </p>
+      <dl className="grid gap-1">
+        <div className="flex flex-wrap justify-between gap-x-4">
+          <dt className="text-sm text-muted-foreground">Reference price</dt>
+          <dd className="text-sm tabular">{card.reference_price ? `${price(card.reference_price)}, last daily close` : "No trusted price yet"}</dd>
+        </div>
+        <div className="flex flex-wrap justify-between gap-x-4">
+          <dt className="text-sm text-muted-foreground">Estimated cost</dt>
+          <dd className="text-sm tabular">{card.estimated_cost_usd ? usd(card.estimated_cost_usd) : "Not known yet"}</dd>
+        </div>
+      </dl>
+      {card.note ? <p className="text-caption text-muted-foreground">{card.note}</p> : null}
+      {open && agentId !== null ? (
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" className={DECISION_KEY} onClick={confirm}>
+            Confirm
+          </button>
+          <button type="button" className={DECISION_KEY} onClick={() => setTap({ phase: "dismissed" })}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+      <p role="status" aria-live="polite" className="text-sm">
+        {tap.phase === "sending" ? "Sending your order." : null}
+        {tap.phase === "confirmed" ? "Confirmed. The platform sizes, checks and places it; watch for the order card." : null}
+        {tap.phase === "refused" && !tap.unknown ? `Refused: ${tap.reason.replaceAll("_", " ")}. Nothing was placed.` : null}
+        {tap.phase === "refused" && tap.unknown ? "Your deployment has not said whether it took this. Confirming again sends it at most once." : null}
+        {tap.phase === "dismissed" ? "Dismissed. Nothing was sent." : null}
+      </p>
+    </Shell>
+  );
+}
+
 /** One card, from the server's typed data; a kind this page does not know shows nothing. */
-export function CardView({ card }: { card: Card }) {
+export function CardView({ card, agentId = null, messageId = "" }: { card: Card; agentId?: string | null; messageId?: string }) {
   switch (card.kind) {
     case "fill":
       return (
@@ -144,6 +200,8 @@ export function CardView({ card }: { card: Card }) {
       );
     case "confirm_mandate":
       return <ConfirmCard card={card} />;
+    case "confirm_order":
+      return <ConfirmOrderView card={card} agentId={agentId} messageId={messageId} />;
     default:
       return null;
   }

@@ -33,8 +33,8 @@ use mandate_time::UtcNanos;
 
 use crate::backtests::paper;
 use crate::commands::{
-    Command, Event, Issued, KillScope, Settled, Writer, caused_envelope, draft, in_workspace,
-    release_warning, same, settle_batch_at,
+    Command, Event, Issued, KillScope, Settled, Writer, caused_draft, caused_envelope, draft,
+    in_workspace, release_warning, same, settle_batch_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::reads::{deferrals_agree, deployed};
@@ -214,7 +214,18 @@ pub(crate) async fn committed(
     dropped: &[String],
     status: Option<&str>,
 ) -> Response {
-    commit_with(app, gate, reader, command, (dropped, status), None).await
+    commit_with(app, gate, reader, command, (dropped, status), None, None).await
+}
+
+/// [`committed`] with `causation_id` the event `cause` names ([`caused_draft`]).
+pub(crate) async fn committed_caused(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    command: &Command,
+    cause: &str,
+) -> Response {
+    commit_with(app, gate, reader, command, (&[], None), None, Some(cause)).await
 }
 
 /// [`committed`] for a command a passkey step-up authorized: its `StepUpAsserted`, under §3.4's id
@@ -228,7 +239,7 @@ pub(crate) async fn committed_asserted(
     command: &Command,
     asserted: Option<(&Asserted, &'static str)>,
 ) -> Response {
-    commit_with(app, gate, reader, command, (&[], None), asserted).await
+    commit_with(app, gate, reader, command, (&[], None), asserted, None).await
 }
 
 /// The record [`committed`] and [`committed_asserted`] share.
@@ -239,6 +250,7 @@ async fn commit_with(
     command: &Command,
     (dropped, status): (&[String], Option<&str>),
     asserted: Option<(&Asserted, &'static str)>,
+    cause: Option<&str>,
 ) -> Response {
     let Some(environment) = reader.control.first().map(|row| row.environment.as_str()) else {
         return Refused::NotFound.response();
@@ -257,7 +269,7 @@ async fn commit_with(
         now: gate.now,
         command,
     };
-    let Some(bytes) = draft(&issued) else {
+    let Some(bytes) = caused_draft(&issued, cause) else {
         return Refused::JournalUnavailable.response();
     };
     let alert = match command {

@@ -35,6 +35,12 @@ describe("the chat's cards are the server's typed data (DEC-2293)", () => {
     expect(cardOf({ kind: "approval", order: {} })).toEqual({ kind: "unknown" });
     expect(cardOf({ kind: "proposal", side: "buy", symbol: "NVDA", qty: null, reason: "Momentum" })).toEqual({ kind: "proposal", side: "buy", symbol: "NVDA", qty: null, reason: "Momentum" });
     expect(cardOf({ kind: "brief", date: "2026-10-29" })).toEqual({ kind: "unknown" });
+    const order = { kind: "confirm_order", card_id: "01JC", symbol: "AAPL", instrument_id: "b0b6", side: "buy", qty: "2", reference_price: "190.5", estimated_cost_usd: "381", note: "Nothing is placed until you confirm." };
+    expect(cardOf(order)).toEqual({ kind: "confirm_order", card_id: "01JC", symbol: "AAPL", instrument_id: "b0b6", qty: "2", reference_price: "190.5", estimated_cost_usd: "381", note: "Nothing is placed until you confirm." });
+    expect(cardOf({ ...order, reference_price: null, estimated_cost_usd: null })).toMatchObject({ kind: "confirm_order", reference_price: null, estimated_cost_usd: null });
+    expect(cardOf({ ...order, card_id: null })).toEqual({ kind: "unknown" });
+    expect(cardOf({ ...order, qty: undefined })).toEqual({ kind: "unknown" });
+    expect(cardOf({ ...order, side: "sell" })).toEqual({ kind: "unknown" });
     expect(cardOf("a model's words")).toEqual({ kind: "unknown" });
   });
 
@@ -97,6 +103,16 @@ describe("the chat's routes (§4.6.2)", () => {
     const saved = await chat.saveSettings(AGENT_IDS.swing, { chat_model: "llm.chat_haiku", daily_cap_usd: "2.50" });
     expect(saved).toEqual({ ok: true, value: { chat_model: "llm.chat_haiku", daily_cap_usd: "2.50" } });
     expect(await chat.settings(AGENT_IDS.swing)).toEqual({ ok: true, value: { chat_model: "llm.chat_haiku", daily_cap_usd: "2.50" } });
+  });
+
+  it("confirms an order card as a browser command on the card's own route (DEC-2859)", async () => {
+    const { chat, calls } = chatOver();
+    const confirmed = await chat.confirmOrder(AGENT_IDS.swing, "01JCARD");
+    expect(confirmed).toEqual({ ok: true, value: { command_id: "fx_request_01JCARD" } });
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.path).toBe(`/agents/${AGENT_IDS.swing}/messages/01JCARD/confirm`);
+    expect(post.headers["X-Mandate-Request"]).toBe("1");
+    expect(post.headers["Idempotency-Key"]).toMatch(/^[A-Za-z0-9_-]{32}$/);
   });
 
   it("calls a lost answer to a send unknown, never sent or not", async () => {

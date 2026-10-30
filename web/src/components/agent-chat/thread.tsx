@@ -45,7 +45,7 @@ function Sources({ sources }: { sources: Source[] }) {
 }
 
 /** The agent's message: its words as quoted text (links only to `https:`), then its card, then its sources. */
-function AgentSaid({ message }: { message: ChatMessage }) {
+function AgentSaid({ message, agentId }: { message: ChatMessage; agentId: string | null }) {
   return (
     <div data-slot="agent-message" data-proactive={message.proactive || undefined} className="grid max-w-[min(90%,44rem)] min-w-0 justify-items-start gap-1.5">
       <p className="px-1 text-caption text-muted-foreground">
@@ -58,7 +58,7 @@ function AgentSaid({ message }: { message: ChatMessage }) {
           <Markdown text={message.text} links="show" />
         </div>
       ) : null}
-      {message.card ? <CardView card={message.card} /> : null}
+      {message.card ? <CardView card={message.card} agentId={agentId} messageId={message.id} /> : null}
       <Sources sources={message.sources} />
     </div>
   );
@@ -96,7 +96,7 @@ export function ChatThread({
       <div ref={scroller} data-slot="thread-scroll" className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div ref={content} role="log" aria-live="polite" aria-label={label} className={cn("grid grid-cols-[minmax(0,1fr)] gap-4 pt-4 pb-3 lg:gap-5 lg:pt-6 lg:pb-4", THREAD_X)} data-slot="thread">
           {thread.loaded && thread.messages.length === 0 ? <div className="text-muted-foreground">{empty}</div> : null}
-          {thread.messages.map((m) => (m.from === "owner" ? <OwnerSaid key={m.id} text={m.text ?? ""} /> : <AgentSaid key={m.id} message={m} />))}
+          {thread.messages.map((m) => (m.from === "owner" ? <OwnerSaid key={m.id} text={m.text ?? ""} /> : <AgentSaid key={m.id} message={m} agentId={"agent" in target ? target.agent : null} />))}
           {thread.running ? (
             <p className="px-1 text-sm text-muted-foreground" data-slot="agent-working">
               Working on it…

@@ -194,3 +194,55 @@ fn every_batch_is_judged_as_rule_319_says() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert!(cases.len() >= 8, "{} batches; never fewer", cases.len());
 }
+
+/// One `{path, value}` change to a text member, as the vectors write them.
+fn set_text(path: &str, value: &str) -> Value {
+    parse(format!(r#"{{"path":"{path}","value":"{value}"}}"#).as_bytes()).unwrap()
+}
+
+/// Journal spec v0.119 rule 5 (DEC-2859): an owner's own opening a reviewer holds is asked, under
+/// the label of what asked, so the record admits an owner's `ask` whatever asked it, the review
+/// ceiling's included; only the `owner_request` label stays an owner's own `auto` opening's, and
+/// `review_ceiling` names only an `ask`.
+#[test]
+fn an_owners_opening_may_be_asked_but_never_under_the_owners_label() {
+    let fixture = fixture();
+    let section = section(&fixture);
+    let owners = || {
+        object(
+            section
+                .get("decisions")
+                .and_then(|d| d.get("owner_auto"))
+                .unwrap(),
+        )
+    };
+    for by in [
+        "rule:large_orders",
+        "default",
+        "review_ceiling",
+        "admission_ceiling",
+        "policy_overlay",
+    ] {
+        let mut asked = owners();
+        apply(&mut asked, &set_text("payload.autonomy", "ask"));
+        apply(&mut asked, &set_text("payload.decided_by", by));
+        assert_eq!(judged(&asked), None, "an owner's opening asked by {by}");
+    }
+    let mut labelled = owners();
+    apply(&mut labelled, &set_text("payload.autonomy", "ask"));
+    assert_eq!(
+        judged(&labelled),
+        Some(("schema", "payload.decided_by".to_owned())),
+        "an owner's ask never claims the owner's own confirmation"
+    );
+    let mut unasked = owners();
+    apply(
+        &mut unasked,
+        &set_text("payload.decided_by", "review_ceiling"),
+    );
+    assert_eq!(
+        judged(&unasked),
+        Some(("schema", "payload.decided_by".to_owned())),
+        "rule 5: the review ceiling names only an ask"
+    );
+}
