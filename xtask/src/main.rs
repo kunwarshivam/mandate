@@ -252,7 +252,8 @@ const NIGHTLY_FUZZ_SEEDS: u32 = 10;
 /// xtask ci nightly-mutants`, which hands it to `reference/mandate/mutants.py --shard` (DEC-2638).
 const REFERENCE_SHARD_ENV: &str = "MANDATE_REFERENCE_SHARD";
 /// The `K/N` partition, counted from 1, CI's `fast-test` matrix passes to `cargo xtask ci
-/// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
+/// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871):
+/// the shard tests only the packages [`package_shard`] gives it.
 /// `cargo xtask ci test` ignores it and runs every test.
 const TEST_PARTITION_ENV: &str = "MANDATE_TEST_PARTITION";
 /// Set, `ci test-nextest` keeps running after a failing test and reports every failure: what
@@ -660,7 +661,23 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
                 eprintln!("    test-nextest: no crate affected (DEC-1190)");
                 return Ok(());
             }
-            let mut args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
+            let scoped = scoped_packages(&selected);
+            let shard = match partition {
+                Some(partition) => {
+                    let (k, n) = partition_of(partition)?;
+                    let meta = metadata()?;
+                    let weighed = test_targets(&meta, scoped.as_deref());
+                    let shard = package_shard(&weighed, k, n);
+                    if shard.is_empty() {
+                        eprintln!("    test-nextest: shard {k}/{n} holds no package (DEC-871)");
+                        return Ok(());
+                    }
+                    eprintln!("    test-nextest: shard {k}/{n} tests {}", shard.join(", "));
+                    Some(shard)
+                }
+                None => scoped,
+            };
+            let mut args = nextest_args(shard.as_deref())?;
             if env::var_os(NO_FAIL_FAST_ENV).is_some() {
                 args.push("--no-fail-fast".to_owned());
             }
@@ -811,11 +828,6 @@ const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cl
 /// (DEC-2325).
 const NEXTEST_CONFIG: &str = "xtask/nextest.toml";
 
-/// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
-/// there are none to scope it to (DEC-1190): every test of them or, with `partition` (`K/N`, `1
-/// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
-/// test once (DEC-871). Every run reads [`NEXTEST_CONFIG`], so its longest tests start first
-/// (DEC-2325).
 /// Narrows a nextest run to the tests `filter` selects (DEC-2644): land-check's one more run of a
 /// test that failed as root, over the same packages, build and environment as the run it failed
 /// in. Exactly the filtered tests, or it fails: a filter that selects none is no pass.
@@ -854,7 +866,11 @@ fn filtered(args: &mut Vec<String>, filter: &str) {
     args.extend(["-E".to_owned(), filter.to_owned()]);
 }
 
-fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
+/// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
+/// there are none to scope it to (DEC-1190). A CI shard passes its own packages
+/// ([`package_shard`]), so it builds only their tests. Every run reads [`NEXTEST_CONFIG`], so its
+/// longest tests start first (DEC-2325).
+fn nextest_args(packages: Option<&[String]>) -> Result<Vec<String>> {
     let config = repo_root()?.join(NEXTEST_CONFIG);
     let mut args: Vec<String> = ["nextest", "run", "--config-file"]
         .map(String::from)
@@ -869,11 +885,44 @@ fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<
         }
     }
     args.extend(["--locked", "--no-tests=pass"].map(String::from));
-    if let Some(partition) = partition {
-        let (k, n) = partition_of(partition)?;
-        args.push(format!("--partition=count:{k}/{n}"));
-    }
     Ok(args)
+}
+
+/// Each workspace package of `among` (every workspace package when it is `None`) with the number
+/// of its targets whose tests nextest builds by default, the weight [`package_shard`] balances.
+fn test_targets(meta: &Metadata, among: Option<&[String]>) -> Vec<(String, usize)> {
+    workspace_packages(meta)
+        .into_iter()
+        .filter(|package| among.is_none_or(|among| among.contains(&package.name)))
+        .map(|package| {
+            let tested = package.targets.iter().filter(|target| target.test).count();
+            (package.name.clone(), tested)
+        })
+        .collect()
+}
+
+/// The packages of shard `k` of `n` (counted from 1), sorted: the heaviest package first, each to
+/// the lightest shard so far, ties to the lower shard, so every package is in exactly one shard
+/// and no shard outweighs another by more than its heaviest package. A shard then builds only its
+/// own packages' tests, where nextest's counted partition built every shard the whole workspace's
+/// (DEC-871: six shards each spent six of their ten minutes compiling 842 test targets).
+fn package_shard(weighed: &[(String, usize)], k: u32, n: u32) -> Vec<String> {
+    let mut order: Vec<&(String, usize)> = weighed.iter().collect();
+    order.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut shards: Vec<(usize, Vec<String>)> = (0..n).map(|_| (0, Vec::new())).collect();
+    for (name, weight) in order {
+        if let Some(lightest) = shards.iter_mut().min_by_key(|shard| shard.0) {
+            lightest.0 = lightest.0.saturating_add(*weight);
+            lightest.1.push(name.clone());
+        }
+    }
+    let mut mine = usize::try_from(k.saturating_sub(1))
+        .ok()
+        .and_then(|index| shards.get(index))
+        .map(|shard| shard.1.clone())
+        .unwrap_or_default();
+    mine.sort();
+    mine
 }
 
 /// A test part's shard, [`TEST_PARTITION_ENV`]'s `K/N`: plain decimals with no leading zero,
@@ -5001,6 +5050,9 @@ fn keeps_defaults() -> bool {
 #[derive(Deserialize)]
 struct Target {
     kind: Vec<String>,
+    /// Whether `cargo test`, and so nextest, builds this target's tests by default.
+    #[serde(default)]
+    test: bool,
 }
 
 fn metadata() -> Result<Metadata> {
@@ -14977,7 +15029,7 @@ mod tests {
     /// A filtered nextest run runs exactly the filtered tests, and fails when they select none.
     #[test]
     fn a_filtered_nextest_run_refuses_to_select_nothing() -> Result<()> {
-        let mut args = super::nextest_args(None, Some(&["fx".to_owned()]))?;
+        let mut args = super::nextest_args(Some(&["fx".to_owned()]))?;
         filtered(&mut args, "test(=t)");
         assert!(args.iter().any(|arg| arg == "--no-tests=fail"));
         assert!(!args.iter().any(|arg| arg == "--no-tests=pass"));
@@ -19453,9 +19505,8 @@ mod tests {
         assert_eq!(shards, expected, "the partitions are 1/N to N/N, each once");
         for shard in &shards {
             assert!(
-                super::nextest_args(Some(shard), None)?
-                    .contains(&format!("--partition=count:{shard}")),
-                "{shard} is a partition nextest takes"
+                super::partition_of(shard).is_ok(),
+                "{shard} is a partition `ci test-nextest` takes"
             );
         }
         let partition_env = format!("{TEST_PARTITION_ENV}: ${{{{ matrix.shard }}}}");
@@ -19463,10 +19514,14 @@ mod tests {
             "fail-fast: false",
             partition_env.as_str(),
             "shared-key: fast-test",
-            "save-if: ${{ matrix.shard == '1/6' }}",
+            "key: ${{ strategy.job-index }}",
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
+        assert!(
+            !test.iter().any(|l| l.starts_with("save-if:")),
+            "every shard saves the cache of its own packages' build"
+        );
         let python: Vec<&str> = workflow_job(&workflow, "fast-python")
             .context("ci.yml has `fast-python`")?
             .iter()
@@ -19675,11 +19730,11 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-871: a partition is `K/N` with `1 <= K <= N` in plain decimal, and runs nextest's counted
-    /// shard; none runs every test; anything else fails rather than running some other set.
+    /// DEC-871: a partition is `K/N` with `1 <= K <= N` in plain decimal; none runs every test;
+    /// anything else fails rather than running some other set.
     #[test]
     fn the_nextest_partition_is_checked() -> Result<()> {
-        let plain = super::nextest_args(None, None)?;
+        let plain = super::nextest_args(None)?;
         let config = repo_root()?.join(super::NEXTEST_CONFIG);
         assert!(
             config.is_file(),
@@ -19698,26 +19753,112 @@ mod tests {
                 "--no-tests=pass".to_owned(),
             ]
         );
-        for (partition, shard) in [
-            ("1/3", "count:1/3"),
-            ("3/3", "count:3/3"),
-            ("2/10", "count:2/10"),
-        ] {
-            let args = super::nextest_args(Some(partition), None)?;
-            assert_eq!(args.get(..plain.len()), Some(plain.as_slice()));
-            assert_eq!(
-                args.get(plain.len()..),
-                Some([format!("--partition={shard}")].as_slice())
-            );
+        for (partition, parsed) in [("1/3", (1, 3)), ("3/3", (3, 3)), ("2/10", (2, 10))] {
+            assert_eq!(super::partition_of(partition)?, parsed);
         }
         for bad in [
             "", "3", "0/3", "4/3", "1/0", "01/3", "1/03", "a/3", "1/b", "-1/3", "1/3/4", " 1/3",
             "+1/3",
         ] {
-            assert!(
-                super::nextest_args(Some(bad), None).is_err(),
-                "{bad:?} is refused"
+            assert!(super::partition_of(bad).is_err(), "{bad:?} is refused");
+        }
+        Ok(())
+    }
+
+    /// DEC-871: the package shards, over the workspace's own packages and over random weights,
+    /// hold every package exactly once, each sorted, and no shard outweighs another by more than
+    /// the heaviest package; the same input gives the same shards. Checked against an independent
+    /// count of each package's tested targets.
+    #[test]
+    fn every_package_is_tested_in_exactly_one_shard() -> Result<()> {
+        let meta = metadata_in(&repo_root()?)?;
+        let workspace = super::test_targets(&meta, None);
+        let raw: serde_json::Value = serde_json::from_str(&output_in(
+            &repo_root()?,
+            "cargo",
+            &["metadata", "--format-version", "1", "--no-deps", "--locked"],
+        )?)?;
+        let members: BTreeSet<&str> = raw["workspace_members"]
+            .as_array()
+            .context("workspace_members")?
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        let oracle: BTreeMap<String, usize> = raw["packages"]
+            .as_array()
+            .context("packages")?
+            .iter()
+            .filter(|p| p["id"].as_str().is_some_and(|id| members.contains(id)))
+            .filter_map(|p| {
+                let tested = p["targets"]
+                    .as_array()?
+                    .iter()
+                    .filter(|t| t["test"].as_bool() == Some(true))
+                    .count();
+                Some((p["name"].as_str()?.to_owned(), tested))
+            })
+            .collect();
+        assert_eq!(
+            workspace.iter().cloned().collect::<BTreeMap<_, _>>(),
+            oracle,
+            "each workspace package weighs its tested targets"
+        );
+        let scoped = super::test_targets(&meta, Some(&["xtask".to_owned()]));
+        assert_eq!(
+            scoped.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
+            ["xtask"]
+        );
+        let check = |weighed: &[(String, usize)], n: u32| {
+            let shards: Vec<Vec<String>> = (1..=n)
+                .map(|k| super::package_shard(weighed, k, n))
+                .collect();
+            let mut seen: Vec<&String> = shards.iter().flatten().collect();
+            seen.sort();
+            let mut expected: Vec<&String> = weighed.iter().map(|p| &p.0).collect();
+            expected.sort();
+            assert_eq!(seen, expected, "every package in exactly one of {n} shards");
+            for shard in &shards {
+                assert!(shard.windows(2).all(|w| w[0] < w[1]), "{shard:?} is sorted");
+            }
+            let weights: Vec<usize> = shards
+                .iter()
+                .map(|shard| {
+                    shard
+                        .iter()
+                        .filter_map(|name| weighed.iter().find(|p| &p.0 == name))
+                        .map(|p| p.1)
+                        .sum()
+                })
+                .collect();
+            let heaviest = weighed.iter().map(|p| p.1).max().unwrap_or(0);
+            let spread = weights.iter().max().unwrap_or(&0) - weights.iter().min().unwrap_or(&0);
+            assert!(spread <= heaviest, "{weights:?} spread past {heaviest}");
+            assert_eq!(
+                shards,
+                (1..=n)
+                    .map(|k| super::package_shard(weighed, k, n))
+                    .collect::<Vec<_>>(),
+                "the same input gives the same shards"
             );
+            assert!(super::package_shard(weighed, n.saturating_add(1), n).is_empty());
+        };
+        for n in 1..=8 {
+            check(&workspace, n);
+        }
+        let mut seed: u64 = 0x2f6b_1d3e_8a47_c905;
+        let mut next = |bound: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % bound
+        };
+        for _ in 0..256 {
+            let count = next(40);
+            let weighed: Vec<(String, usize)> = (0..count)
+                .map(|i| (format!("p{i:02}"), usize::try_from(next(50)).unwrap_or(0)))
+                .collect();
+            let n = u32::try_from(next(9)).unwrap_or(0).saturating_add(1);
+            check(&weighed, n);
         }
         Ok(())
     }
@@ -21985,7 +22126,7 @@ mod tests {
             selected.reasons()
         );
         let run = |packages: &[String]| -> Result<(bool, String)> {
-            let args = nextest_args(None, Some(packages))?;
+            let args = nextest_args(Some(packages))?;
             let out = Command::new("cargo")
                 .current_dir(&root)
                 .env_remove(CARGO_TARGET_DIR)
