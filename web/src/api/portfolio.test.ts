@@ -50,14 +50,6 @@ function apply(base: unknown, variant: Variant): unknown {
  */
 const READ_BY_DESIGN = new Set(["an unknown top-level member", "an unknown account member", "an unknown snapshot member", "an unknown point member", "an unknown instrument member", "an empty as_of"]);
 
-/**
- * Valid variants the client refuses on purpose. "a live agent with a loss" sets the top-level
- * `realized_gross` to -3.5 while its instruments still sum to 25; §4.7 makes the top level their
- * sum, so a total its own parts contradict is refused rather than shown. The variant is the spec
- * example's own inconsistency, and leaving it out here names it.
- */
-const REFUSED_BY_DESIGN = new Set(["a live agent with a loss"]);
-
 const WS = "ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y";
 
 async function served<T>(route: `/${string}`, decoder: Decoder<T>, body: unknown) {
@@ -84,7 +76,7 @@ describe.each(CASES)("read-models/$name, decoded as its schema states it (DEC-24
     expect(await served(route, decode(base), base)).toMatchObject({ ok: true });
   });
 
-  it.each(valid.filter((v) => !REFUSED_BY_DESIGN.has(v.label)).map((v) => [v.label, v] as const))("decodes the valid variant %s", async (_label, variant) => {
+  it.each(valid.map((v) => [v.label, v] as const))("decodes the valid variant %s", async (_label, variant) => {
     const body = apply(base, variant);
     expect(await served(route, decode(body), body)).toMatchObject({ ok: true });
   });
