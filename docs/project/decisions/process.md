@@ -1437,7 +1437,7 @@ target the cell needs and nothing a mistyped or stray value could reach.
 | **Status** | Accepted (agent, under DEC-79: a reversible CI-scope change that weakens no safety rule and no `AGENTS.md` non-negotiable; it narrows *when* a job runs and never what it checks) |
 | **Date** | 2026-10-20 (UTC) |
 | **Decided by** | an agent (`deepseek-ai/DeepSeek-V4.1-Flash-1017`, Cursor), acting as the coordinating session under DEC-79, and taking the founder's instruction of 2026-10-20 19:10 PDT to scope the job off the per-PR path |
-| **Story or claim** | no story; CI throughput and the merge path. Amends [DEC-2609](process.md#dec-2609) item 5; reads against [DEC-1190](earlier-900-1999.md#dec-1190), [DEC-610](earlier-600-899.md#dec-610), [DEC-175](DEC-175.md), [DEC-993](DEC-993.md) item 10 |
+| **Story or claim** | no story; CI throughput and the merge path. Amends [DEC-2609](process.md#dec-2609) item 5; reads against [DEC-1190](earlier-900-1999.md#dec-1190), [DEC-610](earlier-600-899.md#dec-610), [DEC-175](../04-decision-log.md#decisions), [DEC-993](DEC-993.md) item 10 |
 
 ### Context
 
