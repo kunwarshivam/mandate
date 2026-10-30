@@ -149,7 +149,7 @@ function Figure({ label, children }: { label: string; children: ReactNode }) {
 function Figures({ portfolio }: { portfolio: Portfolio }) {
   return (
     <section aria-label="Account figures" data-slot="account-figures" className="grid gap-3">
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-4 min-[22rem]:grid-cols-2 sm:grid-cols-3">
         <Figure label="Invested">
           <MoneyOr value={portfolio.invested} />
         </Figure>
