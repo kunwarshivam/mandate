@@ -448,6 +448,9 @@ impl Sessions {
     /// would still admit it. A signed-out, expired, idle or lapsed session refuses, and a
     /// reduction-only one refuses all but a pause and the kill switch. It never refreshes a
     /// session, and an admitted action counts as the owner's activity, as their own request would.
+    /// Without the cookie it cannot make [`Sessions::authenticate`]'s outage refresh, so a full
+    /// session whose access lapsed refuses even a pause or the kill switch here; the owner's own
+    /// routes still serve both.
     ///
     /// # Errors
     /// [`Unauthenticated`] for every refusal.

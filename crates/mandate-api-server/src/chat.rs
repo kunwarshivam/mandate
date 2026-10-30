@@ -350,6 +350,22 @@ async fn posted(
     if !app.chat.claim(&thread.key(), &run) {
         return problem_conflict();
     }
+    let latest = app
+        .journal
+        .rows(&format!("ctl:{}", reader.workspace))
+        .await
+        .unwrap_or_default();
+    match repeated(&latest, &id, &draft) {
+        Some(Settled::Stored(stored)) => {
+            app.chat.release(&thread.key());
+            return message_accepted(&thread, &stored, &run, reader.now);
+        }
+        Some(_) => {
+            app.chat.release(&thread.key());
+            return idempotency_conflict();
+        }
+        None => {}
+    }
     let stored = match stored_owner(&app, &gate, &reader, (&id, &draft)).await {
         Ok(stored) => stored,
         Err(refusal) => {

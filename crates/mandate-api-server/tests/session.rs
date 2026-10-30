@@ -1181,3 +1181,78 @@ fn a_full_sign_in_is_kept_as_the_route_two_standing_and_nothing_else_is() {
     );
     assert_eq!(full.standing(alice()), SubjectStanding::default());
 }
+
+/// The reference the session `cookie` names, read through one admitted request at `now`.
+fn reference_of(store: &Sessions, cookie: &str, now: i64) -> mandate_identity::SessionRef {
+    store
+        .authenticate(cookie, Request::Other, at(now))
+        .expect("admitted")
+        .reference
+}
+
+#[test]
+fn a_readmission_by_reference_admits_only_what_the_live_session_would() {
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened")
+        .value()
+        .to_owned();
+    let reference = reference_of(&store, &cookie, T0);
+    let again = store
+        .readmit(reference, Request::Other, at(T0 + 1))
+        .expect("a live session admits again");
+    assert_eq!((again.principal, again.reference), (alice(), reference));
+    assert_eq!(again.kind, SessionKind::Full);
+    assert_eq!(
+        store.readmit(reference, Request::Pause, at(T0 + ACCESS_S)),
+        Err(Unauthenticated),
+        "with no cookie there is no outage refresh, so lapsed access refuses even a pause"
+    );
+    store.end(&cookie).expect("signed out");
+    assert_eq!(
+        store.readmit(reference, Request::KillSwitch, at(T0 + 2)),
+        Err(Unauthenticated),
+        "a signed-out session acts no more"
+    );
+    let other = store
+        .open(bob(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened")
+        .value()
+        .to_owned();
+    let bobs = reference_of(&store, &other, T0);
+    assert_eq!(
+        store.readmit(bobs, Request::Other, at(T0 + IDLE_S + 1)),
+        Err(Unauthenticated),
+        "an idle session acts no more"
+    );
+    assert_eq!(
+        store.authenticate(&other, Request::Other, at(T0 + IDLE_S + 2)),
+        Err(Unauthenticated),
+        "and stays ended"
+    );
+}
+
+#[test]
+fn a_reduction_only_session_readmits_a_pause_and_the_kill_switch_alone() {
+    let store = sessions();
+    let cookie = store
+        .open_reduction_only(alice(), signed_in(), None, at(T0))
+        .expect("opened")
+        .value()
+        .to_owned();
+    let reference = store
+        .authenticate(&cookie, Request::Pause, at(T0))
+        .expect("admitted")
+        .reference;
+    assert_eq!(
+        store.readmit(reference, Request::Other, at(T0 + 1)),
+        Err(Unauthenticated)
+    );
+    for request in [Request::Pause, Request::KillSwitch] {
+        let admitted = store
+            .readmit(reference, request, at(T0 + 2))
+            .expect("risk reduction");
+        assert_eq!(admitted.kind, SessionKind::ReductionOnly);
+    }
+}

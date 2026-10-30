@@ -462,7 +462,7 @@ fn session_request(permission: Permission) -> Request {
 pub fn owner_named(message: &str, symbol: &str, quantity: &str) -> bool {
     let words: Vec<&str> = message
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
-        .map(|word| word.trim_matches('.'))
+        .map(|word| word.trim_end_matches('.'))
         .filter(|word| !word.is_empty())
         .collect();
     let wanted = decimal_words(quantity);
@@ -1370,6 +1370,14 @@ mod pure {
         );
         assert!(!owner_named("buy 2.5 AAPL", "AAPL", "2"), "2.5 is not 2");
         assert!(!owner_named("", "AAPL", "2"));
+        assert!(
+            !owner_named("buy .5 AAPL", "AAPL", "5"),
+            "a leading point is kept"
+        );
+        assert!(
+            owner_named("buy 5. AAPL", "AAPL", "5"),
+            "a trailing point is punctuation"
+        );
     }
 
     #[test]
