@@ -4,8 +4,9 @@
 use mandate_accounting::Position;
 use mandate_canon::{Key, Value};
 use mandate_gate_context::{CountedSession, Positions, Protection, RiskMark, Row, Unreadable};
-use mandate_num::{CostBasis, Price, Qty, SignedQty};
+use mandate_num::{CostBasis, Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
+use proptest::prelude::*;
 
 const ACCOUNT: &str = "acct:ws1:alpaca:paper1";
 const OTHER: &str = "acct:ws1:alpaca:other";
@@ -1268,4 +1269,206 @@ fn an_unattributed_fill_is_passed_over() {
         read.filled().collect::<Vec<_>>(),
         vec![(ASSET, SignedQty::from(qty("10")))]
     );
+}
+
+fn usd(value: &str) -> Usd {
+    Usd::parse(value).unwrap()
+}
+
+/// Folds the agent's own fill `id` of `side` `q` at `p` in `instrument`, on its own order.
+fn traded(read: &mut Positions, id: &str, instrument: &str, side: &str, q: &str, p: &str) {
+    let order = format!("mdt-{id}");
+    own_order(read, &order, instrument, side, q);
+    on(
+        read,
+        "FillApplied",
+        &fill(id, &order, instrument, side, q, p),
+    );
+}
+
+/// Trading spec reference case RC-01's fills: 10 AAPL bought at 150.00, then 4 sold at 160.00,
+/// realize 40.00 gross on the sub-ledger, and leave 6 at a basis of 900.00.
+#[test]
+fn rc_01_a_partial_sell_realizes_its_gain_over_the_removed_basis() {
+    let mut read = Positions::new(ACCOUNT, AGENT);
+    traded(&mut read, "f1", ASSET, "buy", "10", "150");
+    assert_eq!(
+        read.realized(ASSET),
+        Some(usd("0")),
+        "an opening realizes 0"
+    );
+    traded(&mut read, "f2", ASSET, "sell", "4", "160");
+    assert_eq!(read.cost_basis(ASSET), Some(position("6", "900")));
+    assert_eq!(read.realized(ASSET), Some(usd("40")));
+}
+
+/// RC-02: averaging in at 100.00 and 110.00, then selling 5 at 120.00 realizes 75.00 and keeps
+/// the average cost at 105.00.
+#[test]
+fn rc_02_averaging_in_then_reducing_realizes_over_the_average_cost() {
+    let mut read = Positions::new(ACCOUNT, AGENT);
+    traded(&mut read, "f1", ASSET, "buy", "10", "100");
+    traded(&mut read, "f2", ASSET, "buy", "10", "110");
+    assert_eq!(read.cost_basis(ASSET), Some(position("20", "2100")));
+    traded(&mut read, "f3", ASSET, "sell", "5", "120");
+    assert_eq!(read.cost_basis(ASSET), Some(position("15", "1575")));
+    assert_eq!(read.realized(ASSET), Some(usd("75")));
+}
+
+/// RC-03's fills: a close realizes 25.00; a short opened after it and closed at 52.00 realizes
+/// 9.00 more, 34.00 in all, and the closed instrument is still one the agent traded.
+#[test]
+fn rc_03_a_close_and_a_closed_short_add_their_realized_gains() {
+    let mut read = Positions::new(ACCOUNT, AGENT);
+    traded(&mut read, "f1", ASSET, "buy", "5", "50");
+    traded(&mut read, "f2", ASSET, "sell", "5", "55");
+    assert_eq!(read.cost_basis(ASSET), Some(Position::FLAT));
+    assert_eq!(read.realized(ASSET), Some(usd("25")));
+    traded(&mut read, "f3", ASSET, "sell", "3", "55");
+    assert_eq!(read.cost_basis(ASSET), Some(position("-3", "-165")));
+    traded(&mut read, "f4", ASSET, "buy", "3", "52");
+    assert_eq!(read.cost_basis(ASSET), Some(Position::FLAT));
+    assert_eq!(read.realized(ASSET), Some(usd("34")));
+    assert_eq!(read.traded().collect::<Vec<_>>(), vec![ASSET]);
+    assert_eq!(read.filled().count(), 0, "flat, so no position is listed");
+}
+
+#[test]
+fn realized_is_per_instrument_and_never_another_agents() {
+    let mut read = bought();
+    traded(&mut read, "f2", ASSET, "sell", "10", "520");
+    traded(&mut read, "f3", ASSET_B, "buy", "2", "10");
+    traded(&mut read, "f4", ASSET_B, "sell", "1", "9");
+    on(
+        &mut read,
+        "OrderRequestRecorded",
+        &request("agent-2", "open"),
+    );
+    on(
+        &mut read,
+        "OrderSubmitted",
+        &submitted("mdt-9", ASSET, "sell", "5"),
+    );
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f9", "mdt-9", ASSET, "sell", "5", "1"),
+    );
+    assert_eq!(
+        read.realized(ASSET),
+        Some(usd("77.5")),
+        "10 × (520 − 512.25)"
+    );
+    assert_eq!(read.realized(ASSET_B), Some(usd("-1")), "1 × (9 − 10)");
+    let mut instruments = vec![ASSET, ASSET_B];
+    instruments.sort_unstable();
+    assert_eq!(read.traded().collect::<Vec<_>>(), instruments);
+    assert_eq!(Positions::new(ACCOUNT, AGENT).realized(ASSET), None);
+    assert_eq!(Positions::new(ACCOUNT, AGENT).traded().count(), 0);
+}
+
+#[test]
+fn a_fill_journaled_twice_realizes_once() {
+    let mut read = bought();
+    traded(&mut read, "f2", ASSET, "sell", "4", "520");
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f2", "mdt-f2", ASSET, "sell", "4", "520"),
+    );
+    assert_eq!(read.realized(ASSET), Some(usd("31")), "4 × (520 − 512.25)");
+}
+
+#[test]
+fn a_release_a_corporate_action_or_a_fee_in_the_asset_leaves_realized_unreported() {
+    let mut released = bought();
+    traded(&mut released, "f2", ASSET, "sell", "4", "520");
+    let release = object(&[
+        ("agent_id", text(AGENT)),
+        ("instrument_id", text(ASSET)),
+        ("qty", text("6")),
+    ]);
+    on(&mut released, "PositionReleased", &release);
+    assert_eq!(released.realized(ASSET), None);
+    assert_eq!(released.traded().collect::<Vec<_>>(), vec![ASSET]);
+
+    let mut acted = bought();
+    let action = object(&[("instrument_id", text(ASSET)), ("kind", text("split"))]);
+    on(&mut acted, "CorporateActionApplied", &action);
+    assert_eq!(acted.realized(ASSET), None);
+
+    let mut charged = Positions::new(ACCOUNT, AGENT);
+    own_order(&mut charged, "mdt-1", ASSET, "buy", "10");
+    on(
+        &mut charged,
+        "FillApplied",
+        &fill("f1", "mdt-1", ASSET, "buy", "10", "2").with("fees", Value::Array(vec![fee("BTC")])),
+    );
+    assert_eq!(charged.realized(ASSET), None);
+}
+
+/// The oracle's scale: twelve decimal places, the most a §8.1 basis carries.
+const SCALE: u32 = 12;
+
+/// `text` as an integer count of 10⁻¹², parsed here and not by `mandate-num`, so the oracle shares
+/// no arithmetic with the fold.
+fn scaled(text: &str) -> i128 {
+    let (negative, digits) = text
+        .strip_prefix('-')
+        .map_or((false, text), |rest| (true, rest));
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    assert!(fraction.len() <= SCALE as usize, "{text}");
+    let padded = format!("{fraction:0<12}");
+    let value =
+        whole.parse::<i128>().unwrap() * 10_i128.pow(SCALE) + padded.parse::<i128>().unwrap();
+    if negative { -value } else { value }
+}
+
+/// A quantity in hundredths, or a price in cents, as the journal's normalized decimal text (no
+/// trailing zero, no trailing point).
+fn hundredths(n: u32) -> String {
+    let text = format!("{}.{:02}", n / 100, n % 100);
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// Trading spec §8.1, summed over any long-only run of the agent's own fills, with another
+    /// agent's fills between them: each row's change of basis less its realized P&L is q·p, so the
+    /// realized total is the final basis less Σ q·p, exactly, however each reduction rounded its
+    /// removed basis. The oracle computes Σ q·p in integers of its own.
+    #[test]
+    fn realized_is_the_final_basis_less_what_the_fills_cost(
+        ops in proptest::collection::vec((any::<bool>(), 1_u32..5_000, 1_u32..100_000, any::<bool>()), 1..40)
+    ) {
+        let mut read = Positions::new(ACCOUNT, AGENT);
+        let mut held: u32 = 0;
+        let mut spent: i128 = 0;
+        for (n, (sell, q, p, theirs)) in ops.into_iter().enumerate() {
+            let q = if sell { q.min(held) } else { q };
+            if q == 0 {
+                continue;
+            }
+            let side = if sell { "sell" } else { "buy" };
+            let (qty_text, price_text) = (hundredths(q), hundredths(p));
+            if theirs {
+                let order = format!("mdt-o{n}");
+                on(&mut read, "OrderRequestRecorded", &request("agent-2", "open"));
+                on(&mut read, "OrderSubmitted", &submitted(&order, ASSET, side, &qty_text));
+                on(&mut read, "FillApplied", &fill(&format!("o{n}"), &order, ASSET, side, &qty_text, &price_text));
+                continue;
+            }
+            traded(&mut read, &format!("f{n}"), ASSET, side, &qty_text, &price_text);
+            let signed = if sell { -i128::from(q) } else { i128::from(q) };
+            spent += signed * i128::from(p) * 10_i128.pow(SCALE - 4);
+            held = if sell { held - q } else { held + q };
+        }
+        let basis = read.cost_basis(ASSET).map(|b| scaled(&b.basis().to_string()));
+        let realized = read.realized(ASSET).map(|r| scaled(&r.to_string()));
+        prop_assert_eq!(basis.is_some(), realized.is_some());
+        if let (Some(basis), Some(realized)) = (basis, realized) {
+            prop_assert_eq!(realized, basis - spent);
+        }
+    }
 }
