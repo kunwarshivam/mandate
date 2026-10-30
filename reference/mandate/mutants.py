@@ -335,6 +335,21 @@ MUTANTS = {
     "re-confirming drops the delegations": ('classify(without_delegations(prev, review_by_of=m), without_delegations(m))',
                                             'classify(without_delegations(prev), without_delegations(m))'),
     "a bound field does not move the content hash": ('content_hash({k: req[k] for k in sorted(req)})', 'content_hash({k: req[k] for k in sorted(req) if k != "limit_price"})'),
+    "step 5d ignores the admission ceiling (MI-35)": ('    return ((a.get("new_instrument", False) and au["admission"] == "ask")',
+                                                       '    return (False'),
+    "step 5d ignores the review ceiling (MI-35)": ('            or review_passed(m, st)\n            or (t is not None',
+                                                    '            or False\n            or (t is not None'),
+    "step 5d ignores the two-approver threshold (MI-35)": ('            or (t is not None and D(a["order_usd"]) > D(t)))',
+                                                            '            or False)'),
+    "step 5d holds an order at the threshold itself (MI-35)": ('            or (t is not None and D(a["order_usd"]) > D(t)))',
+                                                                '            or (t is not None and D(a["order_usd"]) >= D(t)))'),
+    "step 5d converts every owner's ask (MI-35)": ('or res["decision"] != "ask" or owner_held(m, a, st):', 'or res["decision"] != "ask":'),
+    "step 5d converts a deny (MI-35)": ('or res["decision"] != "ask" or owner_held(m, a, st):',
+                                        'or res["decision"] == "auto" or owner_held(m, a, st):'),
+    "step 5d converts a client's ask (MI-35)": ('    if a.get("requested_by", "agent") != "owner" or res["decision"]',
+                                                '    if a.get("requested_by", "agent") == "agent" or res["decision"]'),
+    "step 5d relabels a held ask (MI-35)": ('        return res\n    return {"decision": "auto", "by": "owner_request"}',
+                                            '        return dict(res, by="owner_request") if a.get("requested_by") == "owner" and res["decision"] == "ask" else res\n    return {"decision": "auto", "by": "owner_request"}'),
 }
 # Seeded bugs in the tripwires (§6.7, MI-31, V-044; DEC-187, DEC-350 to DEC-352). Each must be caught both by the
 # tripwire fuzz (TW_PROBE) and by the MC-W reference cases, which `main` regenerates from the mutated model and requires
@@ -480,7 +495,7 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_split_boundaries(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_routes(1500); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
-         "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
+         "fuzz_review(400); fuzz_owner_request(300); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); fuzz_stop_limit_offset(300); "
          "print(len(FAIL))")
 

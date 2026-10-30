@@ -1903,10 +1903,21 @@ gateway service.
 3. **The model proposes; code acts (rule 4).** Each action tool commits the command the web app's
    own route commits, under the sending member's session and a fresh authorization by the same
    matrix row:
-   - `order.buy` is an owner request (`requested_by` `owner`) for the agent's pinned instrument,
-     with the quantity the owner asked for. The builder clips it, the gate decides, and DEC-2159
-     makes it `auto`. A symbol outside the mandate is refused `not_in_mandate`, and a live
-     environment `live_unavailable`. The owner's message that started the run must name both the
+   - `order.buy` prepares an owner request (`requested_by` `owner`) for the agent's pinned
+     instrument, with the quantity the owner asked for, and submits nothing
+     ([DEC-2859](../project/decisions/DEC-2859.md), the founder's). After its checks it posts a
+     `confirm_order` card to the owner and answers the model `{"ok": true, "awaiting_owner": true}`.
+     The card is `{kind, card_id, symbol, instrument_id, side, qty, reference_price,
+     reference_kind, estimated_cost_usd, note}`: `card_id` a fresh ULID, `reference_price` the last
+     trusted daily close (`null` when there is none, and `estimated_cost_usd` with it), the estimate
+     `qty` × that close, and a note that the builder may clip the quantity to the mandate's caps
+     and sets the limit price when it places the order, because no route sizes an order without
+     submitting it (DEC-2859 item 7). Only the owner's tap on the card submits the request
+     (workspace API §4.6.2's *Confirm an order*), under their own session at that instant. The
+     builder clips it, the gate decides, and step 5d of mandate spec §6.2 makes it `auto` unless
+     the review ceiling, the admission ceiling or the two-approver threshold holds it, which then
+     asks for approval as any `ask` does. A symbol outside the mandate is refused
+     `not_in_mandate`, and a live environment `live_unavailable`. The owner's message that started the run must name both the
      symbol and the quantity, each as a whole word, else the buy is refused `not_in_owner_message`
      and nothing is committed: a quantity or symbol the model read in news or a thesis never
      becomes the owner's request, and the model may offer it as an `order.propose` card instead.
@@ -1916,7 +1927,9 @@ gateway service.
      outage refresh a route makes, so a session whose access lapsed refuses even the chat's pause
      and kill switch; the owner's own pause and kill-switch routes still serve them.
    - `order.sell` is an owner exit of the whole position.
-   - The four agent controls are pause, resume, Stop and the agent's kill switch.
+   - The four agent controls are pause, resume, Stop and the agent's kill switch. A sale, a pause,
+     a Stop and the kill switch reduce risk and commit at once; none waits on a card
+     (`AGENTS.md` rules 2 and 13).
    - `mandate.propose` creates a draft version through the version route, which validates it. The
      owner confirms and deploys it on the version's own page; the chat never does.
    - `order.propose` puts the agent's own idea to the owner as a card, which the autonomy rules

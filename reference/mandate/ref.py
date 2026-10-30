@@ -1243,6 +1243,28 @@ def autonomy(m, a, st=None):
         res["on_timeout"] = "skip"
     return res
 
+def owner_held(m, a, st):
+    """§6.2 step 5d (DEC-2859): a reviewer holds an owner's request when the admission ceiling applies to the order
+    (a new instrument under an `ask` admission), the review ceiling applies (the date has passed, or there is no
+    risk clock), or the ask needs two approvers. Each is judged for the order, not from the label that asked."""
+    au = m["autonomy"]
+    t = au["approval"]["two_approver_above_usd"]
+    return ((a.get("new_instrument", False) and au["admission"] == "ask")
+            or review_passed(m, st)
+            or (t is not None and D(a["order_usd"]) > D(t)))
+
+def owner_request(m, a, st, res):
+    """§6.2 step 5d (DEC-2159, DEC-2858 item 10, DEC-2859): an owner's own `ask` no reviewer holds becomes `auto`,
+    labelled `owner_request`; a held one keeps its ask, its label and its approvers. A `deny`, an `auto`, and every
+    request but the owner's pass through unchanged."""
+    if a.get("requested_by", "agent") != "owner" or res["decision"] != "ask" or owner_held(m, a, st):
+        return res
+    return {"decision": "auto", "by": "owner_request"}
+
+def decided(m, a, st=None):
+    """§6.2 steps 3 to 5b, then step 5d (the policy overlay of step 5c is not modelled here)."""
+    return owner_request(m, a, st, autonomy(m, a, st))
+
 # ------------------------------------------------------------------ unasked dollars (§4.2; DEC-189, DEC-695)
 UNASKED_STATE = ("now", "orders_today", "usage")
 

@@ -466,12 +466,6 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         overlay_label = by != POLICY_OVERLAY_LABEL or p["autonomy"] != "auto"
         rule("7.policy_overlay_label", overlay_label, "schema", "payload.decided_by")
         owner = p["requested_by"] == "owner"
-        rule(
-            "7.owner_request",
-            not (owner and adds_risk and asked),
-            "schema",
-            "payload.autonomy",
-        )
         owner_label = by != OWNER_REQUEST_LABEL or (owner and adds_risk and p["autonomy"] == "auto")
         rule("7.owner_request_label", owner_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
