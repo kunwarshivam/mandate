@@ -1486,6 +1486,9 @@ pub fn down() -> Result<()> {
 const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
+/// The cell's static build carries no debug information, which halves the API's binary.
+pub const CELL_PROFILE_DEBUG: (&str, &str) = ("CARGO_PROFILE_DEV_DEBUG", "false");
+
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
 /// (DEC-1013, built by `mandate-runtime-models` since DEC-2383), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
 /// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
@@ -1493,6 +1496,9 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the
 /// dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for the
 /// CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
+/// Without its line tables, [`CELL_PROFILE_DEBUG`]: each process reads its whole executable at
+/// start to check its release signature, and with them the API's binary alone outgrew its 128Mi
+/// limit, so `api` and `connect-finish` were killed before printing a line.
 fn build_binary() -> Result<()> {
     let mut args = vec!["build", "--locked"];
     for package in BUILT_PACKAGES {
@@ -1503,12 +1509,15 @@ fn build_binary() -> Result<()> {
     }
     args.extend(["--target", STATIC_TRIPLE, "--target-dir", STATIC_TARGET]);
     eprintln!(
-        "    $ RUSTFLAGS='-C target-feature=+crt-static' cargo {}",
+        "    $ RUSTFLAGS='-C target-feature=+crt-static' {}={} cargo {}",
+        CELL_PROFILE_DEBUG.0,
+        CELL_PROFILE_DEBUG.1,
         args.join(" ")
     );
     let status = Command::new("cargo")
         .args(args)
         .env("RUSTFLAGS", "-C target-feature=+crt-static")
+        .env(CELL_PROFILE_DEBUG.0, CELL_PROFILE_DEBUG.1)
         .status()
         .context("starting cargo")?;
     if !status.success() {
