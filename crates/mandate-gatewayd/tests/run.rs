@@ -1044,3 +1044,27 @@ fn the_committed_live_registry_file_reads_and_registers_a_and_b_alone() {
         }]
     );
 }
+
+/// DEC-2294: `gate <model_id> --probe <socket>` names the entry and the probe socket the gate socket
+/// sits beside; one that names no id, or names a flag in its place, starts nothing.
+#[test]
+fn a_gate_reads_its_model_id_and_the_probe_socket() {
+    assert_eq!(
+        run::command(&args(
+            "gate llm.chat_sonnet --probe /run/mandate/probe.sock"
+        )),
+        Ok(Command::Gate {
+            model_id: "llm.chat_sonnet".to_owned(),
+            socket: PathBuf::from("/run/mandate/probe.sock"),
+        })
+    );
+    assert_eq!(
+        run::command(&args("gate --probe /p")),
+        Err(ArgsError::GateModelMissing)
+    );
+    assert_eq!(
+        run::command(&args("gate llm.chat_sonnet")),
+        Err(ArgsError::ProbeSocketMissing)
+    );
+    assert_eq!(ArgsError::GateModelMissing.code(), "gate_model_missing");
+}
