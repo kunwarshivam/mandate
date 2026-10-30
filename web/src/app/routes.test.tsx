@@ -5,6 +5,7 @@ import * as approval from "@/app/(app)/approvals/[approvalId]/page";
 import * as design from "@/app/(app)/design/page.dev";
 import * as setup from "@/app/(app)/new/page";
 import * as home from "@/app/(app)/page";
+import * as portfolio from "@/app/(app)/portfolio/page";
 import * as settings from "@/app/(app)/settings/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { StopControl } from "@/components/shell/stop-control";
@@ -58,7 +59,7 @@ describe("titles", () => {
   const generic = /^[A-Z][a-z]+( [a-z]+)*$/;
 
   it("keeps static titles generic: no agent, instrument or amount", () => {
-    for (const mod of [home, setup, agent, approval, settings, design]) {
+    for (const mod of [home, portfolio, setup, agent, approval, settings, design]) {
       const title = mod.metadata.title;
       const text = typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
       expect(text).toMatch(generic);
