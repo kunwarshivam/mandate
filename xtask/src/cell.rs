@@ -1360,7 +1360,10 @@ pub fn hosted() -> Result<()> {
 /// connect finish's (DEC-2348 item 3), which runs from the API's image. Their pods, how each
 /// container last ended (its reason, `OOMKilled` among them, and exit code), their containers'
 /// last logs, current and from the run before a restart, and the namespace's recent events, so a
-/// server that refused to start or was killed names it in the run's own output.
+/// server that refused to start or was killed names it in the run's own output. Then what the node
+/// enforces ([`diagnose_policies`]): a pod's `egress-gate` refuses to start while its policy is not
+/// enforced ("egress still open after a minute"), which on the self-hosted runners held every
+/// workspace pod (run 40837985477's `cell-demo-web`), so the run names the controller's state too.
 pub(super) fn api_diagnosis() {
     let selector = format!(
         "mandate.dev/workspace={WORKSPACE},mandate.dev/process in ({API_PROCESS},{CONNECT_FINISH_PROCESS})"
@@ -1440,6 +1443,7 @@ pub(super) fn api_diagnosis() {
         ]);
     }
     diagnose(&events);
+    diagnose_policies();
 }
 
 /// Prints what `kubectl args` answers, or why it failed, under the API's diagnosis.
