@@ -50,6 +50,14 @@ function apply(base: unknown, variant: Variant): unknown {
  */
 const READ_BY_DESIGN = new Set(["an unknown top-level member", "an unknown account member", "an unknown snapshot member", "an unknown point member", "an unknown instrument member", "an empty as_of"]);
 
+/**
+ * Valid variants the client refuses on purpose. "a live agent with a loss" sets the top-level
+ * `realized_gross` to -3.5 while its instruments still sum to 25; §4.7 makes the top level their
+ * sum, so a total its own parts contradict is refused rather than shown. The variant is the spec
+ * example's own inconsistency, and leaving it out here names it.
+ */
+const REFUSED_BY_DESIGN = new Set(["a live agent with a loss"]);
+
 const WS = "ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y";
 
 async function served<T>(route: `/${string}`, decoder: Decoder<T>, body: unknown) {
@@ -76,7 +84,7 @@ describe.each(CASES)("read-models/$name, decoded as its schema states it (DEC-24
     expect(await served(route, decode(base), base)).toMatchObject({ ok: true });
   });
 
-  it.each(valid.map((v) => [v.label, v] as const))("decodes the valid variant %s", async (_label, variant) => {
+  it.each(valid.filter((v) => !REFUSED_BY_DESIGN.has(v.label)).map((v) => [v.label, v] as const))("decodes the valid variant %s", async (_label, variant) => {
     const body = apply(base, variant);
     expect(await served(route, decode(body), body)).toMatchObject({ ok: true });
   });
@@ -117,6 +125,11 @@ describe("the dashboard's snapshots", () => {
     expect(await served(DASHBOARD_ROUTE, dashboardRead, body)).toMatchObject({ ok: true, value: { accounts: [{ snapshot: { last_equity: null, day_change: null } }, {}] } });
   });
 
+  it("refuses an account served twice, so none is summed twice", async () => {
+    const body = apply(base, { label: "twice", set: { "/accounts/1/account_ref": "acct_1" } });
+    expect(await served(DASHBOARD_ROUTE, dashboardRead, body)).toMatchObject({ ok: false, error: { decode: { path: "/accounts/1/account_ref", problem: "not_canonical" } } });
+  });
+
   it("refuses a decimal with a trailing zero or a sign on zero, a null equity, and a snapshot of no shape", async () => {
     for (const [pointer, value] of [
       ["/accounts/0/snapshot/equity", "10069.970"],
@@ -155,6 +168,28 @@ describe("the equity history", () => {
     const repeated = apply(base, { label: "repeated", set: { "/accounts/0/points/1/at": "2026-10-07T20:59:50.000000000Z" } });
     expect(await served(historyRoute("1w"), historyRead("1w"), repeated)).toMatchObject({ ok: false });
   });
+
+  it("refuses two points in one bucket of the range's width, and takes them in neighbouring buckets", async () => {
+    const at = (first: string, second: string, range: HistoryRange) => apply(base, { label: range, set: { "/range": range, "/accounts/0/points/0/at": first, "/accounts/0/points/1/at": second } });
+    const cases: Array<[HistoryRange, string, string, string]> = [
+      // [range, first, second in the same bucket, second in the next bucket]
+      ["1d", "2026-10-08T14:00:00.000000000Z", "2026-10-08T14:04:59.999999999Z", "2026-10-08T14:05:00.000000000Z"],
+      ["1w", "2026-10-08T14:00:00.000000000Z", "2026-10-08T14:59:59.000000000Z", "2026-10-08T15:00:00.000000000Z"],
+      ["1m", "2026-10-08T00:00:00.000000000Z", "2026-10-08T23:59:59.000000000Z", "2026-10-09T00:00:00.000000000Z"],
+      ["all", "2026-10-08T00:00:01.000000000Z", "2026-10-08T12:00:00.000000000Z", "2026-10-09T00:00:00.000000000Z"],
+    ];
+    for (const [range, first, same, next] of cases) {
+      expect(await served(historyRoute(range), historyRead(range), at(first, same, range)), `${range} same`).toMatchObject({ ok: false, error: { decode: { path: "/accounts/0/points/1/at", problem: "not_canonical" } } });
+      expect(await served(historyRoute(range), historyRead(range), at(first, next, range)), `${range} next`).toMatchObject({ ok: true });
+    }
+  });
+
+  it("refuses an account served twice", async () => {
+    const body = { ...(structuredClone(base) as Record<string, unknown>) };
+    const accounts = body.accounts as unknown[];
+    body.accounts = [accounts[0], structuredClone(accounts[0])];
+    expect(await served(historyRoute("1w"), historyRead("1w"), body)).toMatchObject({ ok: false, error: { decode: { path: "/accounts/1/account_ref", problem: "not_canonical" } } });
+  });
 });
 
 describe("an agent's P&L", () => {
@@ -169,6 +204,19 @@ describe("an agent's P&L", () => {
 
   it("refuses an answer naming another agent, so one agent's P&L is never shown as another's", async () => {
     expect(await served(pnlRoute("agt_other"), pnlRead("agt_other"), base)).toMatchObject({ ok: false, error: { decode: { path: "/agent_id", problem: "not_canonical" } } });
+  });
+
+  it("refuses a top-level figure that is not its instruments' exact sum, or not null when one of theirs is", async () => {
+    const at = (set: Record<string, unknown>) => pnlRead(agent)(apply(base, { label: "sum", set }), "");
+    expect(at({ "/realized_gross": "-3.5" })).toMatchObject({ ok: false, issue: { path: "/realized_gross", problem: "not_canonical" } });
+    expect(at({ "/unrealized_pnl": "30.0000000000000000000000000001" })).toMatchObject({ ok: false, issue: { path: "/unrealized_pnl" } });
+    expect(at({ "/realized_gross": null })).toMatchObject({ ok: false, issue: { path: "/realized_gross" } });
+    expect(at({ "/instruments/1/unrealized_pnl": null })).toMatchObject({ ok: false, issue: { path: "/unrealized_pnl" } });
+    // Sums at the decoder's full 28 places: 0.1 + 0.2 is 0.3 exactly, and a sum with no instrument is zero.
+    expect(at({ "/instruments/0/realized_gross": "0.1", "/instruments/1/realized_gross": "0.2", "/realized_gross": "0.3" })).toMatchObject({ ok: true });
+    expect(at({ "/instruments/0/unrealized_pnl": "0.0000000000000000000000000001", "/unrealized_pnl": "0.0000000000000000000000000001" })).toMatchObject({ ok: true });
+    expect(at({ "/instruments": [], "/realized_gross": "0", "/unrealized_pnl": "0" })).toMatchObject({ ok: true });
+    expect(at({ "/instruments": [], "/realized_gross": null, "/unrealized_pnl": "0" })).toMatchObject({ ok: false });
   });
 
   it("refuses a body that is not an object", async () => {
