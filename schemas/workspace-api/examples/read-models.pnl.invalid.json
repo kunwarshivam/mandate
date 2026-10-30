@@ -1,0 +1,164 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing api_version",
+    "remove": [
+      "/api_version"
+    ]
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/agent_id"
+    ]
+  },
+  {
+    "label": "a missing environment",
+    "remove": [
+      "/environment"
+    ]
+  },
+  {
+    "label": "a missing account_ref",
+    "remove": [
+      "/account_ref"
+    ]
+  },
+  {
+    "label": "a missing instruments",
+    "remove": [
+      "/instruments"
+    ]
+  },
+  {
+    "label": "a missing realized_gross",
+    "remove": [
+      "/realized_gross"
+    ]
+  },
+  {
+    "label": "a missing unrealized_pnl",
+    "remove": [
+      "/unrealized_pnl"
+    ]
+  },
+  {
+    "label": "a malformed agent_id",
+    "set": {
+      "/agent_id": "a b"
+    }
+  },
+  {
+    "label": "a malformed account_ref",
+    "set": {
+      "/account_ref": "a b"
+    }
+  },
+  {
+    "label": "an unknown environment",
+    "set": {
+      "/environment": "mutant_value"
+    }
+  },
+  {
+    "label": "instruments not an array",
+    "set": {
+      "/instruments": {}
+    }
+  },
+  {
+    "label": "a numeric realized_gross",
+    "set": {
+      "/realized_gross": 25
+    }
+  },
+  {
+    "label": "a numeric unrealized_pnl",
+    "set": {
+      "/unrealized_pnl": 30
+    }
+  },
+  {
+    "label": "an unknown instrument member",
+    "set": {
+      "/instruments/0/extra": 1
+    }
+  },
+  {
+    "label": "an instrument without instrument_id",
+    "remove": [
+      "/instruments/0/instrument_id"
+    ]
+  },
+  {
+    "label": "an instrument without filled_qty",
+    "remove": [
+      "/instruments/0/filled_qty"
+    ]
+  },
+  {
+    "label": "an instrument without realized_gross",
+    "remove": [
+      "/instruments/0/realized_gross"
+    ]
+  },
+  {
+    "label": "an instrument without unrealized_pnl",
+    "remove": [
+      "/instruments/0/unrealized_pnl"
+    ]
+  },
+  {
+    "label": "an empty instrument_id",
+    "set": {
+      "/instruments/0/instrument_id": ""
+    }
+  },
+  {
+    "label": "an instrument_id of 201 characters",
+    "set": {
+      "/instruments/0/instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "a numeric filled_qty",
+    "set": {
+      "/instruments/0/filled_qty": 6
+    }
+  },
+  {
+    "label": "a null filled_qty",
+    "set": {
+      "/instruments/0/filled_qty": null
+    }
+  },
+  {
+    "label": "a numeric instrument realized_gross",
+    "set": {
+      "/instruments/0/realized_gross": 40
+    }
+  },
+  {
+    "label": "a non-canonical instrument unrealized_pnl",
+    "set": {
+      "/instruments/0/unrealized_pnl": "30.0"
+    }
+  }
+]

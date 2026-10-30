@@ -1,0 +1,38 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acct_1",
+      "seq": 90,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+  "environment": "paper",
+  "account_ref": "acct_1",
+  "instruments": [
+    {
+      "instrument_id": "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
+      "filled_qty": "6",
+      "realized_gross": "40",
+      "unrealized_pnl": "30"
+    },
+    {
+      "instrument_id": "9ddbf538-6ee1-46c4-c6ff-8d1d4b9ff6d5",
+      "filled_qty": "0",
+      "realized_gross": "-15",
+      "unrealized_pnl": "0"
+    }
+  ],
+  "realized_gross": "25",
+  "unrealized_pnl": "30"
+}

@@ -1,0 +1,62 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acct_1",
+      "seq": 90,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "agents": [
+    {
+      "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+      "environment": "paper",
+      "mandate_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "deployed_at": "2026-10-08T13:00:00.000000000Z",
+      "mode": "normal",
+      "pending_approvals": 1,
+      "label": "momentum-spy",
+      "mandate": {
+        "allocation_usd": "5000",
+        "max_loss_from_allocation": "0.2",
+        "goal": "continuous",
+        "goal_end_date": null,
+        "asset_classes": [
+          "us_equity"
+        ],
+        "max_position_usd": "2000",
+        "max_order_usd": "500",
+        "max_orders_per_day": 20,
+        "max_daily_loss": "0.03",
+        "max_drawdown": "0.1"
+      }
+    }
+  ],
+  "accounts": [
+    {
+      "account_ref": "acct_1",
+      "snapshot": {
+        "equity": "10069.97",
+        "cash": "9139.97",
+        "buying_power": "9139.97",
+        "last_equity": "10000",
+        "day_change": "69.97",
+        "environment": "paper",
+        "observed_at": "2026-10-08T14:29:50.000000000Z"
+      }
+    },
+    {
+      "account_ref": "acct_2",
+      "snapshot": null
+    }
+  ]
+}
