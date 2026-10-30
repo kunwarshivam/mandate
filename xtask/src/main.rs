@@ -11992,8 +11992,10 @@ fn pending_nextest(root: &Path, args: &[&str], build: BuildDir) -> Command {
 
 /// Runs every test the working tree marks pending in `packages`, or in the whole workspace when
 /// there are none to scope it to (DEC-1190), and names each one that passes or does not run,
-/// building where `build` says. A behaviour-only row naming a test that is no longer pending is
-/// stale whichever packages run.
+/// building where `build` says. It builds only the packages that hold a pending test: the filter
+/// selects the same tests either way, and building every package's tests to run them took six of
+/// `fast-pending`'s ten minutes (DEC-871). A behaviour-only row naming a test that is no longer
+/// pending is stale whichever packages run.
 fn pending_problems(root: &Path, build: BuildDir, scope: Option<&[String]>) -> Result<Vec<String>> {
     let mut args = vec![
         "ls-files",
@@ -12055,14 +12057,10 @@ fn pending_problems(root: &Path, build: BuildDir, scope: Option<&[String]>) -> R
         .map(PendingTestRun::filterset)
         .collect::<Vec<_>>()
         .join(" | ");
+    let holding: BTreeSet<&str> = tests.iter().map(|test| test.package.as_str()).collect();
     let mut args = vec!["nextest", "run"];
-    match scope {
-        None => args.push("--workspace"),
-        Some(scope) => {
-            for package in scope {
-                args.extend(["--package", package.as_str()]);
-            }
-        }
+    for package in &holding {
+        args.extend(["--package", *package]);
     }
     args.extend([
         "--locked",
