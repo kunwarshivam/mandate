@@ -13,7 +13,7 @@ use std::time::Duration;
 use mandate_gateway::wire::{PutRefusal, PutReply, PutRequest, Reply};
 use mandate_gateway::{CallRequest, RequestError};
 use mandate_gatewayd::gate_socket::{self, SUFFIX};
-use mandate_gatewayd::serve::{Handler, Limits, Log, SIDE_UNSERVED, Server};
+use mandate_gatewayd::serve::{Handler, Limits, Log, SIDE_UNSERVED, Server, Side};
 
 struct Quiet;
 
@@ -55,6 +55,17 @@ fn server() -> Server {
     )
 }
 
+/// `side`'s answer to `line`, or `Err` when none comes within five seconds, so a server that never
+/// answers fails the test rather than hanging it.
+fn ask_within(side: &Side, line: &str) -> Result<Option<String>, mpsc::RecvTimeoutError> {
+    let (done, answered) = mpsc::channel();
+    let (side, line) = (side.clone(), line.to_owned());
+    thread::spawn(move || {
+        let _ = done.send(side.ask(&line));
+    });
+    answered.recv_timeout(Duration::from_secs(5))
+}
+
 fn socket_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("gatewayd-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -79,14 +90,16 @@ fn a_side_line_is_answered_by_the_serving_thread_until_the_server_stops() {
         done.send(()).unwrap();
     });
     assert_eq!(
-        side.ask("gate llm.chat_sonnet").as_deref(),
+        ask_within(&side, "gate llm.chat_sonnet")
+            .unwrap()
+            .as_deref(),
         Some("answered gate_llm.chat_sonnet")
     );
     assert_eq!(*asked.lock().unwrap(), ["gate llm.chat_sonnet"]);
     stopper.stop();
     assert_eq!(ended.recv_timeout(Duration::from_secs(5)), Ok(()));
     serving.join().unwrap();
-    assert_eq!(side.ask("gate llm.chat_sonnet"), None);
+    assert_eq!(ask_within(&side, "gate llm.chat_sonnet"), Ok(None));
 }
 
 /// A server run with closures alone serves no side line.
@@ -101,7 +114,10 @@ fn a_server_without_a_side_handler_refuses_side_lines() {
             |_| Err(PutRefusal::StoreUnavailable),
         );
     });
-    assert_eq!(side.ask("gate x").as_deref(), Some(SIDE_UNSERVED));
+    assert_eq!(
+        ask_within(&side, "gate x").unwrap().as_deref(),
+        Some(SIDE_UNSERVED)
+    );
     stopper.stop();
     serving.join().unwrap();
 }
