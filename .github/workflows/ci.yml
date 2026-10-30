@@ -11,9 +11,12 @@
 # DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
 # changed paths, the crates owning them or naming them in their sources, and every crate built on
 # those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
-# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `full-checks-2`, `full-checks-3`, `schema-mutants` and the ten cell jobs
+# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `full-checks-2`, `full-checks-3`, `schema-mutants` and the cell jobs
 # (DEC-2609: a crate the cell's images hold or are built on, or `deploy/` and the cell's Python
-# pins) start only when it says so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
+# pins) start only when it says so, and inside them xtask runs only the selected crates' tests.
+# DEC-2649 splits the cell jobs by event: a pull request runs only `cell` and `cell-kill-switch`;
+# the other eight, and `cell-demo-web` (already withheld per PR by DEC-2634), start only on main's
+# own runs and the nightly's dispatch, which have no diff base and select everything. `fast-lint`, the mutation plan
 # and its shards run on every ready pull request as before. A build input, CI, xtask, any
 # manifest, an unknown path, and a run with no diff base select everything. A skipped job starts
 # no runner; `fast` and `full` still pass or fail, and accept a skip only where `select` asked for
@@ -111,6 +114,7 @@ jobs:
       schema_mutants: ${{ steps.select.outputs.schema_mutants }}
       cell: ${{ steps.select.outputs.cell }}
       cell_web: ${{ steps.select.outputs.cell_web }}
+      cell_post_merge: ${{ steps.select.outputs.cell_post_merge }}
       reasons: ${{ steps.select.outputs.reasons }}
       # DEC-2065. Where the cell jobs run: the founder's self-hosted runners, named by the repository
       # variable CI_RUNNER, but only for main's own pushes and dispatches and pull requests from this
@@ -552,8 +556,9 @@ jobs:
   # the image this change built, runs its drills (each again with its bug planted, which each
   # must catch, is `cell-seeded`'s; the journal's drills run in `cell-journal` and `cell-failover`, and the kill
   # switch's in `cell-kill-switch` and the executor's, the vault's and the token exchange's in `cell-executor`, `cell-vault` and `cell-exchange`, below); `cell demo --no-web`, an upgrade of every release in place, is `cell-upgrade`'s (DEC-464). Not yet in `full` (DEC-993 item 10); the chart's invariants are in
-  # `fast-python`. It and the nine cell jobs below start only when `select` says the diff reaches
-  # the cell (DEC-2609); main's nightly run has no diff base and runs all ten.
+  # `fast-python`. It and `cell-kill-switch` are the two cell jobs a pull request runs (DEC-2649);
+  # every cell job below starts only when `select` says the diff reaches the cell (DEC-2609), and
+  # main's own runs and the nightly's dispatch, which have no diff base, run all of them.
   # All eleven run on `select`'s `runner`: the self-hosted runners once the founder sets CI_RUNNER,
   # never for a fork's pull request, and GitHub's ubuntu-24.04 otherwise (DEC-2065).
   cell:
@@ -600,7 +605,7 @@ jobs:
   # it; it keeps the ready steps green.
   cell-demo:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
@@ -750,7 +755,7 @@ jobs:
   # `cell` is not (DEC-993 item 10). It restores `cell`'s cache and saves none of its own.
   cell-journal:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     strategy:
@@ -800,7 +805,7 @@ jobs:
   # Not required, as `cell` is not. It restores `cell`'s cache and saves none of its own.
   cell-failover:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     strategy:
@@ -900,7 +905,7 @@ jobs:
   # cache and saves none of its own.
   cell-executor:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     strategy:
@@ -954,7 +959,7 @@ jobs:
   # and saves none of its own.
   cell-vault:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     strategy:
@@ -1004,7 +1009,7 @@ jobs:
   # `cell`'s cache and saves none of its own.
   cell-exchange:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     strategy:
@@ -1054,7 +1059,7 @@ jobs:
   # `cell`'s cache and saves none of its own.
   cell-seeded:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
@@ -1096,7 +1101,7 @@ jobs:
   # required, as `cell` is not. It restores `cell`'s cache and saves none of its own.
   cell-upgrade:
     needs: select
-    if: needs.select.outputs.cell == 'true'
+    if: needs.select.outputs.cell_post_merge == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
@@ -1402,14 +1407,15 @@ jobs:
             *) test "$MUTANTS_RESULT" = success ;;
           esac
 
-  # DEC-1190 item 5, DEC-2610. The nightly dispatches this workflow on main, and every push to main
+  # DEC-1190 item 5, DEC-2610, DEC-2649. The nightly dispatches this workflow on main, and every push to main
   # (and every merge `merge.yml` makes) runs it there too, where `select` has no diff base and
-  # selects everything; when that run fails, this opens an issue naming only the event, the run and
-  # the verdicts, never a log line. A run cancelled by a newer one reports nothing, nor does a run
-  # on any other branch.
+  # selects everything, including the eight cell jobs a pull request withholds (DEC-2649); when
+  # that run fails — `fast`, `full` or any cell job — this opens an issue naming only the event,
+  # the run and the verdicts, never a log line. A run cancelled by a newer one reports nothing,
+  # nor does a run on any other branch.
   report-main:
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
-    needs: [fast, full]
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && contains(needs.*.result, 'failure') }}
+    needs: [fast, full, cell, cell-demo, cell-demo-web, cell-journal, cell-failover, cell-kill-switch, cell-executor, cell-vault, cell-exchange, cell-seeded, cell-upgrade]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
@@ -1418,12 +1424,11 @@ jobs:
       - name: Open an issue for the failed run on main (opaque)
         env:
           GH_TOKEN: ${{ github.token }}
-          FAST_RESULT: ${{ needs.fast.result }}
-          FULL_RESULT: ${{ needs.full.result }}
+          VERDICTS: fast ${{ needs.fast.result }}, full ${{ needs.full.result }}, cell ${{ needs.cell.result }}, kill-switch ${{ needs.cell-kill-switch.result }}, demo ${{ needs.cell-demo.result }}, demo-web ${{ needs.cell-demo-web.result }}, journal ${{ needs.cell-journal.result }}, failover ${{ needs.cell-failover.result }}, executor ${{ needs.cell-executor.result }}, vault ${{ needs.cell-vault.result }}, exchange ${{ needs.cell-exchange.result }}, seeded ${{ needs.cell-seeded.result }}, upgrade ${{ needs.cell-upgrade.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "ci on main failed at ${GITHUB_SHA}"; then
             echo "An open issue already reports ci on main failing at ${GITHUB_SHA}"
             exit 0
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190, DEC-2610)"
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (${VERDICTS}): ${RUN_URL} (DEC-1190, DEC-2610, DEC-2649)"

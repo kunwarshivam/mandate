@@ -207,9 +207,13 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   crate handed another's binary (`MANDATE_RH_SIM_BIN`) follows that crate.
   `fast-python`, `fast-portable` (the runner's crates), `fast-rh-sim-live`, `full-checks` (any
   path outside the documentation and `web/`), `schema-mutants` (`schemas/`, the specs, the
-  backlog, the pinned Python requirements), the ten cell jobs (`deploy/`, the cell's Python
-  pins, and any crate the cell's images hold or are built on; DEC-2609), and `cell-demo-web` (the
-  cell jobs' paths, or `web/`; DEC-2609 item 5) start only when the diff needs them. Lint, the spec
+  backlog, the pinned Python requirements), `cell` and `cell-kill-switch` (the cell jobs' paths:
+  `deploy/`, the cell's Python
+  pins, and any crate the cell's images hold or are built on; DEC-2609) start only when the diff
+  needs them. The other eight cell jobs (`cell-demo`, `cell-journal`, `cell-failover`,
+  `cell-executor`, `cell-vault`, `cell-exchange`, `cell-seeded`, `cell-upgrade`) and
+  `cell-demo-web` (the cell jobs' paths, or `web/`; DEC-2609 item 5) run only on `main`'s own
+  runs and the nightly's dispatch, not on a pull request (DEC-2634, DEC-2649). Lint, the spec
   guard and mutants on the diff of safety-critical crates run as always. `Cargo.lock`, any
   `Cargo.toml`, `rust-toolchain.toml`, `xtask/`, `.github/`, `.cargo/`, `deny.toml`,
   `clippy.toml`, an unknown path, and a run with no diff base select everything. `fast` and
