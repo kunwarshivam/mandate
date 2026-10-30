@@ -18,6 +18,8 @@ import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-u
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 import type { ConnectionDetail } from "@/api/connect";
 import type { Alerts } from "@/api/alerts";
+import type { AgentPnl, Dashboard, EquityHistory, HistoryRange } from "@/api/portfolio";
+import type { ServedRead } from "./portfolio";
 import type { ChatPort } from "@/api/chat";
 import { fixtureChat } from "./fixture-chat";
 
@@ -220,6 +222,8 @@ export interface Runtime {
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
   /** The registered instruments and signal models a version may name (§4.1, DEC-2136); `null` over the fixtures, whose set-up uses the fixture catalogue. */
   catalogue: (() => Promise<CatalogueAnswer>) | null;
+  /** The Portfolio page's reads (§4.7, DEC-2413); `null` over the fixtures, whose page reads the fixture workspace. */
+  portfolio: PortfolioPort | null;
   /** An instrument's last trusted daily close (`GET /instruments/{id}/price`, DEC-2152); `null` over the fixtures. */
   price: ((instrumentId: string) => Promise<PriceAnswer>) | null;
   /**
@@ -308,6 +312,13 @@ export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: str
 
 /** A stream's records with their bodies, and whether they reach back to the stream's first record; or why they were not read. */
 export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boolean } | { ok: false; reason: string };
+
+/** The Portfolio page's reads (§4.7, DEC-2413): the accounts' latest snapshots, their equity over a range, and an agent's gross P&L; each failed read carries its code. */
+export interface PortfolioPort {
+  dashboard: () => Promise<ServedRead<Dashboard>>;
+  history: (range: HistoryRange) => Promise<ServedRead<EquityHistory>>;
+  pnl: (agentId: string) => Promise<ServedRead<AgentPnl>>;
+}
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
@@ -753,7 +764,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, price: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, askAgent: null, catalogue: null, portfolio: null, price: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
