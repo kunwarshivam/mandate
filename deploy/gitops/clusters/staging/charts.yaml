@@ -1,14 +1,18 @@
 # The repository's own charts as staging runs them: OCI artifacts that release.yml's publish-index
-# job pushed from `main` (`cargo xtask release publish-charts`; these from a58f954d, release run
-# 39254559497, whose images run 39262450314 signed), pinned by digest, and used only once Flux has verified the digest's keyless
-# signature from that workflow on `main` (DEC-2015 item 3). Promotion rewrites the digests here and
-# in images.yaml together (DEC-2016).
+# job pushed from `main` (`cargo xtask release publish-charts`), pinned by digest, and used only
+# once Flux has verified the digest's keyless signature from that workflow on `main` (DEC-2015
+# item 3). Each names, as `mandate.dev/chart-version`, the version its digest was published as,
+# whose `+g` suffix is the commit it was packaged from: test_gitops renders staging's values against
+# that commit's chart, the one Flux installs. Promotion rewrites the digests and versions here and
+# the images in images.yaml together (DEC-2016).
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   name: mandate-backup-plugin-tls
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g74bf65579dbf
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-backup-plugin-tls
@@ -28,6 +32,8 @@ kind: OCIRepository
 metadata:
   name: mandate-journal-db
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g74bf65579dbf
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-journal-db
@@ -47,6 +53,8 @@ kind: OCIRepository
 metadata:
   name: mandate-workspace
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g74bf65579dbf
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-workspace
@@ -66,6 +74,8 @@ kind: OCIRepository
 metadata:
   name: mandate-vault-server
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g74bf65579dbf
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-vault-server

@@ -3,7 +3,8 @@
 //!
 //! Staging follows `main`. `promote staging <dir>` reads a `release.yml` run on `main`'s `CHARTS`
 //! (the signed charts) and `PUBLISHED` (the signed multi-arch image indexes) from `<dir>`, and
-//! rewrites the chart digests in `deploy/gitops/clusters/staging/charts.yaml` and the images in its
+//! rewrites the chart digests, with the version each was published as, in
+//! `deploy/gitops/clusters/staging/charts.yaml` and the images in its
 //! `images.yaml`. Production moves only by `promote production`, which copies staging's two files'
 //! digests as they stand. `deploy/tests/test_gitops.py` refuses a production digest that staging
 //! has not run on `main`.
@@ -95,24 +96,65 @@ fn chart_images(published: &str) -> Result<BTreeMap<String, String>> {
     Ok(images)
 }
 
-/// Each published chart's digest from `CHARTS`: every one of [`PUBLISHED_CHARTS`], exactly once.
-fn chart_digests(charts: &str) -> Result<BTreeMap<String, String>> {
-    let mut digests = BTreeMap::new();
+/// The line of each of an overlay's own OCIRepositories that names the chart version its digest
+/// was published as, `<Chart.yaml version>+g<12 hex>`, in the annotation
+/// `mandate.dev/chart-version`. So the commit a pinned chart was packaged from is known offline,
+/// and `deploy/tests/test_gitops.py` renders each release against that commit's chart, the one
+/// Flux installs, not `main`'s: values on `main` reach the cluster at once, a chart only by
+/// promotion.
+const VERSION_LINE: &str = "    mandate.dev/chart-version: ";
+
+/// One pinned chart: the digest Flux installs, and the version `CHARTS` lists it under.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Pin {
+    digest: String,
+    version: String,
+}
+
+/// Refuses a chart version that is not `<version>+g<the commit's first twelve hex digits>`, the
+/// form `release publish-charts` writes.
+fn checked_version(version: &str) -> Result<String> {
+    let commit = version
+        .split_once("+g")
+        .map(|(_, commit)| commit)
+        .with_context(|| format!("chart version {version} names no commit"))?;
+    ensure!(
+        commit.len() == 12
+            && commit
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        "chart version {version} names no twelve-digit commit"
+    );
+    Ok(version.to_owned())
+}
+
+/// Each published chart's pin from `CHARTS`: every one of [`PUBLISHED_CHARTS`], exactly once,
+/// each with its version.
+fn chart_pins(charts: &str) -> Result<BTreeMap<String, Pin>> {
+    let mut pins = BTreeMap::new();
     for line in charts.lines().filter(|line| !line.trim().is_empty()) {
         let (name, _, digest) = entry(line, CHART_PREFIX)?;
         ensure!(
             PUBLISHED_CHARTS.contains(&name.as_str()),
             "CHARTS lists an unknown chart {name}"
         );
+        let version = line
+            .split_whitespace()
+            .nth(2)
+            .with_context(|| format!("CHARTS lists {name} with no version"))?;
+        let pin = Pin {
+            digest,
+            version: checked_version(version)?,
+        };
         ensure!(
-            digests.insert(name.clone(), digest).is_none(),
+            pins.insert(name.clone(), pin).is_none(),
             "CHARTS lists {name} twice"
         );
     }
     for chart in PUBLISHED_CHARTS {
-        ensure!(digests.contains_key(chart), "CHARTS has no {chart}");
+        ensure!(pins.contains_key(chart), "CHARTS has no {chart}");
     }
-    Ok(digests)
+    Ok(pins)
 }
 
 /// An environment's `images.yaml`: its header, its tier, then each image of `images` in key order.
@@ -162,9 +204,11 @@ fn read_images(text: &str, environment: Environment) -> Result<BTreeMap<String, 
     Ok(images)
 }
 
-/// The chart digests a `charts.yaml` pins, by the name in each OCIRepository's `metadata`.
-fn read_chart_digests(charts: &str) -> Result<BTreeMap<String, String>> {
-    let mut digests = BTreeMap::new();
+/// The charts a `charts.yaml` pins, by the name in each OCIRepository's `metadata`: each with
+/// both its digest and its version annotation.
+fn read_chart_pins(charts: &str) -> Result<BTreeMap<String, Pin>> {
+    let mut digests: BTreeMap<String, String> = BTreeMap::new();
+    let mut versions: BTreeMap<String, String> = BTreeMap::new();
     let mut current: Option<&str> = None;
     for line in charts.lines() {
         if line == "---" {
@@ -179,17 +223,34 @@ fn read_chart_digests(charts: &str) -> Result<BTreeMap<String, String>> {
                     .is_none(),
                 "charts.yaml pins {name} twice"
             );
+        } else if let Some(version) = line.strip_prefix(VERSION_LINE) {
+            let name = current.context("charts.yaml: a chart version before its name")?;
+            ensure!(
+                versions
+                    .insert(name.to_owned(), checked_version(version.trim())?)
+                    .is_none(),
+                "charts.yaml names {name}'s version twice"
+            );
         }
     }
-    Ok(digests)
+    ensure!(
+        digests.keys().eq(versions.keys()),
+        "charts.yaml: every pinned chart needs both its digest and its {} annotation",
+        VERSION_LINE.trim()
+    );
+    Ok(digests
+        .into_iter()
+        .zip(versions.into_values())
+        .map(|((name, digest), version)| (name, Pin { digest, version }))
+        .collect())
 }
 
-/// `charts`, an environment's `charts.yaml`, with each OCIRepository's digest set from `digests`.
-/// Every chart it pins must be one `digests` holds; a published chart it does not pin, such as
-/// one whose release it does not run yet, is left out.
-fn rewrite_charts(charts: &str, digests: &BTreeMap<String, String>) -> Result<String> {
+/// `charts`, an environment's `charts.yaml`, with each OCIRepository's digest and version set
+/// from `pins`. Every chart it pins must be one `pins` holds; a published chart it does not pin,
+/// such as one whose release it does not run yet, is left out.
+fn rewrite_charts(charts: &str, pins: &BTreeMap<String, Pin>) -> Result<String> {
     ensure!(
-        !read_chart_digests(charts)?.is_empty(),
+        !read_chart_pins(charts)?.is_empty(),
         "charts.yaml pins no chart"
     );
     let mut out = String::with_capacity(charts.len());
@@ -200,18 +261,17 @@ fn rewrite_charts(charts: &str, digests: &BTreeMap<String, String>) -> Result<St
         } else if let Some(name) = line.strip_prefix("  name: ") {
             current = Some(name.trim());
         }
-        match line.strip_prefix("    digest: ") {
-            Some(_) => {
-                let name = current.context("charts.yaml: a digest before its name")?;
-                let digest = digests
-                    .get(name)
-                    .with_context(|| format!("no digest for {name}"))?;
-                out.push_str(&format!("    digest: {digest}\n"));
-            }
-            None => {
-                out.push_str(line);
-                out.push('\n');
-            }
+        let pin = || -> Result<&Pin> {
+            let name = current.context("charts.yaml: a pin before its name")?;
+            pins.get(name).with_context(|| format!("no pin for {name}"))
+        };
+        if line.starts_with("    digest: ") {
+            out.push_str(&format!("    digest: {}\n", pin()?.digest));
+        } else if line.starts_with(VERSION_LINE) {
+            out.push_str(&format!("{VERSION_LINE}{}\n", pin()?.version));
+        } else {
+            out.push_str(line);
+            out.push('\n');
         }
     }
     Ok(out)
@@ -255,16 +315,16 @@ pub(crate) fn promote(
     environment: Environment,
     published: Option<&Path>,
 ) -> Result<()> {
-    let (images, digests) = match (environment, published) {
+    let (images, pins) = match (environment, published) {
         (Environment::Staging, Some(dir)) => (
             chart_images(&read(&dir.join("PUBLISHED"))?)?,
-            chart_digests(&read(&dir.join("CHARTS"))?)?,
+            chart_pins(&read(&dir.join("CHARTS"))?)?,
         ),
         (Environment::Production, None) => {
             let staging = cluster_dir(root, Environment::Staging);
             (
                 read_images(&read(&staging.join("images.yaml"))?, Environment::Staging)?,
-                read_chart_digests(&read(&staging.join("charts.yaml"))?)?,
+                read_chart_pins(&read(&staging.join("charts.yaml"))?)?,
             )
         }
         (Environment::Staging, None) => {
@@ -275,7 +335,7 @@ pub(crate) fn promote(
         }
     };
     let dir = cluster_dir(root, environment);
-    let charts = rewrite_charts(&read(&dir.join("charts.yaml"))?, &digests)?;
+    let charts = rewrite_charts(&read(&dir.join("charts.yaml"))?, &pins)?;
     write_all(&[
         (dir.join("charts.yaml"), charts),
         (dir.join("images.yaml"), images_yaml(environment, &images)),
@@ -598,48 +658,79 @@ mod tests {
 
     #[test]
     fn every_published_chart_is_listed_once() -> Result<()> {
-        let digests = chart_digests(&charts_listing())?;
-        assert_eq!(digests.len(), PUBLISHED_CHARTS.len());
-        assert_eq!(digests["mandate-workspace"], digest('4'));
+        let pins = chart_pins(&charts_listing())?;
+        assert_eq!(pins.len(), PUBLISHED_CHARTS.len());
+        assert_eq!(
+            pins["mandate-workspace"],
+            Pin {
+                digest: digest('4'),
+                version: "0.1.0+g545f4852774c".to_owned()
+            }
+        );
         let missing: String = charts_listing()
             .lines()
             .filter(|line| !line.contains("mandate-vault-server"))
             .map(|line| format!("{line}\n"))
             .collect();
-        assert!(chart_digests(&missing).is_err());
-        assert!(chart_digests(&format!("{}{}", charts_listing(), charts_listing())).is_err());
+        assert!(chart_pins(&missing).is_err());
+        assert!(chart_pins(&format!("{}{}", charts_listing(), charts_listing())).is_err());
         assert!(
-            chart_digests(&charts_listing().replace("mandate-workspace", "mandate-other")).is_err()
+            chart_pins(&charts_listing().replace("mandate-workspace", "mandate-other")).is_err()
         );
-        assert!(chart_digests(&charts_listing().replace("/charts/", "/")).is_err());
+        assert!(chart_pins(&charts_listing().replace("/charts/", "/")).is_err());
+        assert!(
+            chart_pins(&charts_listing().replace("  0.1.0+g545f4852774c", "")).is_err(),
+            "a chart with no version names no commit to render it from"
+        );
+        for malformed in ["0.1.0", "0.1.0+g545f4852774", "0.1.0+g545f4852774C"] {
+            assert!(
+                chart_pins(&charts_listing().replace("0.1.0+g545f4852774c", malformed)).is_err(),
+                "{malformed}"
+            );
+        }
         Ok(())
     }
 
     #[test]
     fn each_pinned_chart_is_rewritten_and_nothing_else_changes() -> Result<()> {
-        let digests = chart_digests(&charts_listing())?;
+        let pins = chart_pins(&charts_listing())?;
         let before = overlay(Environment::Staging, "charts.yaml")?;
-        let after = rewrite_charts(&before, &digests)?;
-        let pinned = read_chart_digests(&before)?;
-        let rewritten = read_chart_digests(&after)?;
+        let after = rewrite_charts(&before, &pins)?;
+        let pinned = read_chart_pins(&before)?;
+        let rewritten = read_chart_pins(&after)?;
         assert_eq!(
             rewritten.keys().collect::<Vec<_>>(),
             pinned.keys().collect::<Vec<_>>()
         );
         for (name, value) in &rewritten {
-            assert_eq!(value, &digests[name]);
+            assert_eq!(value, &pins[name]);
         }
         let unchanged = |text: &str| -> Vec<String> {
             text.lines()
-                .filter(|line| !line.starts_with("    digest: "))
+                .filter(|line| !line.starts_with("    digest: ") && !line.starts_with(VERSION_LINE))
                 .map(str::to_owned)
                 .collect()
         };
         assert_eq!(unchanged(&before), unchanged(&after));
-        let mut fewer = digests.clone();
+        let mut fewer = pins.clone();
         fewer.remove("mandate-workspace");
         assert!(rewrite_charts(&before, &fewer).is_err());
-        assert!(rewrite_charts("---\n", &digests).is_err());
+        assert!(rewrite_charts("---\n", &pins).is_err());
+        let mut dropped = false;
+        let unversioned: String = before
+            .lines()
+            .filter(|line| {
+                let first = !dropped && line.starts_with(VERSION_LINE);
+                dropped |= first;
+                !first
+            })
+            .map(|line| format!("{line}\n"))
+            .collect();
+        assert!(dropped);
+        assert!(
+            read_chart_pins(&unversioned).is_err() && rewrite_charts(&unversioned, &pins).is_err(),
+            "a pinned chart without its version annotation is refused"
+        );
         Ok(())
     }
 
@@ -686,8 +777,12 @@ mod tests {
 
         promote(&root, Environment::Staging, Some(&release))?;
         let staging = cluster_dir(&root, Environment::Staging);
-        let staged = read_chart_digests(&read(&staging.join("charts.yaml"))?)?;
-        assert_eq!(staged["mandate-workspace"], digest('4'));
+        let staged = read_chart_pins(&read(&staging.join("charts.yaml"))?)?;
+        assert_eq!(staged["mandate-workspace"].digest, digest('4'));
+        assert_eq!(
+            staged["mandate-workspace"].version, "0.1.0+g545f4852774c",
+            "promotion writes the version each digest was published as, naming the chart's commit"
+        );
         assert_eq!(
             read_images(&read(&staging.join("images.yaml"))?, Environment::Staging)?,
             chart_images(&published())?
@@ -703,7 +798,7 @@ mod tests {
         let mut copied = staged.clone();
         copied.remove("mandate-vault-server");
         assert_eq!(
-            read_chart_digests(&read(&production.join("charts.yaml"))?)?,
+            read_chart_pins(&read(&production.join("charts.yaml"))?)?,
             copied,
             "production copies every chart it pins from staging, and never gains the vault, which \
              staging alone runs (DEC-2051)"

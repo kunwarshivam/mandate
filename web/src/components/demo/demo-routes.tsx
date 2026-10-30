@@ -1,6 +1,7 @@
 import { type ReactNode, Suspense } from "react";
 import { AgentScreen } from "@/components/agent-chat/agent-screen";
 import { HomeScreen } from "@/components/agent-chat/home";
+import { PortfolioScreen } from "@/components/portfolio/portfolio-screen";
 import { SettingsScreen } from "@/components/agent-chat/settings-screen";
 import { SetupScreen } from "@/components/agent-chat/setup-screen";
 import { ApprovalRequestScreen } from "@/components/screens/approval-request";
@@ -36,6 +37,12 @@ export function demoScreen(href: string): ReactNode | null {
             <SetupScreen />
           </WorkspaceGate>
         </Suspense>
+      ) : null;
+    case "portfolio":
+      return second === undefined ? (
+        <WorkspaceGate api>
+          <PortfolioScreen />
+        </WorkspaceGate>
       ) : null;
     case "settings":
       return second === undefined ? <SettingsScreen /> : null;

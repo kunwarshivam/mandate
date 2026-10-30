@@ -10,8 +10,8 @@ import { SCREENS } from "../src/lib/screens";
  */
 
 const WIDTHS = [1024, 1280, 1440, 1920] as const;
-const LABELS = ["Home", "New", "Settings"];
-const DOCKED: Record<string, string> = { home: "Home", new: "New", settings: "Settings" };
+const LABELS = ["Home", "Portfolio", "New", "Settings"];
+const DOCKED: Record<string, string> = { home: "Home", portfolio: "Portfolio", new: "New", settings: "Settings" };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 const items = (page: Page) => dock(page).locator("a, button:not([data-slot=stop-control])");
@@ -54,7 +54,7 @@ for (const width of WIDTHS) {
 
 test("the dock does not shift when the current section changes", async ({ page }) => {
   const boxes: string[] = [];
-  for (const path of ["/", "/new", "/settings"]) {
+  for (const path of ["/", "/portfolio", "/new", "/settings"]) {
     await open(page, path, 1280);
     boxes.push(JSON.stringify(await dock(page).boundingBox()));
   }

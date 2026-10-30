@@ -35,8 +35,8 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
 }
 
 /**
- * The phone's one navigation (DEC-207, DEC-479): Home, Messages with the count of requests waiting,
- * Agents, and More, a sheet with every other screen, Approvals among them, then Stop at the bar's
+ * The phone's one navigation (DEC-207, DEC-2293, DEC-2413): Home with the count of requests
+ * waiting, Portfolio, New agent, and More, a sheet with every other screen, then Stop at the bar's
  * end for a role that may stop (DEC-452). A role
  * that sees no agents gets its home and More. The current tab's
  * icon sits on a pale pill that glides between tabs; with reduced motion it jumps.

@@ -25,9 +25,10 @@ describe("what the phone reaches (DEC-207)", () => {
     for (const href of reached) expect(canOpen(role, href), href).toBe(true);
   });
 
-  it("gives a role that sees agents Home and New agent as tabs, with Settings under More (DEC-2293)", () => {
+  it("gives a role that sees agents Home, Portfolio and New agent as tabs, with Settings under More (DEC-2293, DEC-2413)", () => {
     expect(phoneTabs("owner").map((t) => [t.label, t.href])).toEqual([
       ["Home", "/"],
+      ["Portfolio", "/portfolio"],
       ["New agent", "/new"],
     ]);
     expect(moreGroups("owner").flatMap((g) => g.links.map((l) => l.href))).toEqual(["/settings"]);

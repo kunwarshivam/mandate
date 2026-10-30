@@ -19955,7 +19955,7 @@ mod tests {
         let allowed_runs_on = [
             "ubuntu-24.04",
             "ubuntu-24.04-arm",
-            "macos-14",
+            "macos-15",
             "${{ matrix.runner }}",
             "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
             "${{ needs.select.outputs.runner }}",
@@ -22643,9 +22643,10 @@ jq -r "$filter" "$src"
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
 
-    /// DEC-2610: a merge `merge.yml` makes pushes with its own token, which starts no workflow, so
-    /// it dispatches `ci` on `main` once after any merge, and only then, with the one right that
-    /// takes.
+    /// DEC-2610, DEC-2651: a merge `merge.yml` makes pushes with its own token, which starts no
+    /// workflow, so after any merge, and only then, with the one right that takes, it dispatches
+    /// on `main`, once each, the workflows a push to `main` starts: `ci` and `release` as their
+    /// post-merge runs, and `web-deploy`. A failed dispatch never stops a later one.
     #[test]
     fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
@@ -22675,19 +22676,44 @@ jq -r "$filter" "$src"
                 .any(|l| l.contains("actions:") || l.contains("dispatches")),
             "the merging job holds no `actions` right and dispatches nothing"
         );
-        let dispatch = job("ci-on-main")?;
+        let dispatch = job("post-merge")?;
         for line in [
             "needs: merge",
             "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
             "actions: write",
-            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
-             -f ref=main -f \"inputs[post_merge]=true\"",
         ] {
             assert!(
                 dispatch.iter().any(|l| l == line),
-                "`ci-on-main` has `{line}`"
+                "`post-merge` has `{line}`"
             );
         }
+        let runs = [
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
+             -f ref=main -f \"inputs[post_merge]=true\"",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches\" \
+             -f ref=main -f \"inputs[post_merge]=true\"",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/web-deploy.yml/dispatches\" \
+             -f ref=main",
+        ];
+        let dispatched: Vec<&String> = dispatch.iter().filter(|l| l.starts_with("run:")).collect();
+        assert_eq!(
+            dispatched, runs,
+            "`post-merge` runs these three dispatches on main, in this order, and nothing else \
+             (DEC-2651)"
+        );
+        assert_eq!(
+            dispatch
+                .iter()
+                .filter(|l| *l == "if: ${{ !cancelled() }}")
+                .count(),
+            2,
+            "a failed dispatch never stops a later one"
+        );
+        assert_eq!(
+            workflow.matches("/dispatches").count(),
+            runs.len(),
+            "only `post-merge` dispatches anything"
+        );
         let rights: Vec<&String> = dispatch
             .iter()
             .skip_while(|l| *l != "permissions:")
