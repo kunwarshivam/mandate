@@ -1330,9 +1330,9 @@ jobs:
           path: target/mutant-costs/mutant-costs.json
           retention-days: 14
 
-  # DEC-688, DEC-1004, DEC-2637. The workspace API schemas' mutation sweep
+  # DEC-688, DEC-1004, DEC-2637, DEC-2649. The workspace API schemas' mutation sweep
   # (`schemas/workspace-api/mutate_schemas.py`) runs here beside `full-checks`, which stays under ten
-  # minutes (DEC-464), as ten fixed shards of about 137 mutants, about six minutes each on the
+  # minutes (DEC-464), as twenty fixed shards of about 90 mutants, about five minutes each on the
   # slowest runner; `full` needs every one. Each shard runs the three checkers on the unmutated tree
   # first; they alone also run inside `full-checks`.
   schema-mutants:
@@ -1346,7 +1346,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/10", "1/10", "2/10", "3/10", "4/10", "5/10", "6/10", "7/10", "8/10", "9/10"]
+        shard: ["0/20", "1/20", "2/20", "3/20", "4/20", "5/20", "6/20", "7/20", "8/20", "9/20", "10/20", "11/20", "12/20", "13/20", "14/20", "15/20", "16/20", "17/20", "18/20", "19/20"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
