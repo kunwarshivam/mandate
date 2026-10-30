@@ -98,7 +98,7 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 /// - `merge.yml`'s merge job, whose `github.token` may write, writes the fixed `merged=true` as
-///   its output, so `ci-on-main` knows to dispatch `ci`.
+///   its output, so `post-merge` knows to dispatch `ci`, `release` and `web-deploy`.
 /// - `release.yml`'s two `publish` jobs, which hold `id-token: write`, write the build's printed
 ///   digest as their output, the public digest `compare` checks.
 const ALLOWED: &[(&str, &str, &str)] = &[

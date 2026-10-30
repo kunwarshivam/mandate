@@ -7,13 +7,16 @@
 # `build-a` keeps its binaries, SHA256SUMS and SBOMs as `release-<commit>-<arch>`, and builds one
 # image a binary (E21-35, DEC-971), signed by an ephemeral test key, and drills the start-up
 # signature check on them: an unsigned and a wrongly signed image are refused outside dev and CI.
-# Only a push to `main` publishes: each arch's `publish` job rebuilds, requires its `build-a`'s
+# Only a push to `main` publishes, or the post-merge dispatch `merge.yml` sends in its place: each
+# arch's `publish` job rebuilds, requires its `build-a`'s
 # digest, pushes that arch's images to GHCR by digest, signs each keyless with the run's OIDC
 # identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch index a cell
 # pulls on any arch, and the hosted clusters' charts (E21-58). A pull request that changes the
 # release build runs the same builds and drills in `release-check.yml`, which keeps, publishes
 # and signs nothing and holds no deploy gate, so this workflow, which holds one, runs only on
-# `main` and on dispatch (leak-guard L12, DEC-2032; ES-12). On a
+# `main` and on dispatch (leak-guard L12, DEC-2032; ES-12). A merge `merge.yml` makes pushes with
+# its own token, which starts no workflow, so it dispatches this workflow on `main` with
+# `post_merge`, which runs the push's path and never the signing one (DEC-2651). On any other
 # manual dispatch from `main` only, `release-signing` waits for the founder to approve its
 # `release-signing` environment, then signs each arch's binaries and SHA256SUMS with the release key
 # that environment's secrets hold (DEC-2024, as the founder decided in DEC-2605 rows 8 and 9).
@@ -24,16 +27,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      post_merge:
+        description: "A post-merge run on main, sent by merge.yml in place of a push (DEC-2651)"
+        type: boolean
+        default: false
 
 permissions: {}
 
 # A pull request's runs share one group, so a new push cancels the old run. Pushes to `main` share
 # one group that cancels nothing: the running release finishes, and of the pushes behind it only
-# the newest waits, so a burst of merges releases once, at the tip (DEC-2025). A manual dispatch
-# has a group of its own, because its `release-signing` job can wait hours for the founder's
-# approval and must not hold the pushes' releases behind it.
+# the newest waits, so a burst of merges releases once, at the tip (DEC-2025). `merge.yml`'s
+# post-merge dispatch stands in for a push, so it joins the pushes' group (DEC-2651). Any other
+# manual dispatch has a group of its own, because its `release-signing` job can wait hours for the
+# founder's approval and must not hold the pushes' releases behind it.
 concurrency:
-  group: release-${{ github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref) || github.ref }}
+  group: release-${{ github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && !inputs.post_merge && format('dispatch-{0}', github.ref) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -194,12 +203,15 @@ jobs:
       - name: Each arch's two builds are identical
         run: echo "each arch's two release builds of this commit printed the same SHA256SUMS digest"
 
-  # A push to main only: never a pull request, never a branch (ES-12, E21-35). Each arch publishes
-  # from a runner of its own arch, and its rebuild must print its build-a's digest, so what is
-  # published is what `compare` proved reproducible.
+  # A push to main, or `merge.yml`'s post-merge dispatch on main in its place (DEC-2651): never a
+  # pull request, never a branch (ES-12, E21-35). A dispatch on `main` runs this same file at
+  # `refs/heads/main`, so the keyless signature's OIDC identity, the certificate subject
+  # `.github/workflows/release.yml@refs/heads/main` the clusters verify, is the push's. Each arch
+  # publishes from a runner of its own arch, and its rebuild must print its build-a's digest, so
+  # what is published is what `compare` proved reproducible.
   publish-amd64:
     needs: [build-a-amd64, compare]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.post_merge == true)) && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -238,7 +250,7 @@ jobs:
 
   publish-arm64:
     needs: [build-a-arm64, compare]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.post_merge == true)) && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
@@ -279,7 +291,7 @@ jobs:
   # read back from the registry by digest only after every arch has published (DEC-1060).
   publish-index:
     needs: [publish-amd64, publish-arm64]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.post_merge == true)) && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -323,13 +335,15 @@ jobs:
           name: charts-${{ github.sha }}
           path: published/CHARTS
 
-  # The five jobs below run on a manual dispatch from `main` only, never on a push or a pull
-  # request (DEC-2024, DEC-2026; DEC-2605 rows 8 and 9). `release-signing-build` rebuilds the release, requires
-  # its build-a's digest, so what is signed is what `compare` proved reproducible, and hands `dist`
-  # on. It holds no secret.
+  # The five jobs below run on a manual dispatch from `main` only, never on a push, a pull request
+  # or `merge.yml`'s post-merge dispatch, so a post-merge run never waits on the founder's
+  # approval (DEC-2024, DEC-2026; DEC-2605 rows 8 and 9; DEC-2651). Their condition holds no
+  # negation, which leak-guard L12 refuses on the job the founder approves.
+  # `release-signing-build` rebuilds the release, requires its build-a's digest, so what is signed
+  # is what `compare` proved reproducible, and hands `dist` on. It holds no secret.
   release-signing-build:
     needs: [build-a-amd64, build-a-arm64, compare]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.post_merge == false && github.ref == 'refs/heads/main' }}
     strategy:
       matrix:
         include:
@@ -376,7 +390,7 @@ jobs:
   # it whole.
   release-signing:
     needs: [build-a-amd64, build-a-arm64, release-signing-build]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.post_merge == false && github.ref == 'refs/heads/main' }}
     strategy:
       matrix:
         include:
@@ -427,7 +441,7 @@ jobs:
   # in fails the run.
   release-signing-check:
     needs: [release-signing]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.post_merge == false && github.ref == 'refs/heads/main' }}
     strategy:
       matrix:
         include:
@@ -466,7 +480,7 @@ jobs:
   # secret: only the run's own token, as `publish` on a push.
   release-signing-publish:
     needs: [release-signing-check]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.post_merge == false && github.ref == 'refs/heads/main' }}
     strategy:
       matrix:
         include:
@@ -510,7 +524,7 @@ jobs:
 
   release-signing-publish-index:
     needs: [release-signing-publish]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.post_merge == false && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
