@@ -34,22 +34,26 @@ spec:
       # The connect finish (DEC-2348 item 3): staging provisions `vault-approle-connection-manager`,
       # which only the finish's own pod holds; the API pod holds its own AppRole alone.
       connectFinish: true
-      # The founder's demo (DEC-2150) waives a first passkey's 24-hour cool-off at step-up with
-      # `stepUpCoolOffWaiver: true` and `stepUpCoolOffWaiverUntil: "2026-11-05T00:00:00Z"`. Neither
-      # is set until the promotion that moves staging's chart to a release at or after #2968: the
-      # chart staging pins (74bf6557) has no such keys, so its schema refused the whole workspace
-      # release (values-schema), and the API it runs has no waiver either. That promotion sets both
-      # in the same change; test_gitops renders these values against the pinned chart.
+      # The founder's demo (DEC-2150) waives a first passkey's 24-hour cool-off at step-up, until
+      # no later than the compiled ceiling. Set with the promotion to c6bb0c57, whose chart (after
+      # #2968) accepts both keys; test_gitops renders these values against the pinned chart.
+      stepUpCoolOffWaiver: true
+      stepUpCoolOffWaiverUntil: "2026-11-05T00:00:00Z"
+      # The founder's subject link (BOOTSTRAP.md founding step 2): staging's apply logged
+      # `founding: linked`, so the ConfigMap holds the link and the API reads it to sign the
+      # founder in.
+      subjectLinks: subject-links
     # The paper Alpaca OAuth app (DEC-2636): staging's API host is api-staging.owlhead.ai. The
     # client id is set once the founder registers the app; the secret is the vault's, never here.
     alpacaOAuth:
       clientId: "6a91aa353d0cf78e533b1487ca328e47"
       redirectUri: https://api-staging.owlhead.ai/v1/oauth/alpaca/callback
     # The founder's principal, an opaque ULID (DEC-2114): staging's apply links the founder's
-    # identity-provider subject to it as a digest in the `subject-links` ConfigMap. Founding is off
-    # until the `mandate` image staging runs has `workspace found --open`.
+    # identity-provider subject to it as a digest in the `subject-links` ConfigMap. Founding is on
+    # (BOOTSTRAP.md step 3): the `mandate` image staging runs, from c6bb0c57, has
+    # `workspace found --open`, so the founding hook opens the workspace and writes the grant.
     founding:
-      enabled: false
+      enabled: true
       member: 01KDEM0000000000000000000F
     # The dispatcher's one email recipient (DEC-2080): an opaque recipient id, never an address,
     # mailed only through the recorded transport, which sends nothing while the general email
