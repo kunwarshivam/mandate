@@ -34,12 +34,12 @@ spec:
       # The connect finish (DEC-2348 item 3): staging provisions `vault-approle-connection-manager`,
       # which only the finish's own pod holds; the API pod holds its own AppRole alone.
       connectFinish: true
-      # The founder's demo (DEC-2150): a first passkey's 24-hour cool-off is waived at step-up
-      # until the expiry, each waiver journaled as StepUpCoolOffWaived. The API refuses an expiry
-      # past its compiled ceiling, 2026-11-05T00:00:00Z, and waives nothing at or after it. Remove
-      # both after the demo (backlog E9-4-remove-staging-cool-off-waiver).
-      stepUpCoolOffWaiver: true
-      stepUpCoolOffWaiverUntil: "2026-11-05T00:00:00Z"
+      # The founder's demo (DEC-2150) waives a first passkey's 24-hour cool-off at step-up with
+      # `stepUpCoolOffWaiver: true` and `stepUpCoolOffWaiverUntil: "2026-11-05T00:00:00Z"`. Neither
+      # is set until the promotion that moves staging's chart to a release at or after #2968: the
+      # chart staging pins (74bf6557) has no such keys, so its schema refused the whole workspace
+      # release (values-schema), and the API it runs has no waiver either. That promotion sets both
+      # in the same change; test_gitops renders these values against the pinned chart.
     # The paper Alpaca OAuth app (DEC-2636): staging's API host is api-staging.owlhead.ai. The
     # client id is set once the founder registers the app; the secret is the vault's, never here.
     alpacaOAuth:
