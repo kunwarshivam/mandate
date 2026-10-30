@@ -1,6 +1,6 @@
 import type { AgentHolding } from "@/api/activity";
 import type { CatalogueInstrument } from "@/api/catalogue";
-import { type AgentPnl, BUCKET_SECONDS, type Dashboard, type EquityHistory, type HistoryRange } from "@/api/portfolio";
+import { type AgentPnl, type Dashboard, type EquityHistory, type HistoryRange, bucketOf } from "@/api/portfolio";
 import type { AgentDetail } from "@/api/read-models";
 import type { AgentMode, AssetClass, ShownEnvironment, Workspace } from "@/fixtures/types";
 import type { EquityRange } from "./chart-data";
@@ -48,6 +48,8 @@ export interface Portfolio {
   accountCash?: string | null;
   /** When the broker's figures were observed: the oldest account snapshot's `observed_at`. Absent over the fixtures. */
   observedAt?: string | null;
+  /** `false` when an account's snapshot names another environment than the page shows: its value and history are then not reported. */
+  accountsAgree?: boolean;
   /** What the agents hold, at market value. */
   invested: string | null;
   /** The agents' cash: each agent's equity less what it holds. */
@@ -95,25 +97,33 @@ export interface AccountFigures {
   cash: string | null;
   today: string | null;
   observedAt: string | null;
+  /**
+   * Whether every account's snapshot names the environment the page shows. `false` when they differ
+   * from each other or from it: paper and live money are never summed, nor labelled as one another.
+   */
+  agree: boolean;
 }
 
 /**
  * The accounts' value, cash and change on the day (DEC-2413), each summed in fixed point over every
  * account's latest snapshot. An account with no snapshot, a read that failed or has not answered, a
  * `day_change` a version 1 snapshot does not give, and a workspace with no account each make the sum
- * `null`: no part is ever read as zero.
+ * `null`: no part is ever read as zero. So does a snapshot whose environment is not the one the page
+ * shows (`environment`), since a paper and a live account summed would carry one label for both.
  */
-export function accountFigures(read: ServedRead<Dashboard> | undefined): AccountFigures {
+export function accountFigures(read: ServedRead<Dashboard> | undefined, environment: ShownEnvironment): AccountFigures {
   const none = { total: null, cash: null, today: null, observedAt: null };
-  if (!read?.ok || read.value.accounts.length === 0) return none;
+  if (!read?.ok || read.value.accounts.length === 0) return { ...none, agree: true };
   const snapshots = read.value.accounts.map((a) => a.snapshot);
-  if (snapshots.some((s) => s === null)) return none;
+  const agree = snapshots.every((s) => s === null || s.environment === environment);
+  if (!agree || snapshots.some((s) => s === null)) return { ...none, agree };
   const all = snapshots as NonNullable<(typeof snapshots)[number]>[];
   return {
     total: sumReported(all.map((s) => s.equity)),
     cash: sumReported(all.map((s) => s.cash)),
     today: sumReported(all.map((s) => s.day_change)),
     observedAt: all.map((s) => s.observed_at).reduce((oldest, at) => (at < oldest ? at : oldest)),
+    agree,
   };
 }
 
@@ -142,26 +152,33 @@ export interface AccountPoint {
 
 const unixSeconds = (at: string) => Date.parse(`${at.slice(0, 19)}Z`) / 1000;
 
+/** The account's line, or why it is not reported, in words the page shows after "Not reported:". */
+export type AccountLine = { ok: true; points: AccountPoint[] } | { ok: false; reason: string };
+
 /**
  * The account's line over the range read (DEC-2413): with one account, its points; with more, one
  * point for each bucket where every account has one, their equity summed in fixed point and timed at
  * the latest of them. A bucket missing an account is left out, since no snapshot is carried into a
- * bucket it is not in (§4.7). `null` when nothing is reported: no account, or an equity that cannot be read.
+ * bucket it is not in (§4.7). An empty line is a range in which no account has a snapshot. It is not
+ * reported with no account, when one account has no point in the range while another has, since
+ * that account's part of every point is missing, or with an equity that cannot be read.
  */
-export function accountLine(history: EquityHistory): AccountPoint[] | null {
-  if (history.accounts.length === 0) return null;
-  const width = BUCKET_SECONDS[history.range];
-  const byBucket = history.accounts.map((a) => new Map(a.points.map((p) => [Math.floor(unixSeconds(p.at) / width), p])));
+export function accountLine(history: EquityHistory): AccountLine {
+  if (history.accounts.length === 0) return { ok: false, reason: "no account" };
+  const empty = history.accounts.filter((a) => a.points.length === 0).length;
+  if (empty === history.accounts.length) return { ok: true, points: [] };
+  if (empty > 0) return { ok: false, reason: "an account has no snapshot in this range" };
+  const byBucket = history.accounts.map((a) => new Map(a.points.map((p) => [bucketOf(p.at, history.range), p])));
   const buckets = [...byBucket[0].keys()].filter((b) => byBucket.every((m) => m.has(b))).sort((x, y) => x - y);
-  const line: AccountPoint[] = [];
+  const points: AccountPoint[] = [];
   for (const b of buckets) {
     const parts = byBucket.map((m) => m.get(b) as { at: string; equity: string });
     const sum = exactSum(parts.map((p) => p.equity));
-    if (sum === null) return null;
+    if (sum === null) return { ok: false, reason: "an equity has more places than the page can sum" };
     const at = parts.map((p) => p.at).reduce((latest, t) => (t > latest ? t : latest));
-    line.push({ at, time: unixSeconds(at), equity: toDecimalString(sum) });
+    points.push({ at, time: unixSeconds(at), equity: toDecimalString(sum) });
   }
-  return line;
+  return { ok: true, points };
 }
 
 /** The change over the line, last less first, to the cent; `null` with fewer than two points. */
@@ -260,12 +277,13 @@ export function apiPortfolio(
     return { agentId: a.agent_id, name: a.label, mode: a.mode, unread: read === undefined ? "Reading…" : read.ok ? null : read.reason };
   });
   const allRead = listed.every((a) => a.unread === null);
-  const account = accountFigures(served.dashboard);
+  const account = accountFigures(served.dashboard, environment);
   return {
     environment,
     total: account.total,
     accountCash: account.cash,
     observedAt: account.observedAt,
+    accountsAgree: account.agree,
     invested: allRead ? sumReported(holdings.map((h) => h.marketValue)) : null,
     cash: null,
     unmanaged: null,

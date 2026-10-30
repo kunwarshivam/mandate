@@ -173,7 +173,7 @@ function SignedOr({ value }: { value: string | null }) {
 function AccountValue({ portfolio }: { portfolio: Portfolio }) {
   const market = useMarket();
   if (market) return <AccountEquityChart />;
-  return <ApiAccountChart total={portfolio.total} observedAt={portfolio.observedAt ?? null} environment={portfolio.environment} />;
+  return <ApiAccountChart total={portfolio.total} observedAt={portfolio.observedAt ?? null} environment={portfolio.environment} agree={portfolio.accountsAgree ?? true} />;
 }
 
 function Figure({ label, children }: { label: string; children: ReactNode }) {

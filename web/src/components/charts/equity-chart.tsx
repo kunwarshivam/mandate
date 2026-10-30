@@ -196,10 +196,12 @@ function changePercent(change: string, first: AccountPoint): string | null {
 function describeLine(line: readonly AccountPoint[], words: string, environment: ShownEnvironment): string {
   const first = line[0];
   const last = line.at(-1);
+  const funds = environment === "live" ? "" : " Simulated funds.";
   if (!first || !last) return `No account value recorded ${words}.`;
-  const change = lineChange(line) ?? "0";
+  const change = lineChange(line);
+  if (change === null) return `One account value recorded ${words}: ${usd(first.equity)}, so no change to measure.${funds}`;
   const moved = direction(change) === "flat" ? "no change" : `a ${directionWord(change)} of ${usd(abs(dec(change)))}`;
-  return `Account value ${words}: from ${usd(first.equity)} to ${usd(last.equity)}, ${moved}.${environment === "live" ? "" : " Simulated funds."}`;
+  return `Account value ${words}: from ${usd(first.equity)} to ${usd(last.equity)}, ${moved}.${funds}`;
 }
 
 /**
@@ -207,9 +209,11 @@ function describeLine(line: readonly AccountPoint[], words: string, environment:
  * snapshots, over a line from `GET /dashboard/history` for the range picked. Every money figure here
  * is the decimal the API served or a fixed-point sum of them; the line's numbers are drawing values
  * only. Holding the line shows that point's equity and its change from the range's first point. A
- * history that is not reported says so, and a range with no snapshot says none was recorded.
+ * history that is not reported says so with its reason, as a holding's read does, and a range with
+ * no snapshot says none was recorded. With an account in another environment than the page shows
+ * (`agree` false), no line is drawn: paper and live are never one line under one label.
  */
-export function ApiAccountChart({ total, observedAt, environment }: { total: string | null; observedAt: string | null; environment: ShownEnvironment }) {
+export function ApiAccountChart({ total, observedAt, environment, agree = true }: { total: string | null; observedAt: string | null; environment: ShownEnvironment; agree?: boolean }) {
   const { portfolio, now } = useRuntime();
   const [range, setRange] = useState<EquityRange>(ACCOUNT_RANGE);
   const asked = HISTORY_RANGE_OF[range];
@@ -230,7 +234,8 @@ export function ApiAccountChart({ total, observedAt, environment }: { total: str
     };
   }, [portfolio, asked]);
   const read = answer?.range === asked ? answer.read : undefined;
-  const line = useMemo(() => (read?.ok ? accountLine(read.value) : null), [read]);
+  const drawn = useMemo(() => (read?.ok ? accountLine(read.value) : null), [read]);
+  const line = drawn?.ok && agree ? drawn.points : null;
   const points = useMemo<Point[]>(() => (line ?? []).map((p) => ({ time: p.time, value: Number(p.equity) })), [line]);
   const [scrub, setScrub] = useState<ScrubPoint>(null);
   const onScrub = useCallback((p: ScrubPoint) => setScrub(p), []);
@@ -238,16 +243,19 @@ export function ApiAccountChart({ total, observedAt, environment }: { total: str
   const figure = scrubbed ? scrubbed.equity : total;
   const change = line ? lineChange(line, scrubbed) : null;
   const words = API_RANGE_WORDS[range] ?? RANGE_WORDS[range];
-  const trend = direction(line ? (lineChange(line) ?? "0") : "0");
+  const lineMove = line ? lineChange(line) : null;
+  /** A line with fewer than two points has no direction: drawn neutral, never as "no change". */
+  const trend: Direction = lineMove === null ? "flat" : direction(lineMove);
   const series = useMemo<ChartSeries>(() => ({ kind: "area", tone: "account", points, trend }), [points, trend]);
   const pct = change !== null && line?.[0] ? changePercent(change, line[0]) : null;
+  const unreported = read === undefined ? null : !read.ok ? read.reason : !agree ? "your accounts are not all in this environment" : drawn && !drawn.ok ? drawn.reason : null;
 
   let plot: ReactNode;
   if (read === undefined) plot = <ChartSkeleton height={ACCOUNT_HEIGHT} label="Loading the account's history" />;
-  else if (!read.ok || line === null)
+  else if (unreported !== null || line === null)
     plot = (
       <p className="max-w-measure text-sm text-pretty text-muted-foreground" data-slot="history-not-reported">
-        The account&apos;s history is not reported{read.ok ? "" : `: ${read.reason}`}.
+        Not reported: {unreported ?? "no account"}.
       </p>
     );
   else if (line.length === 0)

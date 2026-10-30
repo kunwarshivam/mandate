@@ -194,9 +194,39 @@ describe("the Portfolio page over the workspace API (DEC-2413 item 3)", () => {
   it("says so when the account's history cannot be read, and keeps the snapshot's value", async () => {
     mountApi({ fail: (path) => path.endsWith("/dashboard/history") });
     const hero = await screen.findByRole("region", { name: "Account value" });
-    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent("The account's history is not reported: unavailable."));
+    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent(/^Not reported: unavailable\.$/));
     await waitFor(() => expect(heroValue()).toBe("$28,478.36"));
     expect(within(hero).queryByRole("img")).toBeNull();
+  });
+
+  it("never sums or labels a live account as the paper workspace's: its value, cash, change and line are not reported", async () => {
+    mountApi({
+      rewrite: (path, body) => {
+        if (!path.endsWith("/dashboard")) return body;
+        const [paper] = body.accounts as Body[];
+        const live = { account_ref: "acct_live", snapshot: { ...(paper.snapshot as Body), environment: "live" } };
+        return { ...body, accounts: [paper, live] };
+      },
+    });
+    await screen.findByRole("table", { name: "Holdings" });
+    await waitFor(() => expect(heroValue()).toBe("Not reported"));
+    for (const label of ["Cash", "Today"]) expect(figure(label)?.textContent, label).toBe("not reported");
+    const hero = section("Account value");
+    await waitFor(() => expect(hero.querySelector("[data-slot=history-not-reported]")).toHaveTextContent("Not reported: your accounts are not all in this environment."));
+    expect(within(hero).queryByRole("img")).toBeNull();
+  });
+
+  it("draws a one-point line with no direction, and says one value was recorded, never no change", async () => {
+    mountApi({
+      rewrite: (path, body) => {
+        if (!path.endsWith("/dashboard/history")) return body;
+        const [account] = body.accounts as Array<{ points: Body[] }>;
+        return { ...body, accounts: [{ ...account, points: account.points.slice(-1) }] };
+      },
+    });
+    await screen.findByRole("img", { name: "Account value, past 24 hours" });
+    expect(section("Account value").textContent).toMatch(/One account value recorded past 24 hours: \$[\d,]+\.\d\d, so no change to measure\. Simulated funds\./);
+    expect(document.querySelector("[data-slot=hero-change]")).toBeNull();
   });
 
   it("names every figure not reported when the dashboard and P&L reads fail", async () => {
