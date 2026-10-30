@@ -10,6 +10,7 @@ import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPa
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
+import { DASHBOARD_ROUTE, type HistoryRange, dashboardRead, historyRead, historyRoute, pnlRead, pnlRoute } from "@/api/portfolio";
 import { priceRead, priceRoute } from "@/api/price";
 import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
@@ -38,6 +39,7 @@ import {
   type MandateChangeRequest,
   type PasskeyPort,
   type AlertsAnswer,
+  type PortfolioPort,
   type PositionsAnswer,
   type PriceAnswer,
   type RecordsAnswer,
@@ -597,6 +599,25 @@ export function ApiRuntimeProvider({
     return { ok: true, instruments: instruments.value.instruments, models: models.value.models };
   }, [client]);
 
+  /** `GET /dashboard`, `GET /dashboard/history` and `GET /agents/{id}/pnl` (§4.7, DEC-2413), read when the Portfolio page asks. */
+  const portfolio = useMemo<PortfolioPort>(
+    () => ({
+      dashboard: async () => {
+        const read = await client.read(DASHBOARD_ROUTE, dashboardRead);
+        return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+      },
+      history: async (range: HistoryRange) => {
+        const read = await client.read(historyRoute(range), historyRead(range));
+        return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+      },
+      pnl: async (agentId: string) => {
+        const read = await client.read(pnlRoute(agentId), pnlRead(agentId));
+        return read.ok ? { ok: true, value: read.value } : { ok: false, reason: read.error.code };
+      },
+    }),
+    [client],
+  );
+
   /** `GET /instruments/{id}/price` (§4.1, DEC-2152): the last trusted daily close, read when the instrument's page asks. */
   const price = useCallback(
     async (instrumentId: string): Promise<PriceAnswer> => {
@@ -819,8 +840,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, portfolio, price, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, askAgent, catalogue, portfolio, price, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, adoptVersion, chat, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

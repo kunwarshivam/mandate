@@ -191,6 +191,13 @@ in the version, so nothing is made up in the browser; a catalogue that cannot be
 and says so; changing a mandate is not sent yet,
 and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
+The one chart drawn over the API is the Portfolio page's account line (DEC-2413, `src/api/portfolio.ts`):
+the account's value, cash and change today are every account's latest snapshot from `GET /dashboard`,
+summed in fixed point; the line is `GET /dashboard/history` for the range picked; and the total P&L is
+each agent's `GET /agents/{id}/pnl`, realized gross plus unrealized, labelled gross since no fee is
+attributed to an agent. A missing snapshot, a version 1 snapshot's day, or a null P&L makes its total
+"not reported", never zero; the agents' cash and what no agent manages need each agent's equity, which
+no read serves, so they stay "not reported".
 Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): Approve first asks
 `POST /step-up/challenges` for a challenge bound to the request's content hash and shows its code
 (`XXXX-XXXX`, the challenge's first 40 bits) with the `mandate step-up confirm` line, naming the session's principal from

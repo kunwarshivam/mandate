@@ -3,8 +3,9 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { CatalogueInstrument } from "@/api/catalogue";
+import type { AgentPnl, Dashboard } from "@/api/portfolio";
 import type { AgentDetail } from "@/api/read-models";
-import { AccountEquityChart } from "@/components/charts/equity-chart";
+import { AccountEquityChart, ApiAccountChart } from "@/components/charts/equity-chart";
 import { useMarket } from "@/components/charts/chart-parts";
 import { AsOf } from "@/components/domain/as-of";
 import { ModeBadge } from "@/components/domain/mode";
@@ -22,6 +23,7 @@ import {
   type Holding,
   type HoldingsRead,
   type Portfolio,
+  type ServedRead,
   type SliceTone,
   agentName,
   apiPortfolio,
@@ -42,28 +44,26 @@ const POLL_MS = 5000;
 const NOT_REPORTED = "not reported";
 
 /**
- * Every agent's own positions over the API, read on open and every few seconds; an agent not yet
- * answered is absent. Each agent's reads are numbered, and an answer older than one already shown is
- * dropped. Restored from the positions screen #3003 removed.
+ * One read per agent over the API, made on open and every few seconds; an agent not yet answered is
+ * absent. Each agent's reads are numbered, and an answer older than one already shown is dropped.
+ * Restored from the positions screen #3003 removed.
  */
-function useHoldingsReads(agents: readonly AgentDetail[]): Readonly<Record<string, HoldingsRead>> {
-  const { holdings } = useRuntime();
-  const [answers, setAnswers] = useState<Readonly<Record<string, HoldingsRead>>>({});
+function usePerAgent<T>(fetchOne: ((agentId: string) => Promise<T>) | null, agents: readonly AgentDetail[]): Readonly<Record<string, T>> {
+  const [answers, setAnswers] = useState<Readonly<Record<string, T>>>({});
   const sent = useRef(new Map<string, number>());
   const shown = useRef(new Map<string, number>());
   const ids = agents.map((a) => a.agent_id).join("\n");
   useEffect(() => {
-    if (!holdings) return;
+    if (!fetchOne) return;
     let live = true;
     const load = () => {
       for (const id of ids ? ids.split("\n") : []) {
         const n = (sent.current.get(id) ?? 0) + 1;
         sent.current.set(id, n);
-        void holdings(id).then((answer) => {
+        void fetchOne(id).then((answer) => {
           if (!live || n < (shown.current.get(id) ?? 0)) return;
           shown.current.set(id, n);
-          const read: HoldingsRead = answer.ok ? { ok: true, items: answer.items } : { ok: false, reason: `Not reported: ${answer.reason}.` };
-          setAnswers((all) => ({ ...all, [id]: read }));
+          setAnswers((all) => ({ ...all, [id]: answer }));
         });
       }
     };
@@ -73,8 +73,55 @@ function useHoldingsReads(agents: readonly AgentDetail[]): Readonly<Record<strin
       live = false;
       window.clearInterval(poll);
     };
-  }, [holdings, ids]);
+  }, [fetchOne, ids]);
   return answers;
+}
+
+/** Every agent's own positions (`GET /agents/{id}/positions`), a failed read named as not reported. */
+function useHoldingsReads(agents: readonly AgentDetail[]): Readonly<Record<string, HoldingsRead>> {
+  const { holdings } = useRuntime();
+  const fetchOne = useMemo(
+    () => (holdings ? async (id: string): Promise<HoldingsRead> => {
+      const answer = await holdings(id);
+      return answer.ok ? { ok: true, items: answer.items } : { ok: false, reason: `Not reported: ${answer.reason}.` };
+    } : null),
+    [holdings],
+  );
+  return usePerAgent(fetchOne, agents);
+}
+
+/** Every agent's gross P&L (`GET /agents/{id}/pnl`, DEC-2413). */
+function usePnlReads(agents: readonly AgentDetail[]): Readonly<Record<string, ServedRead<AgentPnl>>> {
+  const { portfolio } = useRuntime();
+  return usePerAgent(portfolio?.pnl ?? null, agents);
+}
+
+/** The accounts' latest snapshots (`GET /dashboard`, DEC-2413), read on open and every few seconds; absent until it answers. */
+function useDashboard(): ServedRead<Dashboard> | undefined {
+  const { portfolio } = useRuntime();
+  const [answer, setAnswer] = useState<ServedRead<Dashboard> | undefined>(undefined);
+  const sent = useRef(0);
+  const shown = useRef(0);
+  useEffect(() => {
+    if (!portfolio) return;
+    let live = true;
+    const load = () => {
+      sent.current += 1;
+      const n = sent.current;
+      void portfolio.dashboard().then((read) => {
+        if (!live || n < shown.current) return;
+        shown.current = n;
+        setAnswer(read);
+      });
+    };
+    load();
+    const poll = window.setInterval(load, POLL_MS);
+    return () => {
+      live = false;
+      window.clearInterval(poll);
+    };
+  }, [portfolio]);
+  return answer;
 }
 
 /** The registered instruments, read once, for each holding's symbol and asset class; `null` until read or when it cannot be. */
@@ -101,8 +148,13 @@ function usePortfolio(): Portfolio {
   const { source, ws, view } = useRuntime();
   const agents = source === "api" ? (view?.agents ?? NO_AGENTS) : NO_AGENTS;
   const reads = useHoldingsReads(agents);
+  const pnl = usePnlReads(agents);
+  const dashboard = useDashboard();
   const instruments = useInstruments();
-  return useMemo(() => (source === "fixtures" ? fixturePortfolio(ws) : apiPortfolio(ws.environment, agents, reads, instruments)), [source, ws, agents, reads, instruments]);
+  return useMemo(
+    () => (source === "fixtures" ? fixturePortfolio(ws) : apiPortfolio(ws.environment, agents, reads, instruments, { dashboard, pnl })),
+    [source, ws, agents, reads, instruments, dashboard, pnl],
+  );
 }
 
 function NotReported({ className }: { className?: string }) {
@@ -117,23 +169,11 @@ function SignedOr({ value }: { value: string | null }) {
   return value === null ? <NotReported /> : <SignedMoney value={value} />;
 }
 
-/** The account's value with its history, or, where no read gives them, the words for that. */
+/** The account's value with its history: the fixture market's line, or the served snapshots and history over the API. */
 function AccountValue({ portfolio }: { portfolio: Portfolio }) {
   const market = useMarket();
   if (market) return <AccountEquityChart />;
-  return (
-    <section aria-labelledby="account-value-title" data-slot="account-value" className="grid content-start gap-2">
-      <h2 id="account-value-title" className="text-sm font-medium text-muted-foreground">
-        Account value
-      </h2>
-      <p className="text-h1" data-slot="account-value-figure">
-        {portfolio.total === null ? <span className="text-muted-foreground">Not reported</span> : <Money value={portfolio.total} />}
-      </p>
-      <p className="max-w-measure text-sm text-pretty text-muted-foreground" data-slot="history-not-reported">
-        Your deployment doesn&apos;t report the account&apos;s value or its history yet, so there is no chart to draw. The holdings below are what it reports.
-      </p>
-    </section>
-  );
+  return <ApiAccountChart total={portfolio.total} observedAt={portfolio.observedAt ?? null} environment={portfolio.environment} />;
 }
 
 function Figure({ label, children }: { label: string; children: ReactNode }) {
@@ -150,6 +190,11 @@ function Figures({ portfolio }: { portfolio: Portfolio }) {
   return (
     <section aria-label="Account figures" data-slot="account-figures" className="grid gap-3">
       <dl className="grid grid-cols-1 gap-x-6 gap-y-4 min-[22rem]:grid-cols-2 sm:grid-cols-3">
+        {portfolio.accountCash !== undefined ? (
+          <Figure label="Cash">
+            <MoneyOr value={portfolio.accountCash} />
+          </Figure>
+        ) : null}
         <Figure label="Invested">
           <MoneyOr value={portfolio.invested} />
         </Figure>
@@ -164,7 +209,7 @@ function Figures({ portfolio }: { portfolio: Portfolio }) {
         <Figure label="Today">
           <SignedOr value={portfolio.today} />
         </Figure>
-        <Figure label="Total P&L">
+        <Figure label={portfolio.pnlGross ? "Total P&L, gross" : "Total P&L"}>
           <SignedOr value={portfolio.pnl} />
         </Figure>
         <Figure label="Unrealized">
@@ -172,7 +217,8 @@ function Figures({ portfolio }: { portfolio: Portfolio }) {
         </Figure>
       </dl>
       <p className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
-        {portfolio.environment === "live" ? "Your agents' P&L." : "Your agents' paper P&L, simulated."} <Placeholder name="performance" />
+        {portfolio.environment === "live" ? "Your agents' P&L." : "Your agents' paper P&L, simulated."}
+        {portfolio.pnlGross ? <span data-slot="pnl-gross"> Gross: before fees, which aren&apos;t attributed to each agent.</span> : null} <Placeholder name="performance" />
       </p>
     </section>
   );
