@@ -1277,6 +1277,25 @@ fn status(started: &Started, chat: &ChatLive) -> Option<(Status, usize)> {
 #[test]
 fn no_report_offers_an_ungated_pin_and_withholds_any_other() {
     let chats = committed();
+    let pinned: Vec<(String, String, String)> = chats
+        .iter()
+        .map(|c| {
+            let pin = c.entry.content().model_ref();
+            (
+                pin.model_id,
+                pin.model_version,
+                gate::digest_ref(pin.content_hash),
+            )
+        })
+        .collect();
+    let kept: Vec<(String, String, String)> = UNGATED
+        .iter()
+        .map(|(i, v, h)| ((*i).to_owned(), (*v).to_owned(), (*h).to_owned()))
+        .collect();
+    assert_eq!(
+        kept, pinned,
+        "the ungated pins are the committed chat entries exactly"
+    );
     let started = start(
         &chats,
         &Shelf::default(),
@@ -1293,27 +1312,27 @@ fn no_report_offers_an_ungated_pin_and_withholds_any_other() {
         0,
         "no start probe for an ungated pin"
     );
-    assert_eq!(
-        UNGATED.to_vec(),
-        chats
-            .iter()
-            .map(|c| (c.entry.model_id.as_str(), c.entry.model_version.as_str()))
-            .collect::<Vec<_>>()
-    );
 
     let mut newer = chats[0].clone();
     newer.entry.model_version = "1.1.0".to_owned();
     let mut other = chats[1].clone();
     other.entry.model_id = "llm.chat_opus".to_owned();
+    let mut repointed = chats[1].clone();
+    repointed.entry.identity.model_name = format!("{}-next", repointed.entry.identity.model_name);
     let started = start(
-        &[newer.clone(), other.clone()],
+        &[newer.clone(), other.clone(), repointed.clone()],
         &Shelf::default(),
         &MemoryStore::default(),
         ("50", "20"),
         RecordedTransport::new(),
     );
-    for chat in [&newer, &other] {
-        assert_eq!(status(&started, chat), Some((Status::Evaluating, 0)));
+    for chat in [&newer, &other, &repointed] {
+        assert_eq!(
+            status(&started, chat),
+            Some((Status::Evaluating, 0)),
+            "{}",
+            chat.entry.model_id
+        );
     }
     assert_eq!(
         started.withheld,
@@ -1324,6 +1343,10 @@ fn no_report_offers_an_ungated_pin_and_withholds_any_other() {
             },
             Withheld {
                 model_id: "llm.chat_opus".to_owned(),
+                reason: Unverified::Missing
+            },
+            Withheld {
+                model_id: "llm.chat_haiku".to_owned(),
                 reason: Unverified::Missing
             },
         ]
@@ -1639,7 +1662,7 @@ proptest! {
 }
 
 /// How many single bindings [`crafted`] can break.
-const BREAKS: usize = 11;
+const BREAKS: usize = 21;
 
 /// A report on Sonnet with every binding right but the ones `breaks` names, stored in a fresh
 /// store, and its reference.
@@ -1662,6 +1685,17 @@ fn crafted(breaks: &[usize]) -> (Shelf, ArtifactRef) {
         ),
         ("passed", "true".to_owned()),
         ("stopped", "null".to_owned()),
+        ("identity", "true".to_owned()),
+        (
+            "runs",
+            r#"[{"end":"answered","passed":true,"run":"c01"},{"end":"answered","passed":true,"run":"c02"}]"#
+                .to_owned(),
+        ),
+        (
+            "checks",
+            r#"[{"check":"replies","passed":true,"run":"c01"},{"check":"figures","passed":true,"run":"c02"}]"#
+                .to_owned(),
+        ),
     ]);
     let wrong = [
         ("kind", quoted("research_gate_report")),
@@ -1678,6 +1712,24 @@ fn crafted(breaks: &[usize]) -> (Shelf, ArtifactRef) {
         ("passed", "false".to_owned()),
         ("stopped", quoted("checks_failed")),
         ("passed", quoted("true")),
+        ("identity", "false".to_owned()),
+        ("identity", "null".to_owned()),
+        (
+            "runs",
+            r#"[{"end":"answered","passed":true,"run":"c01"},{"end":"turns_exhausted","passed":false,"run":"c02"}]"#
+                .to_owned(),
+        ),
+        ("runs", "[]".to_owned()),
+        ("runs", r#"[{"end":"answered","run":"c01"}]"#.to_owned()),
+        (
+            "checks",
+            r#"[{"check":"replies","passed":true,"run":"c01"},{"check":"figures","passed":false,"run":"c02"}]"#
+                .to_owned(),
+        ),
+        ("checks", "[]".to_owned()),
+        ("checks", r#"{"passed":true}"#.to_owned()),
+        ("checks", r#"[{"check":"replies","passed":"true","run":"c01"}]"#.to_owned()),
+        ("runs", "null".to_owned()),
     ];
     assert_eq!(wrong.len(), BREAKS);
     for b in breaks {

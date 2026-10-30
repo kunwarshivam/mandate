@@ -601,7 +601,24 @@ pub fn verified(
     if member("passed")? != &Value::Bool(true) || member("stopped")? != &Value::Null {
         return Err(Unverified::NotPassed);
     }
+    if member("identity")? != &Value::Bool(true)
+        || !all_passed(member("runs")?)
+        || !all_passed(member("checks")?)
+    {
+        return Err(Unverified::NotPassed);
+    }
     Ok(())
+}
+
+/// Whether `items` is a non-empty array whose every member says `"passed": true`: a report's runs
+/// or checks, read on their own so a body whose verdict and parts disagree never verifies.
+fn all_passed(items: &Value) -> bool {
+    items.as_array().is_some_and(|items| {
+        !items.is_empty()
+            && items
+                .iter()
+                .all(|item| item.get("passed") == Some(&Value::Bool(true)))
+    })
 }
 
 /// What the gate runs with besides its gateway: the workspace its calls name, the entry, the store,

@@ -21,7 +21,9 @@ use mandate_chat::ChatEntry;
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, SecretSource, Transport};
-use mandate_gateway::registry::{Endpoint, Locality, Registry, RegistryError, Reported, Status};
+use mandate_gateway::registry::{
+    Endpoint, Locality, ModelRef, Registry, RegistryError, Reported, Status,
+};
 use mandate_gateway::{RateCaps, Settings};
 use mandate_journal::ArtifactRef;
 use mandate_research_run::live::{LiveEntry, Refused, live_registry, read_live};
@@ -33,7 +35,7 @@ use mandate_gateway::CallRequest;
 use mandate_gateway::wire::{PutRefusal, PutReply, PutRequest, Reply};
 
 use crate::config::Config;
-use crate::gate::{Reports, Unverified, built_in, identity_probe, verified};
+use crate::gate::{Reports, Unverified, built_in, digest_ref, identity_probe, verified};
 use crate::gate_socket::Desk;
 use crate::recorded::{RATE_MARGIN, WORKSPACE_RATE};
 use crate::run::{Parts, Served, StartFailure, metered_service, started_ids};
@@ -125,10 +127,30 @@ pub fn live_service<S: Store + 'static, C: Clock, T: Transport>(
         .map(|start| (start.service, start.refused))
 }
 
-/// The pins DEC-2294 keeps offered with no gate report, by model id and version, until the file
-/// names a report for them: the chat entries offered when the founder ruled. Any other chat entry,
-/// a new model or a new version, is offered only on a passing report.
-pub const UNGATED: [(&str, &str); 2] = [("llm.chat_sonnet", "1.0.0"), ("llm.chat_haiku", "1.0.0")];
+/// The pins DEC-2294 keeps offered with no gate report, by model id, version and content hash,
+/// until the file names a report for them: the chat entries offered when the founder ruled,
+/// exactly as they were. Any other chat entry, a new model, a new version, or the same id and
+/// version with any pinned content changed, is offered only on a passing report.
+pub const UNGATED: [(&str, &str, &str); 2] = [
+    (
+        "llm.chat_sonnet",
+        "1.0.0",
+        "sha256:fd69fae48fdb3072ff9f61ebc7b75faa25a392e9ccb66230523388ae59439f6c",
+    ),
+    (
+        "llm.chat_haiku",
+        "1.0.0",
+        "sha256:4529010899681ebe5ffa58d9d36769dccce47d4dc1464347030a5494b4016e42",
+    ),
+];
+
+/// Whether `pin` is one of [`UNGATED`]: its id, version and content hash all as there.
+pub fn ungated(pin: &ModelRef) -> bool {
+    let hash = digest_ref(pin.content_hash);
+    UNGATED.iter().any(|(id, version, content)| {
+        pin.model_id == *id && pin.model_version == *version && hash == *content
+    })
+}
 
 /// The lane of the ids the start's identity probes draw from, beside the call ids' (0) and the
 /// deployment meter's copies' (1).
@@ -184,7 +206,7 @@ pub fn live_service_with_chat<S: Store + 'static, C: Clock, T: Transport>(
     let mut gated = Vec::new();
     for chat in chats {
         let pin = chat.entry.content().model_ref();
-        let ungated = UNGATED.contains(&(pin.model_id.as_str(), pin.model_version.as_str()));
+        let ungated = ungated(&pin);
         let taken = if chat.gate_report.is_none() && ungated {
             offer_chat(&mut registry, chat)
         } else {
