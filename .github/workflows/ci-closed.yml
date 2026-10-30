@@ -1,0 +1,25 @@
+# Closing a pull request stops its `ci` run. A concurrency group is the repository's, not one
+# workflow's, so this run joins the closed pull request's `ci` group, `ci-refs/pull/{n}/merge`,
+# and `cancel-in-progress` cancels the run there, running or still queued, before its mutation
+# shards take runners from the open pull requests. Before it, a closed pull request's run went on
+# to the end: on 2026-10-29 two closed pull requests' runs held runners for up to ten hours.
+# A merged pull request's push to `main` runs in `main`'s own group, which this never joins.
+name: ci-closed
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stopped:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: The closed pull request's ci run is cancelled by joining its group
+        run: echo "ci for ${GITHUB_REF} stops with this pull request"
