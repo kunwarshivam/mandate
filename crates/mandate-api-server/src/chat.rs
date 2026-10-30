@@ -32,14 +32,14 @@ use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::chat_run::{self, Start, Thread};
-use crate::commands::{Event, Settled, Writer, envelope_by, settle_batch_at};
+use crate::commands::{Event, Settled, Writer, envelope_by};
 use crate::http::{App, invalid};
 use crate::reads::{Deployment, deployed, envelope, mode};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, int, object, path_refused, served, session,
     string,
 };
-use crate::writes::{Gate, derived_for, principal_text, strictly};
+use crate::writes::{Gate, appended_batch_at, derived_for, principal_text, repeated, strictly};
 
 /// The longest message an owner may send, in characters.
 pub const MAX_MESSAGE_CHARS: usize = 4_000;
@@ -243,7 +243,8 @@ fn decode_settings(body: &[u8]) -> Result<Settings, Undecoded> {
     })
 }
 
-/// Whether `text` is a plain positive decimal: digits, at most one point, not zero.
+/// Whether `text` is a plain positive decimal: digits, at most one point, not zero, and at most
+/// [`CAP_FRACTION_DIGITS`] digits after the point, so the run can always read it as millionths.
 fn positive_decimal(text: &str) -> bool {
     let mut parts = text.split('.');
     let whole = parts.next().unwrap_or_default();
@@ -251,9 +252,15 @@ fn positive_decimal(text: &str) -> bool {
     parts.next().is_none()
         && !whole.is_empty()
         && whole.bytes().all(|b| b.is_ascii_digit())
-        && fraction.is_none_or(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()))
+        && fraction.is_none_or(|f| {
+            !f.is_empty() && f.len() <= CAP_FRACTION_DIGITS && f.bytes().all(|b| b.is_ascii_digit())
+        })
         && text.bytes().any(|b| (b'1'..=b'9').contains(&b))
 }
+
+/// The most digits a daily cap may carry after its point: the run counts spend in millionths of a
+/// dollar.
+pub const CAP_FRACTION_DIGITS: usize = 6;
 
 fn refused(path: &str, code: &str) -> Undecoded {
     Undecoded::Invalid {
@@ -329,16 +336,35 @@ async fn posted(
     text: String,
     deployment: Option<Deployment>,
 ) -> Response {
-    let run = format!("run_{}", app.chat.ulid(gate.now).to_ascii_lowercase());
-    if !app.chat.claim(&thread.key(), &run) {
-        return problem_conflict();
-    }
     let payload = thread.message_payload("owner", Some(&text), None, &[], None, false);
-    let stored = match append_owner(&app, &gate, &reader, "ChatMessagePosted", payload).await {
+    let (id, draft) = match owner_draft(&gate, &reader, "ChatMessagePosted", payload) {
+        Ok(drafted) => drafted,
+        Err(refusal) => return refusal.response(),
+    };
+    let run = run_for(&id);
+    if !app.chat.claim(&thread.key(), &run) {
+        return match replayed(&reader.control, (&id, &draft)) {
+            Some(Ok(stored)) => message_accepted(&thread, &stored, &run, reader.now),
+            Some(Err(conflict)) => *conflict,
+            None => problem_conflict(),
+        };
+    }
+    let Ok(latest) = app.journal.rows(&format!("ctl:{}", reader.workspace)).await else {
+        app.chat.release(&thread.key());
+        return Refused::JournalUnavailable.response();
+    };
+    if let Some(answer) = replayed(&latest, (&id, &draft)) {
+        app.chat.release(&thread.key());
+        return match answer {
+            Ok(stored) => message_accepted(&thread, &stored, &run, reader.now),
+            Err(conflict) => *conflict,
+        };
+    }
+    let stored = match stored_owner(&app, &gate, &reader, (&id, &draft)).await {
         Ok(stored) => stored,
         Err(refusal) => {
             app.chat.release(&thread.key());
-            return refusal.response();
+            return *refusal;
         }
     };
     chat_run::spawn(
@@ -355,12 +381,17 @@ async fn posted(
             proactive: false,
         },
     );
+    message_accepted(&thread, &stored, &run, reader.now)
+}
+
+/// The `202` for the owner's message: the thread, the message's id, and the run it started.
+fn message_accepted(thread: &Thread, stored: &StoredEvent, run: &str, now: UtcNanos) -> Response {
     let mut members = thread.id_members();
     members.extend([
         ("message_id", string(&stored.event_id)),
-        ("run_id", string(&run)),
+        ("run_id", string(run)),
     ]);
-    enveloped(StatusCode::ACCEPTED, reader.now, members)
+    enveloped(StatusCode::ACCEPTED, now, members)
 }
 
 /// `GET /v1/workspaces/{ws}/agents/{agent}/messages?after={seq}`.
@@ -486,19 +517,31 @@ pub async fn stop_run(
         Err(refusal) => return refusal.response(),
     };
     let thread = Thread::agent(&agent, &member(&gate));
+    let mut payload = thread.id_payload();
+    payload.push(("run_id", string(&run)));
+    let (id, draft) = match owner_draft(&gate, &reader, "ChatRunStopRequested", payload) {
+        Ok(drafted) => drafted,
+        Err(refusal) => return refusal.response(),
+    };
+    let stopped = || {
+        enveloped(
+            StatusCode::ACCEPTED,
+            reader.now,
+            vec![("run_id", string(&run))],
+        )
+    };
+    match replayed(&reader.control, (&id, &draft)) {
+        Some(Ok(_)) => return stopped(),
+        Some(Err(conflict)) => return *conflict,
+        None => {}
+    }
     if app.chat.running(&thread.key()).as_deref() != Some(run.as_str()) {
         return Refused::NotFound.response();
     }
     app.chat.stop(&run);
-    let mut payload = thread.id_payload();
-    payload.push(("run_id", string(&run)));
-    match append_owner(&app, &gate, &reader, "ChatRunStopRequested", payload).await {
-        Ok(_) => enveloped(
-            StatusCode::ACCEPTED,
-            reader.now,
-            vec![("run_id", string(&run))],
-        ),
-        Err(refusal) => refusal.response(),
+    match stored_owner(&app, &gate, &reader, (&id, &draft)).await {
+        Ok(_) => stopped(),
+        Err(refusal) => *refusal,
     }
 }
 
@@ -665,7 +708,11 @@ pub async fn put_settings(
         ("chat_model", string(&settings.chat_model)),
         ("daily_cap_usd", string(&settings.daily_cap_usd)),
     ];
-    match append_owner(&app, &gate, &reader, "ChatSettingsChanged", payload).await {
+    let (id, draft) = match owner_draft(&gate, &reader, "ChatSettingsChanged", payload) {
+        Ok(drafted) => drafted,
+        Err(refusal) => return refusal.response(),
+    };
+    match stored_owner(&app, &gate, &reader, (&id, &draft)).await {
         Ok(_) => enveloped(
             StatusCode::OK,
             reader.now,
@@ -675,7 +722,7 @@ pub async fn put_settings(
                 ("daily_cap_usd", string(&settings.daily_cap_usd)),
             ],
         ),
-        Err(refusal) => refusal.response(),
+        Err(refusal) => *refusal,
     }
 }
 
@@ -810,14 +857,14 @@ fn problem_conflict() -> Response {
     )
 }
 
-/// Appends one of the owner's own records (`user` actor), under §3.4's id for the gate's key.
-async fn append_owner(
-    app: &App,
+/// The owner's record of `event_type` under §3.4's event id for the gate's key: the id, and the
+/// draft a repeat under the key must match.
+fn owner_draft(
     gate: &Gate,
     reader: &Reader,
     event_type: &'static str,
     payload: Vec<(&str, Value)>,
-) -> Result<StoredEvent, Refused> {
+) -> Result<(String, Vec<u8>), Refused> {
     let operation = match event_type {
         "ChatRunStopRequested" => "chat_stop",
         "ChatSettingsChanged" => "chat_settings",
@@ -846,20 +893,52 @@ async fn append_owner(
         config_refs: Vec::new(),
     };
     let draft = envelope_by("user", &writer, &event, None).ok_or(Refused::JournalUnavailable)?;
-    let stream = format!("ctl:{}", reader.workspace);
-    match settle_batch_at(
-        app.journal.as_ref(),
-        &stream,
-        &id,
-        &[draft.as_slice()],
-        gate.now,
-        None,
-    )
-    .await
-    {
+    Ok((id, draft))
+}
+
+/// Records the owner's `draft` under `id`, or replays the record a repeat under the key already
+/// stored (§3.4 step 1); other content under the key is `409 idempotency_conflict`.
+async fn stored_owner(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    (id, draft): (&str, &[u8]),
+) -> Result<StoredEvent, Box<Response>> {
+    match appended_batch_at(app, reader, (id, &[draft]), gate.now, None).await {
         Settled::Stored(row) => Ok(*row),
-        _ => Err(Refused::JournalUnavailable),
+        Settled::Conflict => Err(Box::new(idempotency_conflict())),
+        _ => Err(Box::new(Refused::JournalUnavailable.response())),
     }
+}
+
+/// What a repeat under the key finds in `rows`: the stored record, replayed, or a conflict; `None`
+/// when the key is new.
+fn replayed(
+    rows: &[StoredEvent],
+    (id, draft): (&str, &[u8]),
+) -> Option<Result<StoredEvent, Box<Response>>> {
+    repeated(rows, id, draft).map(|settled| match settled {
+        Settled::Stored(row) => Ok(*row),
+        _ => Err(Box::new(idempotency_conflict())),
+    })
+}
+
+fn idempotency_conflict() -> Response {
+    crate::http::problem(
+        StatusCode::CONFLICT,
+        crate::http::problem_body(mandate_api::problem::ProblemCode::IdempotencyConflict),
+    )
+}
+
+/// The run an owner's message starts, named from the message's own event id, so a repeat under
+/// the key replays the same run rather than starting another.
+fn run_for(message: &str) -> String {
+    let id: String = message
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    format!("run_{id}")
 }
 
 #[cfg(test)]

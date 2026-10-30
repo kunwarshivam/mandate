@@ -1344,7 +1344,24 @@ fn the_owner_s_stop_ends_the_run_before_its_next_call() {
     release.send(()).expect("the gateway waits");
     let body = settled(&f, &cookie);
     assert_eq!(texts(&body).last().map(|t| t.1.as_str()), Some("Stopped."));
+    assert_eq!(
+        stop(&run, KEY).status,
+        202,
+        "a Stop retried after its run ended replays its answer"
+    );
+    assert_eq!(
+        stop(&run, "k1Z-9_eeeeeeeeee").status,
+        404,
+        "a new Stop of an ended run finds no run"
+    );
     let rows = chat_rows(&f);
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.event_type == "ChatRunStopRequested")
+            .count(),
+        1,
+        "the retried Stop is the one record"
+    );
     assert!(
         rows.iter().any(|r| r.event_type == "ChatRunStopRequested"),
         "the Stop is its own record though it reuses the message's key"
@@ -2550,4 +2567,249 @@ fn a_proactive_run_proposes_an_order_as_a_card_and_places_nothing() {
         })
         .collect();
     assert_eq!(kinds, ["agent", "agent", "proactive", "proactive"]);
+}
+
+fn post_keyed(f: &Fixture, cookie: &str, text: &str, key: &str) -> Reply {
+    let cookie = format!("{COOKIE_NAME}={cookie}");
+    let body = format!(r#"{{"text":"{text}"}}"#);
+    send(
+        f.addr,
+        "POST",
+        &messages_path(),
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Content-Type", "application/json"),
+            ("Cookie", &cookie),
+            ("Idempotency-Key", key),
+        ],
+        body.as_bytes(),
+    )
+}
+
+fn accepted_ids(reply: &Reply) -> (String, String) {
+    let body = parse(&reply.body).expect("JSON");
+    let id = |k: &str| {
+        body.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    (id("message_id"), id("run_id"))
+}
+
+#[test]
+fn a_retried_message_replays_its_answer_and_starts_no_second_run() {
+    let gateway = gateway_service(vec![turn(
+        &[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)],
+        None,
+    )]);
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    let first = post_keyed(&f, &cookie, "hi", KEY);
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    settled(&f, &cookie);
+    let again = post_keyed(&f, &cookie, "hi", KEY);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(accepted_ids(&again), accepted_ids(&first));
+    assert!(accepted_ids(&first).1.starts_with("run_"));
+    let other = post_keyed(&f, &cookie, "something else", KEY);
+    assert_eq!(
+        other.status,
+        409,
+        "{}",
+        String::from_utf8_lossy(&other.body)
+    );
+    assert_eq!(
+        member_text(&parse(&other.body).expect("JSON"), &["code"]),
+        Some("idempotency_conflict")
+    );
+    let rows = chat_rows(&f);
+    let owners = rows
+        .iter()
+        .filter(|row| {
+            row.event_type == "ChatMessagePosted"
+                && String::from_utf8_lossy(&row.body).contains(r#""author":"owner""#)
+        })
+        .count();
+    let ended = rows
+        .iter()
+        .filter(|row| row.event_type == "ChatRunEnded")
+        .count();
+    assert_eq!((owners, ended), (1, 1), "one message, one run");
+}
+
+#[test]
+fn a_buy_the_owner_did_not_name_commits_nothing() {
+    let gateway = gateway_service(vec![
+        turn(
+            &[
+                (name::BUY, r#"{"quantity":"5","symbol":"AAPL"}"#),
+                (name::BUY, r#"{"quantity":"2","symbol":"aapl"}"#),
+            ],
+            None,
+        ),
+        turn(&[], Some(r#"{"watch":[]}"#)),
+    ]);
+    let f = fixture(Some(gateway));
+    seed_catalogue(&f);
+    let cookie = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "buy 2 AAPL").status, 202);
+    settled(&f, &cookie);
+    let found = results(&f);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(
+        found[0].1, r#"{"ok":false,"refused":"not_in_owner_message"}"#,
+        "a quantity the owner never typed"
+    );
+    assert!(found[1].1.contains(r#""accepted":true"#), "{found:?}");
+    let requests = f
+        .journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .values()
+        .flatten()
+        .filter(|row| row.event_type == "OwnerRequestSubmitted")
+        .count();
+    assert_eq!(requests, 1, "only the named buy is the owner's request");
+}
+
+#[test]
+fn a_buy_after_the_owner_signed_out_is_refused_and_commits_nothing() {
+    let (release, held) = std::sync::mpsc::channel();
+    let gateway = gateway_service_gated(
+        vec![
+            turn(&[(name::BUY, r#"{"quantity":"2","symbol":"AAPL"}"#)], None),
+            turn(&[], Some(r#"{"watch":[]}"#)),
+        ],
+        Some(held),
+    );
+    let f = fixture(Some(gateway));
+    seed_catalogue(&f);
+    let cookie = signed_in(&f);
+    let reader = signed_in(&f);
+    assert_eq!(post_message(&f, &cookie, "buy 2 AAPL").status, 202);
+    f.sessions.end(&cookie).expect("signed out");
+    release.send(()).expect("the gateway answers");
+    settled(&f, &reader);
+    assert_eq!(
+        results(&f),
+        vec![(
+            name::BUY.to_owned(),
+            r#"{"ok":false,"refused":"no_session"}"#.to_owned()
+        )]
+    );
+    let requests = f
+        .journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .values()
+        .flatten()
+        .filter(|row| row.event_type == "OwnerRequestSubmitted")
+        .count();
+    assert_eq!(requests, 0);
+}
+
+#[test]
+fn a_day_s_spend_that_does_not_read_holds_the_run_as_over_its_cap() {
+    assert!(capped(
+        "100",
+        &[("agt_a", "not money", 0, "ChatTurnRecorded")]
+    ));
+    assert!(capped(
+        "100",
+        &[("agt_a", "0.0000001", 0, "ChatTurnRecorded")]
+    ));
+}
+
+#[test]
+fn a_cap_with_more_than_six_digits_after_its_point_is_refused() {
+    let f = fixture(Some(gateway_service(Vec::new())));
+    let cookie = signed_in(&f);
+    for (cap, status) in [("0.0000001", 422), ("0.000001", 200), ("12.5", 200)] {
+        let body = format!(r#"{{"chat_model":"llm.chat_sonnet","daily_cap_usd":"{cap}"}}"#);
+        let key = format!("k1Z-9_cap{:0>7}", cap.len());
+        let (found, answer) = put_settings(&f, &cookie, "agt_a", body.as_bytes(), &key);
+        assert_eq!(found, status, "{cap}: {answer:?}");
+    }
+}
+
+#[test]
+fn a_message_retried_while_its_run_is_in_flight_replays_and_another_is_refused() {
+    let (release, held) = std::sync::mpsc::channel();
+    let gateway = gateway_service_gated(
+        vec![turn(
+            &[(name::REPLY, r#"{"sources":[],"text":"Hello."}"#)],
+            None,
+        )],
+        Some(held),
+    );
+    let f = fixture(Some(gateway));
+    let cookie = signed_in(&f);
+    let first = post_keyed(&f, &cookie, "hi", KEY);
+    assert_eq!(first.status, 202);
+    let again = post_keyed(&f, &cookie, "hi", KEY);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(accepted_ids(&again), accepted_ids(&first));
+    assert_eq!(
+        post_keyed(&f, &cookie, "not hi", KEY).status,
+        409,
+        "other content under the key"
+    );
+    assert_eq!(
+        post_keyed(&f, &cookie, "hi again", "k1Z-9_gggggggggg").status,
+        429,
+        "a new message while the run is in flight"
+    );
+    release.send(()).expect("the gateway answers");
+    settled(&f, &cookie);
+    let ended = chat_rows(&f)
+        .iter()
+        .filter(|row| row.event_type == "ChatRunEnded")
+        .count();
+    assert_eq!(ended, 1, "one run");
+}
+
+#[test]
+fn settings_under_a_used_key_replay_the_same_body_and_refuse_another() {
+    let f = fixture(Some(gateway_service(Vec::new())));
+    let cookie = signed_in(&f);
+    let body = |cap: &str| format!(r#"{{"chat_model":"llm.chat_sonnet","daily_cap_usd":"{cap}"}}"#);
+    let key = "k1Z-9_hhhhhhhhhh";
+    assert_eq!(
+        put_settings(&f, &cookie, "agt_a", body("1").as_bytes(), key).0,
+        200
+    );
+    assert_eq!(
+        put_settings(&f, &cookie, "agt_a", body("1").as_bytes(), key).0,
+        200
+    );
+    let (status, answer) = put_settings(&f, &cookie, "agt_a", body("2").as_bytes(), key);
+    assert_eq!(status, 409);
+    assert_eq!(
+        member_text(&answer, &["code"]),
+        Some("idempotency_conflict")
+    );
+    let changes = chat_rows(&f)
+        .iter()
+        .filter(|row| row.event_type == "ChatSettingsChanged")
+        .count();
+    assert_eq!(changes, 1);
 }

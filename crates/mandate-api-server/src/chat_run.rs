@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mandate_api::idempotency::IdempotencyKey;
+use mandate_authn::Request;
 use mandate_canon::{Digest, Value, parse};
 use mandate_chat::engine::{arg_text, parse_document};
 use mandate_chat::entry::{AGENT, PROACTIVE, SETUP, name};
@@ -311,17 +312,13 @@ impl Journaled<'_> {
         let _ = self.append("ChatRunEnded", payload);
     }
 
-    /// The cost of the agent's chat today, summed from its turns' records.
-    fn spent_today(&self) -> u128 {
+    /// The cost of the agent's chat today, summed from its turns' records; `None` when it cannot
+    /// be known: no clock, an unreadable control stream, or a turn whose cost does not read.
+    fn spent_today(&self) -> Option<u128> {
         let Some(agent) = self.start.thread.agent.as_deref() else {
-            return 0;
+            return Some(0);
         };
-        let today = self
-            .app
-            .clock
-            .now()
-            .map(|now| now.date().to_string())
-            .unwrap_or_default();
+        let today = self.app.clock.now()?.date().to_string();
         let control = self
             .handle
             .block_on(
@@ -329,7 +326,7 @@ impl Journaled<'_> {
                     .journal
                     .rows(&format!("ctl:{}", self.start.workspace)),
             )
-            .unwrap_or_default();
+            .ok()?;
         control
             .iter()
             .filter(|row| {
@@ -338,8 +335,9 @@ impl Journaled<'_> {
             .filter_map(envelope)
             .filter_map(|e| e.get("payload").cloned())
             .filter(|p| p.get("agent_id").and_then(Value::as_str) == Some(agent))
-            .filter_map(|p| p.get("cost_usd").and_then(Value::as_str).and_then(micros))
-            .sum()
+            .filter_map(|p| p.get("cost_usd").cloned())
+            .map(|cost| cost.as_str().and_then(micros))
+            .try_fold(0u128, |sum, cost| sum.checked_add(cost?))
     }
 }
 
@@ -428,8 +426,13 @@ impl Host for Journaled<'_> {
         self.app.chat.stopped(&self.start.run)
     }
 
+    /// Over the cap, or unable to tell: a cap or a day's spend that does not read stops the run,
+    /// which never adds cost it cannot count (AGENTS.md rule 3).
     fn over_budget(&mut self) -> bool {
-        micros(&self.cap).is_some_and(|cap| self.spent_today() >= cap)
+        match (micros(&self.cap), self.spent_today()) {
+            (Some(cap), Some(spent)) => spent >= cap,
+            _ => true,
+        }
     }
 
     fn now(&mut self) -> UtcNanos {
@@ -439,6 +442,41 @@ impl Host for Journaled<'_> {
     fn call_id(&mut self) -> String {
         let now = self.now();
         self.app.chat.ulid(now)
+    }
+}
+
+/// The session request an acting tool's `permission` is: a pause and the kill switch are what a
+/// reduction-only session still admits; everything else needs a full one.
+fn session_request(permission: Permission) -> Request {
+    match permission {
+        Permission::Pause => Request::Pause,
+        Permission::KillSwitchAgent => Request::KillSwitch,
+        _ => Request::Other,
+    }
+}
+
+/// Whether the owner's own `message` names both `symbol` and `quantity`, each as a whole word: the
+/// one buy a run commits as the owner's request is one the owner typed, never one the model read
+/// in a headline or a thesis (DEC-2293 item 5, tightened). A buy the owner did not name is offered
+/// as a proposal card instead.
+pub fn owner_named(message: &str, symbol: &str, quantity: &str) -> bool {
+    let words: Vec<&str> = message
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
+        .map(|word| word.trim_end_matches('.'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let wanted = decimal_words(quantity);
+    words.iter().any(|word| word.eq_ignore_ascii_case(symbol))
+        && words.iter().any(|word| decimal_words(word) == wanted)
+}
+
+/// A decimal's digits without trailing fraction zeros or a trailing point, so `10`, `10.0` and
+/// `10.00` read alike; any other text is itself.
+fn decimal_words(text: &str) -> &str {
+    match text.split_once('.') {
+        Some((whole, fraction)) if fraction.bytes().all(|b| b == b'0') => whole,
+        Some(_) => text.trim_end_matches('0'),
+        None => text,
     }
 }
 
@@ -1053,6 +1091,9 @@ impl Tools<'_> {
         if !self.pins(&deployment, &snapshot.instrument_id) {
             return refusal("not_in_mandate");
         }
+        if !owner_named(&self.start.message, &snapshot.symbol, &quantity) {
+            return refusal("not_in_owner_message");
+        }
         let command = Command::OwnerRequest {
             agent: deployment.0.clone(),
             instrument: snapshot.instrument_id.clone(),
@@ -1109,23 +1150,27 @@ impl Tools<'_> {
         self.commit(&make(&deployment.0), permission)
     }
 
-    /// Commits `command` as the owner's own route would: a fresh authorization of the owner's
-    /// session for `permission`, and an idempotency key of this run's own, so a retried run
-    /// replays rather than repeats.
+    /// Commits `command` as the owner's own route would: the owner's session admitted again now,
+    /// by its reference, so a session signed out, expired or narrowed since the message acts no
+    /// more; a fresh authorization of it for `permission`; and an idempotency key of this run's
+    /// own, so a retried run replays rather than repeats.
     fn commit(&mut self, command: &Command, permission: Permission) -> String {
         let Some(session) = self.start.gate.as_ref() else {
             return refusal("no_session");
         };
         let now = self.app.clock.now().unwrap_or(self.start.now);
+        let Ok(admitted) =
+            self.app
+                .sessions
+                .readmit(session.admitted.reference, session_request(permission), now)
+        else {
+            return refusal("no_session");
+        };
         let Ok(key) = IdempotencyKey::parse(&format!("chat-{}-{}", self.start.run, self.index))
         else {
             return refusal("idempotency");
         };
-        let gate = Gate {
-            admitted: session.admitted,
-            now,
-            key,
-        };
+        let gate = Gate { admitted, now, key };
         let reader = match self.handle.block_on(authorized(
             self.app,
             &gate.admitted,
@@ -1200,12 +1245,25 @@ impl Tools<'_> {
         let Some(session) = self.start.gate.as_ref() else {
             return refusal("no_session");
         };
+        let now = self.app.clock.now().unwrap_or(self.start.now);
+        let Ok(admitted) =
+            self.app
+                .sessions
+                .readmit(session.admitted.reference, Request::Other, now)
+        else {
+            return refusal("no_session");
+        };
+        let gate = Gate {
+            admitted,
+            now: session.now,
+            key: session.key.clone(),
+        };
         let Some(document) = parse_document(text) else {
             return refusal("document_not_json");
         };
         match self.handle.block_on(crate::version_routes::create_for_chat(
             self.app,
-            session,
+            &gate,
             &self.start.workspace,
             document,
         )) {
@@ -1279,7 +1337,65 @@ mod pure {
     use mandate_canon::{Digest, Value, parse, to_canonical};
     use mandate_journal::StoredEvent;
 
-    use super::{RESULT_BYTES, THREAD_MESSAGES, Thread, cut, micros, references, transcript};
+    use mandate_authn::Request;
+    use mandate_identity::Permission;
+
+    use super::{
+        RESULT_BYTES, THREAD_MESSAGES, Thread, cut, micros, owner_named, references,
+        session_request, transcript,
+    };
+
+    #[test]
+    fn a_buy_is_the_owner_s_only_when_their_message_names_its_symbol_and_quantity_as_words() {
+        assert!(owner_named("buy 2 AAPL", "AAPL", "2"));
+        assert!(owner_named("Buy 2 aapl, please.", "AAPL", "2"));
+        assert!(owner_named("get $AAPL x 2.0", "AAPL", "2"));
+        assert!(owner_named("buy 2.50 AAPL", "AAPL", "2.5"));
+        assert!(owner_named("buy 10 AAPL", "AAPL", "10.00"));
+        assert!(
+            !owner_named("what about Apple?", "AAPL", "2"),
+            "no symbol, no quantity"
+        );
+        assert!(!owner_named("buy AAPL", "AAPL", "2"), "no quantity");
+        assert!(!owner_named("buy 2 shares", "AAPL", "2"), "no symbol");
+        assert!(!owner_named("buy 20 AAPL", "AAPL", "2"), "20 is not 2");
+        assert!(!owner_named("buy 2 AAPL", "AAPL", "20"), "2 is not 20");
+        assert!(
+            !owner_named("buy 100 AAPL", "AAPL", "10"),
+            "no zeros trimmed without a point"
+        );
+        assert!(
+            !owner_named("buy 2 AAPLX", "AAPL", "2"),
+            "a symbol only as a whole word"
+        );
+        assert!(!owner_named("buy 2.5 AAPL", "AAPL", "2"), "2.5 is not 2");
+        assert!(!owner_named("", "AAPL", "2"));
+        assert!(
+            !owner_named("buy .5 AAPL", "AAPL", "5"),
+            "a leading point is kept"
+        );
+        assert!(
+            owner_named("buy 5. AAPL", "AAPL", "5"),
+            "a trailing point is punctuation"
+        );
+    }
+
+    #[test]
+    fn only_a_pause_and_the_kill_switch_are_risk_reducing_session_requests() {
+        assert_eq!(session_request(Permission::Pause), Request::Pause);
+        assert_eq!(
+            session_request(Permission::KillSwitchAgent),
+            Request::KillSwitch
+        );
+        for other in [
+            Permission::OwnerRequest,
+            Permission::OwnerExit,
+            Permission::ResumeOrStop,
+            Permission::DraftVersion,
+        ] {
+            assert_eq!(session_request(other), Request::Other, "{other:?}");
+        }
+    }
 
     #[test]
     fn a_result_up_to_the_limit_is_whole_and_a_longer_one_is_cut_on_a_character() {

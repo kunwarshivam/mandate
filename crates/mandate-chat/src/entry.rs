@@ -394,7 +394,7 @@ fn declarations() -> Vec<ToolDeclaration> {
         tool(
             name::BUY,
             ToolClass::Action,
-            "Ask the platform to buy for the owner. The platform sizes it within the mandate and may clip or refuse it.",
+            "Ask the platform to buy for the owner, only the symbol and quantity the owner's own message names; anything else is refused, so offer it with order.propose. The platform sizes it within the mandate and may clip or refuse it.",
             object(vec![
                 (
                     "properties",
