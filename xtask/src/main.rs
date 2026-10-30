@@ -19955,7 +19955,7 @@ mod tests {
         let allowed_runs_on = [
             "ubuntu-24.04",
             "ubuntu-24.04-arm",
-            "macos-14",
+            "macos-15",
             "${{ matrix.runner }}",
             "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
             "${{ needs.select.outputs.runner }}",

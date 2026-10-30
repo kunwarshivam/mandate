@@ -346,7 +346,7 @@ jobs:
   fast-portable:
     needs: select
     if: needs.select.outputs.portable == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 10
     permissions:
       contents: read
