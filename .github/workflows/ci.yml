@@ -190,10 +190,10 @@ jobs:
       - run: cargo xtask ci spec-guard
         if: steps.change.outputs.docs_only != 'true'
 
-  # DEC-871, DEC-2325, DEC-2639. The workspace's nextest run, in nextest's counted partitions: each shard
-  # builds every test binary and runs its sixth of the tests, and together they run every test once. The shards
-  # and `fast-pending` build the same test profile, so they share one cache, which only the first
-  # shard saves.
+  # DEC-871, DEC-2325, DEC-2639. The workspace's nextest run, split by package: each shard builds and
+  # runs only the packages `cargo xtask ci test-nextest` gives it, and every package is in exactly
+  # one shard, so together they run every test once. Each shard keeps the dependency cache of its
+  # own build.
   fast-test:
     name: fast-test (${{ matrix.shard }})
     needs: select
