@@ -1,14 +1,18 @@
 # The repository's own charts as production runs them: OCI artifacts that release.yml's publish-index
-# job pushed from `main` (`cargo xtask release publish-charts`; these from 2fc268f6, release run
-# 39173190442), pinned by digest, and used only once Flux has verified the digest's keyless
-# signature from that workflow on `main` (DEC-2015 item 3). Promotion rewrites the digests here and
-# in images.yaml together (DEC-2016).
+# job pushed from `main` (`cargo xtask release publish-charts`), pinned by digest, and used only
+# once Flux has verified the digest's keyless signature from that workflow on `main` (DEC-2015
+# item 3). Each names, as `mandate.dev/chart-version`, the version its digest was published as,
+# whose `+g` suffix is the commit it was packaged from: test_gitops renders production's values
+# against that commit's chart. Promotion copies staging's digests and versions here and its images
+# into images.yaml together (DEC-2016).
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   name: mandate-backup-plugin-tls
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g2fc268f6cc7d
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-backup-plugin-tls
@@ -28,6 +32,8 @@ kind: OCIRepository
 metadata:
   name: mandate-journal-db
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g2fc268f6cc7d
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-journal-db
@@ -47,6 +53,8 @@ kind: OCIRepository
 metadata:
   name: mandate-workspace
   namespace: flux-system
+  annotations:
+    mandate.dev/chart-version: 0.1.0+g2fc268f6cc7d
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-workspace
