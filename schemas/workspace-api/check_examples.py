@@ -30,10 +30,16 @@ A `$ref` that resolves to nothing is reported as a failure naming the schema.
 `pattern` is matched as ECMA-262 (JSON Schema's regex dialect) and Rust's `regex` match it: `$`
 matches only at the very end. Python's `$` also matches before a final newline, so `"1\\n"` would
 pass `^[0-9]+$`; the checker rewrites each unescaped `$` outside a character class to `\\Z` first.
+
+`MANDATE_SCHEMA_MUTATED`, set by `mutate_schemas.py` to the one schema a mutant changed (its path
+from `schemas/workspace-api/`, without `.schema.json`), checks that schema first and stops at the
+first schema with a problem. A run with a problem still exits 1 and one without still checks
+everything, so the verdict is the full run's; only a caught mutant's run is shorter.
 """
 
 import copy
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -45,6 +51,7 @@ from referencing.exceptions import Unresolvable
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "schemas/workspace-api"
 EXAMPLES = HERE / "examples"
+MUTATED = os.environ.get("MANDATE_SCHEMA_MUTATED", "")
 ID_BASE = "https://mandate.dev/schemas/workspace-api/v1/"
 
 
@@ -142,7 +149,9 @@ def main() -> int:
         if not valid and first is None:
             problems.append(f"{label}: should be rejected, was accepted")
 
-    for name, schema in sorted(schemas.items()):
+    for name, schema in sorted(schemas.items(), key=lambda item: (item[0] != MUTATED, item[0])):
+        if MUTATED and problems:
+            break
         Draft202012Validator.check_schema(schema)
         if schema.get("$id") != f"{ID_BASE}{name}.schema.json":
             problems.append(f"{name}: $id must be {ID_BASE}{name}.schema.json")
@@ -177,7 +186,7 @@ def main() -> int:
             for case in bad or []:
                 expect(False, validator(schema), apply_case(good, case), f"{name}: {case['label']}")
 
-    for path in sorted(EXAMPLES.glob("*.json")):
+    for path in [] if MUTATED and problems else sorted(EXAMPLES.glob("*.json")):
         stem = path.name.removesuffix(".json").removesuffix(".invalid").removesuffix(".valid")
         if stem.replace(".", "/") not in schemas:
             problems.append(f"{path.relative_to(ROOT)}: no schema for this example")

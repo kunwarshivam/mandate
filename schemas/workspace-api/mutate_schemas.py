@@ -13,10 +13,17 @@ sweep fails on any survivor not listed in `DELIBERATE` with its reason; `--all` 
 `--shard K/N` (0 <= K < N) runs only the mutants whose index, counted across `FILES` in order and
 each file's `mutants()`, is K modulo N, so N shards partition the sweep (DEC-688). Without it the
 sweep runs every mutant.
+
+Each mutant's `check_examples.py` run is told which schema the mutant changed
+(`MANDATE_SCHEMA_MUTATED`), so it checks that schema first and stops at the first problem: a caught
+mutant costs one schema's check instead of all 56. The verdict is unchanged, since a run with any
+problem still fails and one without still checks everything; `fast_path_agrees` re-proves that on
+every run before any mutant is judged.
 """
 
 import copy
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -148,14 +155,44 @@ def in_shard(index: int, shard: tuple[int, int]) -> bool:
     return index % n == k
 
 
-def fails(checker: Path) -> bool:
-    """Whether `checker` reports a problem in the tree it sits in."""
+def fails(checker: Path, mutated: str = "") -> bool:
+    """Whether `checker` reports a problem in the tree it sits in. `mutated` names the schema a
+    mutant changed, which `check_examples.py` checks first, stopping at its first problem."""
+    env = {**os.environ, "MANDATE_SCHEMA_MUTATED": mutated} if mutated else None
     return (
         subprocess.run(
-            [sys.executable, "-I", str(checker)], capture_output=True, check=False
+            [sys.executable, "-I", str(checker)], capture_output=True, check=False, env=env
         ).returncode
         != 0
     )
+
+
+def fast_path_agrees(tree: Path) -> None:
+    """Refuses the sweep unless `check_examples.py`'s first-problem path, which every mutant runs,
+    passes the unmutated copy and fails a planted bad `$id` in the last of `FILES`, as its full run
+    does. The last file is checked last on the full run and first on the fast one, so a fast path
+    that stopped early without a problem, or never reached the mutated schema, is caught here."""
+    examples = tree / "workspace-api/check_examples.py"
+    last = FILES[-1]
+    mutated = last.removesuffix(".schema.json")
+    if fails(examples, mutated):
+        raise SystemExit(
+            f"check_examples.py fails the unmutated copy when told {mutated} was mutated, so every "
+            "mutant would count as caught"
+        )
+    planted = tree / "workspace-api" / last
+    text = planted.read_text(encoding="utf-8")
+    doc = json.loads(text)
+    doc["$id"] = "planted"
+    planted.write_text(json.dumps(doc), encoding="utf-8")
+    runs = (("full", ""), ("first-problem", mutated))
+    missed = [run for run, name in runs if not fails(examples, name)]
+    planted.write_text(text, encoding="utf-8")
+    if missed:
+        raise SystemExit(
+            f"check_examples.py's {missed} run passes a planted bad $id in {last}, so its verdict "
+            "is not the full run's"
+        )
 
 
 def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
@@ -177,6 +214,7 @@ def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
                 f"the checkers {broken} fail on the unmutated copy, so every mutant would count "
                 "as caught; copy what they read into the temporary tree"
             )
+        fast_path_agrees(tree)
         for name in FILES:
             target = tree / "workspace-api" / name
             original = json.loads((HERE / name).read_text(encoding="utf-8"))
@@ -188,7 +226,8 @@ def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
                 doc = copy.deepcopy(original)
                 mutate(doc)
                 target.write_text(json.dumps(doc), encoding="utf-8")
-                caught = any(fails(checker) for checker in checkers)
+                mutated = name.removesuffix(".schema.json")
+                caught = any(fails(checker, mutated) for checker in checkers)
                 if not caught:
                     found.append(f"{name}{label}")
             target.write_text(json.dumps(original), encoding="utf-8")
