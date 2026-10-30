@@ -170,8 +170,9 @@ EVALUATED = [
 def decision_cases(decisions: dict[str, dict]) -> list[dict]:
     """Rule 8's owner branch: an owner's or a client's request carries no evaluation numbers,
     outputs, or weights whatever its purpose, and lists every clip; an agent's opening still needs
-    its numbers. Rule 7's owner clauses (item 10): an owner's opening is never asked, and only an
-    owner's `auto` opening carries the `owner_request` label."""
+    its numbers. Rule 7's owner clause (DEC-2858 item 10, as DEC-2859 amends it): only an owner's
+    `auto` opening carries the `owner_request` label. An owner's opening a reviewer holds is asked
+    (mandate spec §6.2 step 5d), so no vector refuses an owner's `ask` any more."""
     agent = decisions["agent_asked"]["payload"]
     return [
         decision_case("owner_open_unevaluated", "rule 8: an owner request", "owner_auto", []),
@@ -218,24 +219,6 @@ def decision_cases(decisions: dict[str, dict]) -> list[dict]:
             [change("payload.autonomy", "deny"), change("payload.decided_by", "rule:low_score")],
         ),
         decision_case("client_open_unevaluated", "rule 8: a client request", "client_asked", []),
-        decision_case(
-            "owner_open_asked",
-            "rule 7, DEC-2858 item 10: an owner's own opening is never asked",
-            "owner_auto",
-            [change("payload.autonomy", "ask"), change("payload.decided_by", "default")],
-            refused_at("payload.autonomy"),
-        ),
-        decision_case(
-            "owner_increase_asked",
-            "rule 7, DEC-2858 item 10: nor its increase",
-            "owner_auto",
-            [
-                change("payload.purpose", "increase"),
-                change("payload.autonomy", "ask"),
-                change("payload.decided_by", "rule:large_orders"),
-            ],
-            refused_at("payload.autonomy"),
-        ),
         decision_case(
             "owner_request_label_on_a_client_request",
             "rule 7: the owner's label is the owner's alone",
@@ -425,15 +408,14 @@ def outcome(got: list[tuple[int, Violation]]) -> dict:
 
 
 def expected_decision(decision: dict) -> dict:
-    """The oracle's own reading of rule 7's owner clauses and then rule 8, for a decision every other
-    rule accepts: an owner's opening asked, or the owner's label anywhere else, first; then who
+    """The oracle's own reading of rule 7's owner clause and then rule 8, for a decision every other
+    rule accepts: the owner's label anywhere but an owner's own `auto` opening first, since an owner's
+    opening a reviewer holds may be asked (v0.119, DEC-2859); then who
     asked decides whether an evaluation produced it, and the six members are walked in the table's
     order."""
     p = decision["payload"]
     opening = p["purpose"] in ("open", "increase")
     owners_own = p["requested_by"] == "owner" and opening
-    if owners_own and p["autonomy"] == "ask":
-        return refused_at("payload.autonomy")
     if p["decided_by"] == "owner_request" and not (owners_own and p["autonomy"] == "auto"):
         return refused_at("payload.decided_by")
     asked_by_owner = p["requested_by"] != "agent"
@@ -524,7 +506,6 @@ def check_section(section: dict, decide: Validator) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.7.owner_request",
     "rule.7.owner_request_label",
     "regress.rule_8_owner_request_evaluated",
     "regress.rule_8_owner_request_without_clips",

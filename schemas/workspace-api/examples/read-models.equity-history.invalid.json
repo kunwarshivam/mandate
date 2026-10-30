@@ -1,0 +1,122 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing api_version",
+    "remove": [
+      "/api_version"
+    ]
+  },
+  {
+    "label": "a missing range",
+    "remove": [
+      "/range"
+    ]
+  },
+  {
+    "label": "an unknown range",
+    "set": {
+      "/range": "mutant_value"
+    }
+  },
+  {
+    "label": "a range in another case",
+    "set": {
+      "/range": "1D"
+    }
+  },
+  {
+    "label": "a missing accounts",
+    "remove": [
+      "/accounts"
+    ]
+  },
+  {
+    "label": "accounts not an array",
+    "set": {
+      "/accounts": {}
+    }
+  },
+  {
+    "label": "an unknown account member",
+    "set": {
+      "/accounts/0/extra": 1
+    }
+  },
+  {
+    "label": "an account without account_ref",
+    "remove": [
+      "/accounts/0/account_ref"
+    ]
+  },
+  {
+    "label": "an account without points",
+    "remove": [
+      "/accounts/0/points"
+    ]
+  },
+  {
+    "label": "a malformed account_ref",
+    "set": {
+      "/accounts/0/account_ref": "a b"
+    }
+  },
+  {
+    "label": "points not an array",
+    "set": {
+      "/accounts/0/points": {}
+    }
+  },
+  {
+    "label": "an unknown point member",
+    "set": {
+      "/accounts/0/points/0/extra": 1
+    }
+  },
+  {
+    "label": "a point without at",
+    "remove": [
+      "/accounts/0/points/0/at"
+    ]
+  },
+  {
+    "label": "a point without equity",
+    "remove": [
+      "/accounts/0/points/0/equity"
+    ]
+  },
+  {
+    "label": "a point at a date",
+    "set": {
+      "/accounts/0/points/0/at": "2026-10-07"
+    }
+  },
+  {
+    "label": "a numeric equity",
+    "set": {
+      "/accounts/0/points/0/equity": 10000
+    }
+  },
+  {
+    "label": "a null equity",
+    "set": {
+      "/accounts/0/points/0/equity": null
+    }
+  }
+]

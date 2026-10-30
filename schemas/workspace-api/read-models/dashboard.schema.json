@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/dashboard.schema.json",
+  "description": "GET /dashboard (§4.7 D1, in part; DEC-2413): the workspace's agents as GET /agents lists them, and each account the control stream names (ConnectionRequested or ConnectionEstablished) with its latest AccountSnapshotRecorded, the broker's account as reconciliation journals it. as_of names the control stream and each agent and account stream read that holds a row.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "agents",
+    "accounts"
+  ],
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "$ref": "agent.schema.json#/$defs/AgentRow"
+      }
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Account"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Account": {
+      "description": "One account stream, in the order the control stream first names it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_ref",
+        "snapshot"
+      ],
+      "properties": {
+        "account_ref": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "snapshot": {
+          "description": "The latest AccountSnapshotRecorded on the stream, whatever its version (journal spec §9.35); null while the stream holds none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Snapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Snapshot": {
+      "description": "The broker's figures as the snapshot records them (journal spec §9.2, §9.35), never derived or rounded. last_equity and day_change are null for a version 1 snapshot, which carries no prior close: never zero and never equity.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "equity",
+        "cash",
+        "buying_power",
+        "last_equity",
+        "day_change",
+        "environment",
+        "observed_at"
+      ],
+      "properties": {
+        "equity": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "cash": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "buying_power": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "last_equity": {
+          "description": "The broker's equity at the prior session's close (trading spec §7.2), from a version 2 snapshot.",
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "day_change": {
+          "description": "equity − last_equity, signed; null when last_equity is.",
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environment": {
+          "enum": [
+            "paper",
+            "live"
+          ]
+        },
+        "observed_at": {
+          "description": "The snapshot row's recorded_at.",
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}

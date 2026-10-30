@@ -4580,32 +4580,6 @@ owner_requests:
     changes: []
     expect:
       outcome: Valid
-  - name: owner_open_asked
-    clause: 'rule 7, DEC-2858 item 10: an owner''s own opening is never asked'
-    decision: owner_auto
-    changes:
-    - path: payload.autonomy
-      value: ask
-    - path: payload.decided_by
-      value: default
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.autonomy
-  - name: owner_increase_asked
-    clause: 'rule 7, DEC-2858 item 10: nor its increase'
-    decision: owner_auto
-    changes:
-    - path: payload.purpose
-      value: increase
-    - path: payload.autonomy
-      value: ask
-    - path: payload.decided_by
-      value: rule:large_orders
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.autonomy
   - name: owner_request_label_on_a_client_request
     clause: 'rule 7: the owner''s label is the owner''s alone'
     decision: client_asked

@@ -1243,7 +1243,8 @@ pub fn up() -> Result<()> {
             &[(&host_ca_bundle()?, "ca-certificates.crt")],
         )?;
     }
-    if !cluster_exists()? {
+    let created = !cluster_exists()?;
+    if created {
         create_cluster()?;
     }
     let built = (source == ImageSource::Build).then_some(&image);
@@ -1264,7 +1265,18 @@ pub fn up() -> Result<()> {
     .into_iter()
     .flatten()
     .collect::<Vec<_>>();
-    import_images(&images)?;
+    if let Err(error) = import_images(&images) {
+        if !created {
+            return Err(error);
+        }
+        eprintln!(
+            "xtask: {error:#}; the node of the cluster this `up` made fell over while it took the \
+             images, so the cluster is made again, once"
+        );
+        sh("k3d", &["cluster", "delete", CLUSTER])?;
+        create_cluster()?;
+        import_images(&images)?;
+    }
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -1649,12 +1661,14 @@ fn import_images(images: &[&String]) -> Result<()> {
     if images.is_empty() {
         return Ok(());
     }
+    node_takes_images()?;
     let mut args = vec!["image", "import", "--cluster", CLUSTER];
     args.extend(images.iter().map(|image| image.as_str()));
     if sh("k3d", &args).is_err() {
         eprintln!(
             "xtask: the batched image import failed; importing what the node lacks one by one"
         );
+        node_diagnosis();
     }
     api_server_ready()?;
     for image in images {
@@ -1680,7 +1694,9 @@ fn listed_holds(listed: &str, image: &str) -> bool {
     listed.lines().any(|line| line.trim() == image)
 }
 
-/// Waits for the cell's API server to answer `/readyz`.
+/// Waits for the cell's API server to answer `/readyz`; when it never does, prints the node
+/// container's state and the end of its log first, so a node that k3s killed or restarted says
+/// why (k3s's own exit, an OOM kill, a missing containerd socket) instead of only timing out.
 fn api_server_ready() -> Result<()> {
     for _ in 0..POLLS {
         if kubectl(&["get", "--raw", "/readyz"]).is_ok() {
@@ -1688,7 +1704,50 @@ fn api_server_ready() -> Result<()> {
         }
         sleep(Duration::from_secs(2));
     }
+    node_diagnosis();
     bail!("the cell's API server never became ready")
+}
+
+/// Waits until the node is Ready and its containerd answers on its socket, the two things an
+/// import needs: the API server answers before k3s's containerd does, and an import that starts
+/// in between finds no socket (`ctr: cannot access socket`), which k3d logs and then reports as
+/// imported.
+fn node_takes_images() -> Result<()> {
+    for _ in 0..POLLS {
+        let ready = kubectl(&["get", "nodes", "--no-headers"])
+            .is_ok_and(|nodes| nodes.split_whitespace().nth(1) == Some("Ready"));
+        if ready
+            && output(
+                "docker",
+                &["exec", NODE, "ctr", "--namespace", "k8s.io", "version"],
+            )
+            .is_ok()
+        {
+            return Ok(());
+        }
+        sleep(Duration::from_secs(2));
+    }
+    node_diagnosis();
+    bail!("the cell's node never became ready to take images")
+}
+
+/// The cell node container's state and the last lines of its log, each printed or its error.
+fn node_diagnosis() {
+    for args in [
+        vec![
+            "inspect",
+            "--format",
+            "status={{.State.Status}} oom_killed={{.State.OOMKilled}} exit={{.State.ExitCode}} \
+             restarts={{.RestartCount}} error={{.State.Error}}",
+            NODE,
+        ],
+        vec!["logs", "--tail", "80", NODE],
+    ] {
+        match output("docker", &args) {
+            Ok(text) => eprintln!("    node diagnosis `docker {}`:\n{text}", args.join(" ")),
+            Err(e) => eprintln!("    node diagnosis `docker {}`: {e:#}", args.join(" ")),
+        }
+    }
 }
 
 fn cluster_exists() -> Result<bool> {
@@ -3967,7 +4026,7 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
             "networks": ["journal"],
             "healthcheck": {
-                "test": ["CMD", "pg_isready", "-U", "postgres", "-d", "mandate"],
+                "test": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "mandate"],
                 "interval": "2s",
                 "retries": 30
             },

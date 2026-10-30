@@ -1,0 +1,34 @@
+[
+  {
+    "label": "no account and nothing traded",
+    "set": {
+      "/account_ref": null,
+      "/instruments": [],
+      "/realized_gross": "0",
+      "/unrealized_pnl": "0"
+    }
+  },
+  {
+    "label": "a basis not reported",
+    "set": {
+      "/instruments/0/realized_gross": null,
+      "/instruments/0/unrealized_pnl": null,
+      "/realized_gross": null,
+      "/unrealized_pnl": null
+    }
+  },
+  {
+    "label": "an instrument_id of 200 characters",
+    "set": {
+      "/instruments/0/instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "a live agent with a loss",
+    "set": {
+      "/environment": "live",
+      "/instruments/1/realized_gross": "-43.5",
+      "/realized_gross": "-3.5"
+    }
+  }
+]

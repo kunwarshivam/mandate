@@ -135,7 +135,7 @@ const day = patterned(/^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/);
 const label = patterned(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const assetClass = closedEnum<AssetClass>(["crypto", "us_equity"]);
 /** `common.schema.json`'s `Id` and `EventId`: an opaque id, and a ULID. */
-const id = patterned(/^[A-Za-z0-9_-]{1,64}$/);
+export const id = patterned(/^[A-Za-z0-9_-]{1,64}$/);
 const eventId = patterned(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
 
 /** At least one asset class, each once (`minItems: 1`, `uniqueItems`). */
@@ -168,7 +168,7 @@ const agentMembers = {
   label: nullable(label),
   mandate: nullable(mandateSummary),
 };
-const agentRow = object<AgentRow>(agentMembers);
+export const agentRow = object<AgentRow>(agentMembers);
 export const reconciledHolding = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
 const openingsHeld = object<OpeningsHeld>({ reason: closedEnum(["account_traded", "research_agent_traded", "unknown"] as const) });
 /** `openings_held` as served, or `unknown` from a deployment that does not serve it yet: an unjudged hold never reads as none. */

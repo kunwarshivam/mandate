@@ -491,6 +491,31 @@ req("MC-D23", C["MC-D23"]["now"] == C["MC-D17"]["now"] and C["MC-D24"]["now"] ==
     and C["MC-D23"]["patch"] == C["MC-D24"]["patch"] and C["MC-D23"]["action"] == C["MC-D24"]["action"], "the same delegation either side")
 req("MC-D27", "review_by" not in d["bases"]["btc_accumulator"]["mandate"]["autonomy"] and C["MC-D27"]["now"] > C["MC-D18"]["now"],
     "no review date, long after")
+OWNER_IDS = ("MC-D28", "MC-D29", "MC-D30", "MC-D31", "MC-D32", "MC-D33")
+for cid in OWNER_IDS:
+    a = C[cid]["action"]
+    req(cid, a["requested_by"] == "owner" and a["combined_score"] is None and a["purpose"] == "open",
+        "an owner's opening, with no score (DEC-2858)")
+    req(cid, C[cid]["now"] == (C["MC-D18"]["now"] if cid in ("MC-D29", "MC-D30") else C["MC-D17"]["now"]),
+        "past the review date only in MC-D29 and MC-D30")
+for cid, (dec, by, approvers) in {"MC-D28": ("auto", "owner_request", None), "MC-D29": ("ask", "rule:large_orders", 1),
+                                  "MC-D30": ("ask", "review_ceiling", 1), "MC-D31": ("ask", "rule:large_orders", 2),
+                                  "MC-D32": ("auto", "owner_request", None), "MC-D33": ("ask", "admission_ceiling", 1)}.items():
+    e = C[cid]["expect"]
+    req(cid, (e["decision"], e["by"], e.get("approvers_required")) == (dec, by, approvers), f"{dec} by {by}, {approvers} approvers")
+    if dec == "ask":
+        tr = e["trigger"]
+        req(cid, tr["decided_by"] == by and tr["requested_by"] == "owner" and tr["client"] is None
+            and (tr["rule"] is None) == (not by.startswith("rule:")), "the trigger names what asked, for the owner")
+    else:
+        req(cid, "trigger" not in e and "approvers_required" not in e, "an auto asks no one")
+req("MC-D28", Decimal(C["MC-D28"]["action"]["order_usd"]) > Decimal("900"), "above large_orders' 900, so the rules ask")
+req("MC-D31", Decimal(C["MC-D31"]["action"]["order_usd"]) > Decimal("500") and C["MC-D31"]["patch"][-1]["value"] == "500",
+    "above the threshold the patch sets")
+req("MC-D32", Decimal(C["MC-D32"]["action"]["order_usd"]) <= Decimal("500") and C["MC-D32"]["patch"][0]["value"] == [],
+    "no rules, so the default asks, at the threshold")
+req("MC-D33", C["MC-D33"]["action"]["new_instrument"] and d["bases"]["btc_accumulator_reviewed"]["mandate"]["autonomy"]["admission"] == "ask"
+    and Decimal(C["MC-D33"]["action"]["order_usd"]) <= Decimal("900"), "a new instrument under an ask admission, an order the rules let run")
 
 # change
 inc = {"MC-C01", "MC-C02", "MC-C04", "MC-C08", "MC-C10", "MC-C12", "MC-C14", "MC-C15", "MC-C17", "MC-C18", "MC-C19", "MC-C20",

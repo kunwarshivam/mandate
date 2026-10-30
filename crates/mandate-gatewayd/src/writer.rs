@@ -9,6 +9,8 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_gateway::wire::{PutRefusal, PutReply, PutRequest};
 use mandate_journal::{ArtifactError, ArtifactRef, get_artifact};
 
+use crate::gate::Reports;
+
 /// The most bytes the research store may hold before a put that would add more is refused
 /// `store_full` (DEC-2279 item 4): a constant of the service, not a value. The chart's research
 /// store is to be at least twice this (DEC-2279 Consequences).
@@ -88,5 +90,21 @@ impl ArtifactWriter {
                 Err(PutRefusal::StoreUnavailable)
             }
         }
+    }
+}
+
+impl Reports for ArtifactWriter {
+    /// The bytes under `reference`, only if they re-hash to it.
+    fn read(&self, reference: &ArtifactRef) -> Option<Vec<u8>> {
+        get_artifact(&self.store, reference).ok()
+    }
+
+    /// Stores a gate report as any put of this workspace's, under the same cap.
+    fn write(&mut self, bytes: &[u8]) -> Option<ArtifactRef> {
+        let put = PutRequest {
+            workspace_id: self.workspace.clone(),
+            bytes: bytes.to_vec(),
+        };
+        self.put(&put).ok().map(ArtifactRef::from_digest)
     }
 }

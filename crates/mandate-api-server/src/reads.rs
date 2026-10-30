@@ -643,6 +643,54 @@ impl AccountFold for PositionsFold {
     }
 }
 
+impl PositionsFold {
+    /// `read-models/pnl`'s members (workspace API spec §4.7, DEC-2413): the agent sub-ledger's
+    /// gross realized and unrealized P&L per instrument its own fills touched, a closed one
+    /// included, and their sums. `None` when the arithmetic overflows.
+    pub fn pnl(&self) -> Option<Vec<(&'static str, Value)>> {
+        let mut instruments = Vec::new();
+        let mut realized_total = Some(Usd::ZERO);
+        let mut unrealized_total = Some(Usd::ZERO);
+        for (read, instrument) in self
+            .read
+            .iter()
+            .flat_map(|read| read.traded().map(move |instrument| (read, instrument)))
+        {
+            let basis = read.cost_basis(instrument);
+            let realized = read.realized(instrument);
+            let unrealized = match basis {
+                Some(flat) if flat.qty().is_zero() => Some(Usd::ZERO),
+                _ => valued(basis, read.risk_mark(instrument))?.map(|(_, pnl)| pnl),
+            };
+            realized_total = summed(realized_total, realized)?;
+            unrealized_total = summed(unrealized_total, unrealized)?;
+            let qty = read
+                .filled()
+                .find(|(held, _)| *held == instrument)
+                .map_or(mandate_num::SignedQty::ZERO, |(_, qty)| qty);
+            instruments.push(object(vec![
+                ("instrument_id", Value::Str(instrument.to_owned())),
+                ("filled_qty", Value::Str(qty.to_string())),
+                ("realized_gross", decimal(realized)),
+                ("unrealized_pnl", decimal(unrealized)),
+            ])?);
+        }
+        Some(vec![
+            ("instruments", Value::Array(instruments)),
+            ("realized_gross", decimal(realized_total)),
+            ("unrealized_pnl", decimal(unrealized_total)),
+        ])
+    }
+}
+
+/// `total` with `figure` added: `Some(None)` once either is not reported, `None` on overflow.
+fn summed(total: Option<Usd>, figure: Option<Usd>) -> Option<Option<Usd>> {
+    match (total, figure) {
+        (Some(total), Some(figure)) => total.checked_add(figure).ok().map(Some),
+        _ => Some(None),
+    }
+}
+
 /// A decimal figure, or `null` when it is not served.
 fn decimal(figure: Option<impl std::fmt::Display>) -> Value {
     figure.map_or(Value::Null, |figure| Value::Str(figure.to_string()))

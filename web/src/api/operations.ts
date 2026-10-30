@@ -31,6 +31,9 @@ export type ReadId =
   | "agent"
   | "agent_orders"
   | "agent_positions"
+  | "agent_pnl"
+  | "dashboard"
+  | "dashboard_history"
   | "journal_events"
   | "approvals"
   | "approval"
@@ -50,6 +53,9 @@ const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "agent", method: "GET", route: "/agents/{agent}", query: [], section: "§4.7" },
   { id: "agent_orders", method: "GET", route: "/agents/{agent}/orders", query: [], section: "§4.7, DEC-2111" },
   { id: "agent_positions", method: "GET", route: "/agents/{agent}/positions", query: [], section: "§4.7, DEC-2111" },
+  { id: "agent_pnl", method: "GET", route: "/agents/{agent}/pnl", query: [], section: "§4.7, DEC-2413" },
+  { id: "dashboard", method: "GET", route: "/dashboard", query: [], section: "§4.7, DEC-2413" },
+  { id: "dashboard_history", method: "GET", route: "/dashboard/history", query: ["range"], section: "§4.7, DEC-2413" },
   { id: "journal_events", method: "GET", route: "/journal/streams/{stream}/events", query: ["after_seq", "limit"], section: "§4.8.1" },
   { id: "approvals", method: "GET", route: "/approvals", query: ["state"], section: "§4.3" },
   { id: "approval", method: "GET", route: "/approvals/{approval}", query: [], section: "§4.3" },

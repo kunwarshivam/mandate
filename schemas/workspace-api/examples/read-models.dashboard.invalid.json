@@ -1,0 +1,176 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing api_version",
+    "remove": [
+      "/api_version"
+    ]
+  },
+  {
+    "label": "a missing agents",
+    "remove": [
+      "/agents"
+    ]
+  },
+  {
+    "label": "a missing accounts",
+    "remove": [
+      "/accounts"
+    ]
+  },
+  {
+    "label": "agents not an array",
+    "set": {
+      "/agents": {}
+    }
+  },
+  {
+    "label": "accounts not an array",
+    "set": {
+      "/accounts": {}
+    }
+  },
+  {
+    "label": "an agent row without its mode",
+    "remove": [
+      "/agents/0/mode"
+    ]
+  },
+  {
+    "label": "an unknown account member",
+    "set": {
+      "/accounts/0/extra": 1
+    }
+  },
+  {
+    "label": "an account without account_ref",
+    "remove": [
+      "/accounts/0/account_ref"
+    ]
+  },
+  {
+    "label": "an account without snapshot",
+    "remove": [
+      "/accounts/1/snapshot"
+    ]
+  },
+  {
+    "label": "a malformed account_ref",
+    "set": {
+      "/accounts/0/account_ref": "a b"
+    }
+  },
+  {
+    "label": "a snapshot as a bare decimal",
+    "set": {
+      "/accounts/0/snapshot": "1"
+    }
+  },
+  {
+    "label": "an unknown snapshot member",
+    "set": {
+      "/accounts/0/snapshot/extra": 1
+    }
+  },
+  {
+    "label": "a snapshot without equity",
+    "remove": [
+      "/accounts/0/snapshot/equity"
+    ]
+  },
+  {
+    "label": "a snapshot without cash",
+    "remove": [
+      "/accounts/0/snapshot/cash"
+    ]
+  },
+  {
+    "label": "a snapshot without buying_power",
+    "remove": [
+      "/accounts/0/snapshot/buying_power"
+    ]
+  },
+  {
+    "label": "a snapshot without last_equity",
+    "remove": [
+      "/accounts/0/snapshot/last_equity"
+    ]
+  },
+  {
+    "label": "a snapshot without day_change",
+    "remove": [
+      "/accounts/0/snapshot/day_change"
+    ]
+  },
+  {
+    "label": "a snapshot without environment",
+    "remove": [
+      "/accounts/0/snapshot/environment"
+    ]
+  },
+  {
+    "label": "a snapshot without observed_at",
+    "remove": [
+      "/accounts/0/snapshot/observed_at"
+    ]
+  },
+  {
+    "label": "a numeric equity",
+    "set": {
+      "/accounts/0/snapshot/equity": 10069.97
+    }
+  },
+  {
+    "label": "a non-canonical cash",
+    "set": {
+      "/accounts/0/snapshot/cash": "9139.970"
+    }
+  },
+  {
+    "label": "a numeric buying_power",
+    "set": {
+      "/accounts/0/snapshot/buying_power": 1
+    }
+  },
+  {
+    "label": "a numeric last_equity",
+    "set": {
+      "/accounts/0/snapshot/last_equity": 10000
+    }
+  },
+  {
+    "label": "a numeric day_change",
+    "set": {
+      "/accounts/0/snapshot/day_change": 69.97
+    }
+  },
+  {
+    "label": "an unknown environment",
+    "set": {
+      "/accounts/0/snapshot/environment": "mutant_value"
+    }
+  },
+  {
+    "label": "an observed_at without nanoseconds",
+    "set": {
+      "/accounts/0/snapshot/observed_at": "2026-10-08T14:29:50Z"
+    }
+  }
+]

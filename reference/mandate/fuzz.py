@@ -1234,6 +1234,55 @@ def fuzz_review(n):
             if a["purpose"] not in REDUCING:
                 check(autonomy(in_effect, a)["decision"] != "auto", "MI-32 with no risk clock to judge by, nothing is auto", ctx)
 
+TWO_APPROVER_CHOICES = [None, None, "100", "300", "500", "900", "1000"]
+
+def own_owner_held(m, a, t):
+    """The oracle's own reviewers for an owner's request (MI-35): an `ask` admission on a new instrument, a review date
+    whose end the calendar instant `t` has reached (or no instant at all), and an order above the two-approver
+    threshold. Read from the mandate, the action and the clock, never from a decision or its label."""
+    au = m["autonomy"]
+    rb = au.get("review_by")
+    review = rb is not None and (t is None or own_passed(rb, t))
+    threshold = au["approval"]["two_approver_above_usd"]
+    over = threshold is not None and Fraction(a["order_usd"]) > Fraction(threshold)
+    return (a["new_instrument"] and au["admission"] == "ask") or review or over
+
+def fuzz_owner_request(n):
+    """MI-35 (§6.2 step 5d, DEC-2859): an owner's own opening or increase that steps 3 to 5b leave `ask` is never `auto`
+    when a reviewer holds it, and keeps that ask's label and approver count; one no reviewer holds is always `auto`,
+    labelled `owner_request`. A `deny` and an `auto` are untouched, and the agent's and a client's requests are decided
+    exactly as without step 5d. The oracle judges each reviewer itself (own_owner_held) and tells the cases apart by
+    the step-5b decision alone."""
+    for _ in range(n):
+        m = rand_reviewed_mandate() if rng.random() < 0.7 else (rand_delegated_mandate() or copy.deepcopy(base.btc))
+        if rng.random() < 0.3:
+            m["autonomy"].pop("review_by", None)
+        m["autonomy"]["admission"] = rng.choice(["ask", "ask", "deny", "auto"])
+        m["autonomy"]["approval"]["two_approver_above_usd"] = rng.choice(TWO_APPROVER_CHOICES)
+        rbs = [m["autonomy"]["review_by"]] if "review_by" in m["autonomy"] else []
+        for t in review_times(rbs) + [None]:
+            st = None if t is None else rand_state(t, {}, trouble_p=0.2)
+            a = rand_autonomy_action()
+            owner = dict(a, requested_by="owner")
+            before = autonomy(m, owner, st)
+            got = decided(m, owner, st)
+            held = own_owner_held(m, a, t)
+            ctx = (m["autonomy"], a, None if t is None else fmt(t), before, got, held)
+            if before["decision"] == "ask" and held:
+                check(got["decision"] != "auto", "MI-35 an owner's request a reviewer holds is never auto", ctx)
+                check(got == before, "MI-35 a held owner's request keeps its ask, its label and its approvers", ctx)
+            elif before["decision"] == "ask":
+                check(got == {"decision": "auto", "by": "owner_request"},
+                      "MI-35 an owner's request whose only ask is the rules' or the default's is auto, labelled owner_request", ctx)
+            else:
+                check(got == before, "MI-35 step 5d leaves a deny and an auto as they are", ctx)
+            for who in ("agent", "client"):
+                other = dict(a, requested_by=who)
+                check(decided(m, other, st) == autonomy(m, other, st), "MI-35 step 5d leaves the agent's and a client's requests", ctx)
+            reducing = {"purpose": rng.choice(sorted(REDUCING)), "requested_by": "owner"}
+            check(decided(m, reducing, st) == {"decision": "auto", "by": "builtin_risk_reducing"},
+                  "MI-35 an owner's exit stays built-in AUTO", ctx)
+
 def own_review_class(old_rb, new_rb):
     if old_rb == new_rb:
         return None
@@ -2612,6 +2661,7 @@ if __name__ == "__main__":
     fuzz_delegated_rule_changes(1500)
     fuzz_client_ceiling(400)
     fuzz_review(600)
+    fuzz_owner_request(600)
     fuzz_review_changes(600)
     fuzz_review_rules(600)
     fuzz_tripwires(400)

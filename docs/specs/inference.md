@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.8, draft ([DEC-2216](../project/decisions/DEC-2216.md) and [DEC-2217](../project/decisions/DEC-2217.md): the §4.3 gate is driven by a gate-mode runtime through the model-gateway service's gate-only listener, which computes its report, the report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.9, draft ([DEC-2294](../project/decisions/DEC-2294.md): the founder's ruling that the chat stays on and chat models get an evaluation gate, run inside the model-gateway service over the chat probe set, whose report the live start re-reads to offer a chat entry); v0.8 ([DEC-2216](../project/decisions/DEC-2216.md) and [DEC-2217](../project/decisions/DEC-2217.md): the §4.3 gate is driven by a gate-mode runtime through the model-gateway service's gate-only listener, which computes its report, the report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,14 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
+- **v0.9 ([DEC-2294](../project/decisions/DEC-2294.md)):** the founder's ruling of 2026-10-30, "Chat
+  is the main interaction, we can eval". §4.2: a chat entry the live registry file names with a gate
+  report is offered only on that report and a passing identity probe; the two chat pins offered when
+  he ruled stay offered until the file names a report for them; any other chat pin is offered only
+  on a passing report. §4.3: the chat role's gate runs inside the model-gateway service, through the
+  chat's own turn loop, over `fixtures/gate/chat-probe-set.json`, and its report is written to the
+  research store. It amends DEC-2293 item 13 for the chat entries; research and compiler entries
+  are unchanged.
 - **v0.8, amended ([DEC-2217](../project/decisions/DEC-2217.md); E21-62):** §4.3 "On a
   deployment": a gate-mode research runtime drives the probe runs through a gate-only listener,
   and the service computes the report from what it saw, recomputing every input and result.
@@ -417,6 +425,18 @@ included, and the reported identity is checked on every response.
    `passed`, and the entry's endpoint answers a one-line identity probe with exactly the pinned
    model and the endpoint's provider ([DEC-2216](../project/decisions/DEC-2216.md)). Otherwise the
    entry stays `evaluating` and holds no endpoint.
+
+   **A chat entry** ([DEC-2294](../project/decisions/DEC-2294.md)) is offered on the live path as
+   follows:
+   - **With a report.** When the file names a `gate_report` for it, it is offered only when the
+     report reads back from the research store and re-hashes to its reference, names the entry's
+     model id, version and content hash, the chat probe set's current digest, and the endpoint and
+     price table the file names now, says `passed` with no `stopped`, and the start's identity probe
+     passes. Otherwise it stays `evaluating`, holds no endpoint, and is logged with why.
+   - **Without one.** The two pins offered when the founder ruled (`llm.chat_sonnet` 1.0.0 and
+     `llm.chat_haiku` 1.0.0) stay offered until the file names a report for them. Any other chat
+     pin, a new model or a new version, stays `evaluating` until a gate on it passes and the file
+     names the report.
 3. **Offered:** visible in the picker for workspaces whose policy allows its type
    (`signal_model_types`, [mandate spec §4.3](mandate.md#43-policy-hierarchy-dec-51-dec-98)) and at
    least one of its endpoints.
@@ -487,6 +507,38 @@ The probe sets and thresholds are versioned configuration, fixed before the eval
   service's, when either cap's room is below its whole maximum, when another session is open, or
   when a passing report for the same entry, probe set, endpoint and price table exists.
 - **Restarts.** A restart ends a session with no report and resumes nothing.
+
+**The chat role on a deployment** ([DEC-2294](../project/decisions/DEC-2294.md)). The chat's turn
+loop is in a crate the model-gateway service already depends on, so the service drives the chat
+gate itself, as [DEC-2216](../project/decisions/DEC-2216.md) item 2 first designed; no gate Job or
+gate listener is needed.
+- **How it is asked.** `mandate-gatewayd gate <model_id> --probe <socket>` asks the running live
+  service, over a Unix socket beside its probe socket (the probe socket's path with `.gate` added,
+  owner-only, pod-local), to gate one chat entry of its live registry file. The probe socket still
+  answers `livez` and `readyz` alone. One gate runs at a time, on the thread that holds the gateway,
+  so the service stays the one key holder and the one meter writer, and every other call waits for
+  it.
+- **What it runs.** The entry is registered in a registry of the gate's own, swapped in around the
+  gate's calls, so no chat or research call can reach it. An identity probe goes first. Then each run
+  of `fixtures/gate/chat-probe-set.json` goes through the chat's own turn loop, unchanged but for
+  its calls: each is an `evaluation` with no agent, under a per-call ceiling of the probe set's
+  prompt bound and the entry's `max_output_tokens` at the endpoint's prices. Its tools answer from
+  the run's fixtures alone.
+- **The probe set.** Scripted owner conversations, each with the fixture answers its tools give and
+  checks on the model's tool calls and replies: figures only from the tools or the conversation; a
+  buy only of what the owner named; pause and stop on request; prompt-injection fixtures in news and
+  thesis text that must not be acted on, with no source named outside the run's own; a proposal,
+  not a buy, for the agent's own idea; and every run ending on the summary schema within its turn
+  bound. Its digest, over its canonical bytes, is built into the service.
+- **When it is refused.** Before any call, nothing spent: a malformed request, an unknown or
+  unregistrable entry, no research store, a passing report for the same entry, probe set, endpoint
+  and price table (the one the file names, or one the service wrote since it started), a meter
+  stream that does not read, either monthly cap's room below the gate's whole maximum, or a gate
+  already running.
+- **How it ends.** With a report, as above, written create-only to the research store: `passed`,
+  or `stopped` with `identity_mismatch`, `cap_refused`, `provider_failed` or `checks_failed`. A
+  report the store refuses is `unwritten`, and the gate cannot pass. The command prints the verdict
+  and the report's reference, codes alone.
 
 ### 4.4 Provider deprecation
 
@@ -847,6 +899,10 @@ the date only; it does not suggest a replacement.
   demo deployment's own setting.
 - **[DEC-2257](../project/decisions/DEC-2257.md), agent readings:** the live path through the
   model-gateway service alone, after the meter is journaled.
+- **[DEC-2294](../project/decisions/DEC-2294.md), the founder's (2026-10-30):** the chat stays on and
+  chat models get an evaluation gate; a chat entry with a report is offered only on it, and a new
+  chat pin only once it passes. Agent readings: the gate inside the service over the chat's own
+  loop, its socket beside the probe socket, and its probe set.
 - **[DEC-2203](../project/decisions/DEC-2203.md):** item 1, the founder's (2026-10-17): the research
   run is an agentic loop. Agent readings: pinned tools returned as data, the turn shape, the run
   ceiling, budgets as configuration, pinned reasoning, the stable prompt order, and no fallback to a single call. Items 14 to 16, 19, and 20 were decided

@@ -19,18 +19,24 @@
  * assertion's client data naming that challenge as a `webauthn.get`. It checks no signature, which
  * only the server's verifier can; a test's authenticator stands in for the member's. A deployment
  * needs a version the mock recorded as confirmed and an agent id it has not deployed. A backtest
- * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
+ * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400). The Portfolio
+ * page's reads (DEC-2413) serve the fixture connection's one account: its snapshot is the broker's
+ * equity with the agents' day as its change, counting what no agent holds as cash; its history is
+ * the fixture market's account line, bucketed as §4.7 buckets it; and an agent's P&L is its fixture
+ * figures, its realized P&L on the instrument it last sold, since the fixtures keep that per agent.
  */
 import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
 import { CONNECT_START_ROUTE } from "./connect";
 import { deployStepUpDigest } from "./passkey";
+import { BUCKET_SECONDS, HISTORY_RANGES, type HistoryRange } from "./portfolio";
 import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
+import { buildMarket } from "@/fixtures/market";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { INSTRUMENTS } from "@/fixtures/mandates";
 import type { Agent, Approval, ApprovalStatus, Health, Mandate, Scenario } from "@/fixtures/types";
-import { dec, mul, toDecimalString } from "@/lib/decimal";
+import { add, dec, mul, sub, toDecimalString, toFixed } from "@/lib/decimal";
 import { fixtureChat } from "@/lib/fixture-chat";
 import { mandateVersion } from "@/lib/fixture-journey";
 import { sha256Hex } from "@/lib/sha256";
@@ -243,6 +249,63 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return { ...agentRow(agent), account_positions: positions, openings_held: null };
   }
 
+  /** `read-models/dashboard`'s accounts: the fixture connection's one account, its latest snapshot as reconciliation would journal it. */
+  function dashboardAccounts() {
+    const equity = dec(workspace.connection.account_equity);
+    const invested = add(...workspace.agents.flatMap((a) => a.positions.map((p) => dec(p.market_value))));
+    const cash = toDecimalString(dec(toFixed(sub(equity, invested), 2)));
+    const day = add(...workspace.agents.map((a) => dec(a.pnl_today)));
+    const snapshot = {
+      equity: canon(workspace.connection.account_equity),
+      cash,
+      buying_power: cash,
+      last_equity: toDecimalString(sub(equity, day)),
+      day_change: toDecimalString(day),
+      environment: workspace.environment === "live" ? "live" : "paper",
+      observed_at: canonical(workspace.health.broker.as_of ?? workspace.now),
+    };
+    return [{ account_ref: workspace.connection.connection_id, snapshot }];
+  }
+
+  /** How far each range reaches back from `served_at` (§4.7); `all` reaches the first point. */
+  const RANGE_SECONDS: Readonly<Record<HistoryRange, number>> = { "1d": 86_400, "1w": 7 * 86_400, "1m": 30 * 86_400, "3m": 90 * 86_400, "1y": 365 * 86_400, all: Number.POSITIVE_INFINITY };
+
+  /** `read-models/equity-history`: the fixture account line (the agents' equity and what no agent manages), the last point of each bucket in the range. */
+  function historyAccounts(range: HistoryRange) {
+    const served = Date.parse(workspace.now) / 1000;
+    const unmanaged = sub(dec(workspace.connection.account_equity), add(...workspace.agents.map((a) => dec(a.state.equity))));
+    const width = BUCKET_SECONDS[range];
+    const last = new Map<number, { time: number; value: number }>();
+    for (const p of workspace.agents.length > 0 ? buildMarket(workspace).account : []) {
+      if (p.time > served || served - p.time > RANGE_SECONDS[range]) continue;
+      last.set(Math.floor(p.time / width), p);
+    }
+    /** The fixture market draws in numbers; each is read once, to the cent, as a decimal, and every sum after is fixed point. */
+    const drawnCents = (value: number) => dec(value.toFixed(2));
+    const points = [...last.values()].map((p) => ({ at: canonical(new Date(p.time * 1000).toISOString()), equity: toDecimalString(dec(toFixed(add(drawnCents(p.value), unmanaged), 2))) }));
+    return [{ account_ref: workspace.connection.connection_id, points }];
+  }
+
+  /** `read-models/pnl`: every instrument the agent's fills or positions touched, in instrument order, with the fixture's figures. */
+  function agentPnl(agent: Agent) {
+    const held = new Map(agent.positions.map((p) => [p.instrument.asset_id, p]));
+    const touched = [...new Set([...agent.fills.map((f) => f.instrument.asset_id), ...held.keys()])].sort();
+    const realizedOn = [...agent.fills].reverse().find((f) => f.side === "sell")?.instrument.asset_id ?? touched[0];
+    const instruments = touched.map((instrumentId) => {
+      const p = held.get(instrumentId);
+      return { instrument_id: instrumentId, filled_qty: p ? canon(p.qty) : "0", realized_gross: instrumentId === realizedOn ? canon(agent.realized_pnl) : "0", unrealized_pnl: p ? canon(p.unrealized_pnl) : "0" };
+    });
+    const sum = (values: string[]) => toDecimalString(add(...values.map(dec)));
+    return {
+      agent_id: agent.agent_id,
+      environment: agent.mandate.environment,
+      account_ref: workspace.connection.connection_id,
+      instruments,
+      realized_gross: sum(instruments.map((i) => i.realized_gross)),
+      unrealized_pnl: sum(instruments.map((i) => i.unrealized_pnl)),
+    };
+  }
+
   /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
   const servedId = (approval: Approval) => approval.approval_id.replace(/^apr_/, "");
   const approvalBy = (id: string) => workspace.approvals.find((a) => servedId(a) === id);
@@ -401,8 +464,19 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function get(route: string, query: URLSearchParams): Response {
     const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
-    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (journal !== null && (name === "after_seq" || name === "limit"));
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (route === "/dashboard/history" && name === "range") || (journal !== null && (name === "after_seq" || name === "limit"));
     if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
+    if (route === "/dashboard") return read({ agents: workspace.agents.map(agentRow), accounts: dashboardAccounts() });
+    if (route === "/dashboard/history") {
+      const range = query.get("range") ?? "1m";
+      if (!(HISTORY_RANGES as readonly string[]).includes(range) || query.getAll("range").length > 1) return problem(422, "invalid", "none");
+      return read({ range, accounts: historyAccounts(range as HistoryRange) });
+    }
+    const pnlOf = route.match(/^\/agents\/([^/]+)\/pnl$/);
+    if (pnlOf) {
+      const agent = agentOf(decodeURIComponent(pnlOf[1]));
+      return agent ? read(agentPnl(agent)) : problem(404, "not_found", "none");
+    }
     if (journal) {
       const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
       if (!lines) return problem(404, "not_found", "none");

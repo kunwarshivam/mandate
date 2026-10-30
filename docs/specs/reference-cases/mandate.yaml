@@ -13443,6 +13443,120 @@ cases:
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
     thesis_confidence: '0'}
   expect: {decision: auto, by: 'rule:routine'}
+- id: MC-D28
+  kind: review
+  title: Before the review date an owner's request the rules ask is auto
+  base: btc_accumulator_reviewed
+  patch:
+  - {op: remove, path: /autonomy/rules/1}
+  now: '2026-12-24T04:59:59.000000000Z'
+  action: {purpose: open, order_usd: '950', combined_score: null, instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001,
+    asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
+    position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
+    thesis_confidence: '0', requested_by: owner}
+  expect: {decision: auto, by: owner_request}
+- id: MC-D29
+  kind: review
+  title: Past the review date an owner's request the rules ask stays an ask under the rule that asked
+  base: btc_accumulator_reviewed
+  patch:
+  - {op: remove, path: /autonomy/rules/1}
+  now: '2026-12-24T05:00:00.000000000Z'
+  action: {purpose: open, order_usd: '950', combined_score: null, instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001,
+    asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
+    position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
+    thesis_confidence: '0', requested_by: owner}
+  expect:
+    decision: ask
+    by: rule:large_orders
+    approvers_required: 1
+    on_timeout: skip
+    trigger:
+      mandate_version: sha256:6933d6fbaeeb35490f7af269b6c363b48a863785aeaaf2afd663d763c2f1f02d
+      decided_by: rule:large_orders
+      requested_by: owner
+      client: null
+      rule:
+        id: large_orders
+        when: {field: order_usd, op: gt, value: '900'}
+        then: ask
+- id: MC-D30
+  kind: review
+  title: Past the review date an owner's request the rules let run asks under the review ceiling
+  base: btc_accumulator_reviewed
+  patch:
+  - {op: remove, path: /autonomy/rules/1}
+  now: '2026-12-24T05:00:00.000000000Z'
+  action: {purpose: open, order_usd: '300', combined_score: null, instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001,
+    asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
+    position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
+    thesis_confidence: '0', requested_by: owner}
+  expect:
+    decision: ask
+    by: review_ceiling
+    approvers_required: 1
+    on_timeout: skip
+    trigger: {mandate_version: 'sha256:6933d6fbaeeb35490f7af269b6c363b48a863785aeaaf2afd663d763c2f1f02d', decided_by: review_ceiling,
+      requested_by: owner, client: null, rule: null}
+- id: MC-D31
+  kind: review
+  title: Above the two-approver threshold an owner's request the rules ask stays an ask for two approvers
+  base: btc_accumulator_reviewed
+  patch:
+  - {op: remove, path: /autonomy/rules/1}
+  - {op: replace, path: /autonomy/approval/two_approver_above_usd, value: '500'}
+  now: '2026-12-24T04:59:59.000000000Z'
+  action: {purpose: open, order_usd: '950', combined_score: null, instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001,
+    asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
+    position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
+    thesis_confidence: '0', requested_by: owner}
+  expect:
+    decision: ask
+    by: rule:large_orders
+    approvers_required: 2
+    on_timeout: skip
+    trigger:
+      mandate_version: sha256:130f71f876da98ec51634865af9d8769bdc2370c1be2953c61ed59dd5ccdfb5b
+      decided_by: rule:large_orders
+      requested_by: owner
+      client: null
+      rule:
+        id: large_orders
+        when: {field: order_usd, op: gt, value: '900'}
+        then: ask
+- id: MC-D32
+  kind: review
+  title: At or under the two-approver threshold an owner's request the default asks is auto
+  base: btc_accumulator_reviewed
+  patch:
+  - op: replace
+    path: /autonomy/rules
+    value: []
+  - {op: replace, path: /autonomy/approval/two_approver_above_usd, value: '500'}
+  now: '2026-12-24T04:59:59.000000000Z'
+  action: {purpose: open, order_usd: '500', combined_score: null, instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001,
+    asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
+    position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
+    thesis_confidence: '0', requested_by: owner}
+  expect: {decision: auto, by: owner_request}
+- id: MC-D33
+  kind: review
+  title: A new instrument's first order the owner asks for stays an ask under the admission ceiling
+  base: btc_accumulator_reviewed
+  patch:
+  - {op: remove, path: /autonomy/rules/1}
+  now: '2026-12-24T04:59:59.000000000Z'
+  action: {purpose: open, order_usd: '300', combined_score: null, instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001,
+    asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
+    position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: true,
+    thesis_confidence: '0.9', requested_by: owner}
+  expect:
+    decision: ask
+    by: admission_ceiling
+    approvers_required: 1
+    on_timeout: skip
+    trigger: {mandate_version: 'sha256:6933d6fbaeeb35490f7af269b6c363b48a863785aeaaf2afd663d763c2f1f02d', decided_by: admission_ceiling,
+      requested_by: owner, client: null, rule: null}
 - id: MC-E01
   kind: escalation
   op: lifecycle

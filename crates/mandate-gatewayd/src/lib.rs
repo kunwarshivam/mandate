@@ -21,10 +21,14 @@
 //! the journal store. [`recorded`] replays a recording's model half, and [`run`] reads the binary's
 //! arguments and builds the `--recorded` service over the journaled meters. [`writer`] stores the
 //! research runtime's artifacts, create-only and capped, in a store of their own (DEC-2279).
+//! [`gate`] is the chat role's evaluation gate and its report (DEC-2294), and [`gate_socket`] the
+//! pod-local socket an operator asks for a gate on.
 
 pub mod cap;
 pub mod config;
 pub mod control;
+pub mod gate;
+pub mod gate_socket;
 pub mod key;
 pub mod live;
 pub mod recorded;

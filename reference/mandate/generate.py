@@ -1192,6 +1192,37 @@ for cid, title, base, patch, now, a in REVIEW_A:
         e["trigger"] = approval_trigger(m, {"mandate_version": version(m), "decided_by": e["by"], "requested_by": "agent"})
     cases.append({"id": cid, "kind": "review", "title": title, "base": base, "patch": patch, "now": now, "action": full, "expect": e})
 
+# The owner's own request (§6.2 step 5d, MI-35; DEC-2859): no §8.3 evaluation, so no score (DEC-2858), and the
+# rule that reads the score is dropped so the walk reaches the rules under test. An ask the rules raise is the
+# owner's own to make auto; an ask on an order the review or admission ceiling applies to, or above the
+# two-approver threshold, stays an ask with its own label and approver count.
+OWNER = dict(OPEN, combined_score=None, requested_by="owner")
+NO_SCORE_RULE = [{"op": "remove", "path": "/autonomy/rules/1"}]
+TWO_ABOVE_500 = [rep("/autonomy/approval/two_approver_above_usd", "500")]
+OWNER_A = [
+    ("MC-D28", "Before the review date an owner's request the rules ask is auto", NO_SCORE_RULE, LAST_INSTANT,
+     {"order_usd": "950"}),
+    ("MC-D29", "Past the review date an owner's request the rules ask stays an ask under the rule that asked",
+     NO_SCORE_RULE, PASSED, {"order_usd": "950"}),
+    ("MC-D30", "Past the review date an owner's request the rules let run asks under the review ceiling", NO_SCORE_RULE,
+     PASSED, {}),
+    ("MC-D31", "Above the two-approver threshold an owner's request the rules ask stays an ask for two approvers",
+     NO_SCORE_RULE + TWO_ABOVE_500, LAST_INSTANT, {"order_usd": "950"}),
+    ("MC-D32", "At or under the two-approver threshold an owner's request the default asks is auto",
+     [rep("/autonomy/rules", [])] + TWO_ABOVE_500, LAST_INSTANT, {"order_usd": "500"}),
+    ("MC-D33", "A new instrument's first order the owner asks for stays an ask under the admission ceiling",
+     NO_SCORE_RULE, LAST_INSTANT, {"new_instrument": True, "thesis_confidence": "0.9"}),
+]
+for cid, title, patch, now, a in OWNER_A:
+    m = apply_patch(MB["btc_accumulator_reviewed"], patch)
+    V.validate(m)
+    full = dict(OWNER, **a)
+    e = decided(m, full, {"now": now})
+    if e["decision"] == "ask":
+        e["trigger"] = approval_trigger(m, {"mandate_version": version(m), "decided_by": e["by"], "requested_by": "owner"})
+    cases.append({"id": cid, "kind": "review", "title": title, "base": "btc_accumulator_reviewed", "patch": patch, "now": now,
+                  "action": full, "expect": e})
+
 # =========================================================== N. escalation (§6.1, §6.4; MI-21 to MI-25; DEC-155, DEC-156, DEC-158, DEC-173)
 E_T0 = "2026-09-22T14:00:00.000000000Z"
 E_CTX = {"approvers": ["u1", "u2"], "author": "u1", "environment": "paper", "timeout_s": 300,
