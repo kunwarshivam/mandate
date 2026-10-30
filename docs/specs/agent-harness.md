@@ -1906,7 +1906,15 @@ gateway service.
    - `order.buy` is an owner request (`requested_by` `owner`) for the agent's pinned instrument,
      with the quantity the owner asked for. The builder clips it, the gate decides, and DEC-2159
      makes it `auto`. A symbol outside the mandate is refused `not_in_mandate`, and a live
-     environment `live_unavailable`.
+     environment `live_unavailable`. The owner's message that started the run must name both the
+     symbol and the quantity, each as a whole word, else the buy is refused `not_in_owner_message`
+     and nothing is committed: a quantity or symbol the model read in news or a thesis never
+     becomes the owner's request, and the model may offer it as an `order.propose` card instead.
+     Each acting tool also admits the owner's session again at its own instant, so a session
+     signed out, expired or narrowed to risk reduction since the message acts no more (only a
+     pause and the kill switch pass a reduction-only one). With no cookie the run cannot make the
+     outage refresh a route makes, so a session whose access lapsed refuses even the chat's pause
+     and kill switch; the owner's own pause and kill-switch routes still serve them.
    - `order.sell` is an owner exit of the whole position.
    - The four agent controls are pause, resume, Stop and the agent's kill switch.
    - `mandate.propose` creates a draft version through the version route, which validates it. The
