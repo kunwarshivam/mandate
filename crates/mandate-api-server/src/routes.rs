@@ -259,7 +259,7 @@ pub(crate) fn workspace_text(workspace: WorkspaceId) -> Result<String, Refused> 
 }
 
 /// The rows of each deployed agent's stream, after the control stream's.
-async fn agent_rows(
+pub(crate) async fn agent_rows(
     app: &App,
     reader: &Reader,
     deployments: &[Deployment],
@@ -341,7 +341,10 @@ pub(crate) fn enveloped(
 
 /// An agent's members, with the label and envelope of the mandate document its version names,
 /// `null` when the store does not hold it (DEC-1020 item 2).
-fn agent_members(view: &AgentView, document: Option<&Envelope>) -> Vec<(&'static str, Value)> {
+pub(crate) fn agent_members(
+    view: &AgentView,
+    document: Option<&Envelope>,
+) -> Vec<(&'static str, Value)> {
     vec![
         ("agent_id", string(&view.agent_id)),
         ("environment", string(&view.environment)),
