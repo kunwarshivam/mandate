@@ -1358,9 +1358,6 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
         .to_owned())
 }
 
-/// Runs `command` with its stdout sent to stderr, so the build's stdout holds only its
-/// `digest=` line for `$GITHUB_OUTPUT`. It prints the program and its arguments only, never the
-/// variables set on it, which `Command`'s `Debug` would print with their values.
 /// How many times [`sign_keyless`] runs `cosign sign` before the release fails.
 const SIGN_ATTEMPTS: u32 = 3;
 /// The pause between two of [`sign_keyless`]'s attempts.
@@ -1390,6 +1387,9 @@ fn sign_keyless(cosign: &Path, reference: &str, wait: Duration) -> Result<()> {
     }
 }
 
+/// Runs `command` with its stdout sent to stderr, so the build's stdout holds only its
+/// `digest=` line for `$GITHUB_OUTPUT`. It prints the program and its arguments only, never the
+/// variables set on it, which `Command`'s `Debug` would print with their values.
 fn run(command: &mut Command) -> Result<()> {
     let shown = shown(command);
     eprintln!("    $ {shown}");
