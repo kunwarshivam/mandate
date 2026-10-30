@@ -1133,3 +1133,30 @@ fn an_evaluation_names_no_agent_and_is_metered_like_any_call() {
     assert_eq!(reserved.purpose, Purpose::Evaluation);
     assert_eq!(reserved.agent_id, None);
 }
+
+/// DEC-2216 item 2, DEC-2294: a registry swapped in serves the calls made while it is in, the one
+/// handed back is the gateway's own, unchanged, and swapping it back restores every pin it held.
+#[test]
+fn a_registry_swapped_in_serves_alone_and_the_one_handed_back_is_the_gateways_own() {
+    use mandate_gateway::RequestError;
+    use mandate_gateway::registry::Registry;
+    let (mut gateway, model) = gateway();
+    let own = gateway.replace_registry(Registry::new());
+    assert!(
+        own.entry(&model).is_ok(),
+        "the gateway's own registry comes back"
+    );
+    assert_eq!(gateway.registry().entries().count(), 0);
+    assert_eq!(
+        gateway.call(&request(&model, 1)),
+        Err(RequestError::UnknownModel),
+        "a pin only the other registry holds does not resolve"
+    );
+    let empty = gateway.replace_registry(own);
+    assert_eq!(empty.entries().count(), 0);
+    gateway.transport_mut().script(vec![ok_reply(100)]);
+    assert_eq!(
+        gateway.call(&request(&model, 2)).unwrap().outcome,
+        Outcome::Ok
+    );
+}

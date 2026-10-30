@@ -6,11 +6,16 @@
 //!
 //! The same exchange carries a research artifact's put (DEC-2279 item 1), answered on the same one
 //! thread, so the writer's count of the stored bytes has one holder (item 4).
+//!
+//! A [`Side`] asks the same thread one line from outside the listener, and waits for its one-line
+//! answer: the gate socket's request for an evaluation gate (DEC-2294), which so runs on the one
+//! gateway, key and meter writer every call uses.
 
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -38,12 +43,49 @@ pub trait Log: Send + Sync {
     fn line(&self, line: &str);
 }
 
+/// What the thread that holds the gateway answers: each call, each put, and each line a [`Side`]
+/// asks.
+pub trait Handler {
+    fn call(&mut self, request: CallRequest) -> Reply;
+    fn put(&mut self, put: &PutRequest) -> PutReply;
+    fn side(&mut self, line: &str) -> String;
+}
+
 /// A listener and its bounds, served by [`Server::run`] until its [`Stopper`] stops it.
 pub struct Server {
     listener: TcpListener,
     limits: Limits,
     log: Arc<dyn Log>,
     stopping: Arc<AtomicBool>,
+    jobs: Sender<Job>,
+    queue: Receiver<Job>,
+    side: Arc<Mutex<Option<Sender<Job>>>>,
+}
+
+/// Asks the thread that holds a running [`Server`]'s gateway one line. It holds the queue open only
+/// while the server's listener runs, so a stopped server's run still returns.
+#[derive(Clone)]
+pub struct Side(Arc<Mutex<Option<Sender<Job>>>>);
+
+impl Side {
+    /// Asks `line` and waits for its answer; `None` once the server has stopped, or when it stops
+    /// before answering.
+    pub fn ask(&self, line: &str) -> Option<String> {
+        let sender = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()?;
+        let (reply, answered) = mpsc::channel();
+        sender
+            .send(Job::Side {
+                line: line.to_owned(),
+                reply,
+            })
+            .ok()?;
+        drop(sender);
+        answered.recv().ok()
+    }
 }
 
 /// Stops a running [`Server`]: no connection is accepted after it, and [`Server::run`] returns once
@@ -54,10 +96,16 @@ pub struct Stopper {
     address: SocketAddr,
 }
 
-/// One decoded request waiting for the gateway's reply.
-struct Job {
-    request: Request,
-    reply: Sender<Answer>,
+/// One decoded request waiting for the gateway's reply, or one line a [`Side`] asked.
+enum Job {
+    Wire {
+        request: Request,
+        reply: Sender<Answer>,
+    },
+    Side {
+        line: String,
+        reply: Sender<String>,
+    },
 }
 
 /// The reply to one [`Request`], of its kind.
@@ -68,12 +116,21 @@ enum Answer {
 
 impl Server {
     pub fn new(listener: TcpListener, limits: Limits, log: Arc<dyn Log>) -> Self {
+        let (jobs, queue) = mpsc::channel::<Job>();
         Self {
             listener,
             limits,
             log,
             stopping: Arc::new(AtomicBool::new(false)),
+            side: Arc::new(Mutex::new(Some(jobs.clone()))),
+            jobs,
+            queue,
         }
+    }
+
+    /// The handle that asks this server's gateway thread a line while it runs.
+    pub fn side(&self) -> Side {
+        Side(Arc::clone(&self.side))
     }
 
     /// The handle that stops this server.
@@ -99,15 +156,23 @@ impl Server {
     /// thread (DEC-2279 items 1 and 4).
     pub fn run_storing(
         self,
-        mut answer: impl FnMut(CallRequest) -> Reply,
-        mut store: impl FnMut(&PutRequest) -> PutReply,
+        answer: impl FnMut(CallRequest) -> Reply,
+        store: impl FnMut(&PutRequest) -> PutReply,
     ) {
-        let (jobs, queue) = mpsc::channel::<Job>();
+        self.run_handling(&mut Closures { answer, store });
+    }
+
+    /// As [`Server::run_storing`], with every call, put and [`Side`] line answered by `handler`, on
+    /// this thread. A side is answered only until the listener stops; one asked after is `None`.
+    pub fn run_handling(self, handler: &mut dyn Handler) {
         let Self {
             listener,
             limits,
             log,
             stopping,
+            jobs,
+            queue,
+            side,
         } = self;
         let _stop_on_unwind = listener.local_addr().ok().map(|address| {
             StopOnDrop(Stopper {
@@ -115,9 +180,35 @@ impl Server {
                 address,
             })
         });
-        let acceptor = thread::spawn(move || accept(&listener, limits, &log, &stopping, &jobs));
-        answer_all(&queue, &mut answer, &mut store);
+        let acceptor = thread::spawn(move || {
+            accept(&listener, limits, &log, &stopping, &jobs);
+            *side.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        });
+        answer_all(&queue, handler);
         let _ = acceptor.join();
+    }
+}
+
+/// A [`Handler`] of two closures, which serves no side line.
+struct Closures<A, P> {
+    answer: A,
+    store: P,
+}
+
+/// The answer to a side line a server without a side handler is asked.
+pub const SIDE_UNSERVED: &str = "refused not_served";
+
+impl<A: FnMut(CallRequest) -> Reply, P: FnMut(&PutRequest) -> PutReply> Handler for Closures<A, P> {
+    fn call(&mut self, request: CallRequest) -> Reply {
+        (self.answer)(request)
+    }
+
+    fn put(&mut self, put: &PutRequest) -> PutReply {
+        (self.store)(put)
+    }
+
+    fn side(&mut self, _line: &str) -> String {
+        SIDE_UNSERVED.to_owned()
     }
 }
 
@@ -139,17 +230,20 @@ impl Drop for StopOnDrop {
     }
 }
 
-fn answer_all(
-    queue: &Receiver<Job>,
-    answer: &mut impl FnMut(CallRequest) -> Reply,
-    store: &mut impl FnMut(&PutRequest) -> PutReply,
-) {
+fn answer_all(queue: &Receiver<Job>, handler: &mut dyn Handler) {
     for job in queue {
-        let answered = match job.request {
-            Request::Call(request) => Answer::Call(Box::new(answer(*request))),
-            Request::Put(put) => Answer::Put(store(&put)),
-        };
-        let _ = job.reply.send(answered);
+        match job {
+            Job::Wire { request, reply } => {
+                let answered = match request {
+                    Request::Call(request) => Answer::Call(Box::new(handler.call(*request))),
+                    Request::Put(put) => Answer::Put(handler.put(&put)),
+                };
+                let _ = reply.send(answered);
+            }
+            Job::Side { line, reply } => {
+                let _ = reply.send(handler.side(&line));
+            }
+        }
     }
 }
 
@@ -220,7 +314,7 @@ fn exchange(mut connection: TcpStream, timeout: Duration, log: &dyn Log, jobs: &
         }
     };
     let (reply, answered) = mpsc::channel();
-    if jobs.send(Job { request, reply }).is_err() {
+    if jobs.send(Job::Wire { request, reply }).is_err() {
         log.line("request dropped: stopping");
         return;
     }

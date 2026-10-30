@@ -46,6 +46,9 @@ pub enum Command {
     Live(LiveArgs),
     /// Answer one `exec` probe over the running process's socket.
     Probe { asked: Probe, socket: PathBuf },
+    /// Ask the running live service, over the gate socket beside `socket`, to run the chat gate on
+    /// `model_id` (DEC-2294).
+    Gate { model_id: String, socket: PathBuf },
 }
 
 /// What `run` was started with.
@@ -95,6 +98,8 @@ pub enum ArgsError {
     VaultAddressMissing,
     #[error("a live start names no vault directory")]
     VaultDirMissing,
+    #[error("a gate names no model id")]
+    GateModelMissing,
 }
 
 impl ArgsError {
@@ -110,6 +115,7 @@ impl ArgsError {
             Self::RegistryMissing => "registry_missing",
             Self::VaultAddressMissing => "vault_address_missing",
             Self::VaultDirMissing => "vault_dir_missing",
+            Self::GateModelMissing => "gate_model_missing",
         }
     }
 }
@@ -121,7 +127,8 @@ impl ArgsError {
 ///
 /// # Errors
 /// The first [`ArgsError`]: the probe socket, then the subcommand's own, a live start's in the
-/// order recording, registry, listen address, vault address, vault directory.
+/// order recording, registry, listen address, vault address, vault directory, and a gate's model
+/// id.
 pub fn command(args: &[String]) -> Result<Command, ArgsError> {
     let flag = |name: &str| {
         args.iter()
@@ -147,6 +154,14 @@ pub fn command(args: &[String]) -> Result<Command, ArgsError> {
                 .and_then(|word| Probe::parse(word))
                 .ok_or(ArgsError::ProbeUnknown)?;
             Ok(Command::Probe { asked, socket })
+        }
+        Some("gate") => {
+            let model_id = args
+                .get(1)
+                .filter(|word| !word.is_empty() && !word.starts_with("--"))
+                .cloned()
+                .ok_or(ArgsError::GateModelMissing)?;
+            Ok(Command::Gate { model_id, socket })
         }
         Some("run") if named("--registry") => {
             if named("--recorded") {

@@ -205,6 +205,14 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         &self.registry
     }
 
+    /// Puts `registry` in the gateway's place and hands back the one it held. The service's
+    /// evaluation gate swaps a registry of its own in around its calls and the service's back
+    /// after, so an entry under evaluation never resolves in the registry every other call
+    /// resolves in (DEC-2216 item 2, DEC-2294).
+    pub fn replace_registry(&mut self, registry: Registry) -> Registry {
+        std::mem::replace(&mut self.registry, registry)
+    }
+
     pub fn meter(&self) -> &Meter<S> {
         &self.meter
     }
