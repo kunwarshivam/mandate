@@ -210,6 +210,8 @@ function middlewareProblems(tree) {
 }
 
 const WORKER = "owlhead-web";
+/** The only variables wrangler.jsonc may commit: the public data-source switch, origin and workspace (DEC-975, DEC-2414). */
+const DATA_SOURCE_VARS = ["OWLHEAD_DATA_SOURCE", "OWLHEAD_API_ORIGIN", "OWLHEAD_WORKSPACE_ID"];
 const SECRET_LOOKING = /secret|service_role|private_key|-----BEGIN|\beyJ[\w-]{8,}\./i;
 
 function wranglerProblems(tree) {
@@ -234,9 +236,9 @@ function wranglerProblems(tree) {
     [config.routes === undefined && config.route === undefined, "routes must not be committed; the founder adds the custom domain in the dashboard (DEC-1005 item 5)"],
     [services.some((s) => s?.binding === "WORKER_SELF_REFERENCE" && s?.service === WORKER), `services must bind WORKER_SELF_REFERENCE to "${WORKER}"`],
     [!/account_id/.test(text), "account_id must not be committed; the founder's dashboard holds the account (DEC-823 item 4)"],
-    [vars === undefined, "vars must not be committed; the founder sets the public variables in the dashboard (DEC-823 items 4 and 5)"],
+    [vars === undefined || (typeof vars === "object" && vars !== null && Object.keys(vars).every((name) => DATA_SOURCE_VARS.includes(name))), `vars may name only ${DATA_SOURCE_VARS.join(", ")}, the public data-source variables (DEC-975, DEC-2414)`],
     [config.keep_vars === true, "keep_vars must be true, so a deploy keeps the variables the founder set in the dashboard (DEC-823 item 5, DEC-975)"],
-    [!SECRET_LOOKING.test(JSON.stringify(rest)), "holds a secret-looking value; no credential goes in the Worker's configuration (DEC-823 item 4)"],
+    [!SECRET_LOOKING.test(JSON.stringify({ ...rest, vars })), "holds a secret-looking value; no credential goes in the Worker's configuration (DEC-823 item 4)"],
   ];
   return checks.filter(([ok]) => !ok).map(([, message]) => `wrangler.jsonc: ${message}`);
 }
