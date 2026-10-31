@@ -484,8 +484,16 @@ mod review_tests {
     #[test]
     fn a_name_that_is_not_utf8_is_refused_not_skipped() {
         let dir = scratch("utf8");
-        fs::write(dir.join(OsStr::from_bytes(b"\xff.jsonl")), b"")
-            .expect("a file with a non-UTF-8 name is written");
+        let entry = dir.join(OsStr::from_bytes(b"\xff.jsonl"));
+        if let Err(refused_by_the_filesystem) = fs::write(&entry, b"") {
+            assert_eq!(
+                refused_by_the_filesystem.raw_os_error(),
+                Some(92),
+                "the non-UTF-8 entry was refused for another reason: {refused_by_the_filesystem}"
+            );
+            fs::remove_dir_all(&dir).expect("the scratch directory is removed");
+            return;
+        }
         let refused = match read_export(&dir) {
             Ok(_) => panic!("an entry whose name is not UTF-8 is refused"),
             Err(refused) => refused,
