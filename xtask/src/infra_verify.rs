@@ -143,7 +143,7 @@ fn flux(list: &mut Checklist, kubectl: Kubectl<'_>) {
 
 /// What a Flux object's condition messages say, as fixed class words alone: a message may quote a
 /// value, an image or a path, so none is printed, only which of these it matched.
-const FLUX_CLASSES: [(&str, &str); 16] = [
+const FLUX_CLASSES: [(&str, &str); 28] = [
     ("dependency", "dependency"),
     ("context deadline exceeded", "timeout"),
     ("timed out", "timeout"),
@@ -160,6 +160,18 @@ const FLUX_CLASSES: [(&str, &str); 16] = [
     ("forbidden", "forbidden"),
     ("unauthorized", "auth-failed"),
     ("retries exhausted", "retries-exhausted"),
+    ("deadlineexceeded", "timeout"),
+    ("resource not ready", "not-ready"),
+    ("another operation", "operation-in-progress"),
+    ("already exists", "already-exists"),
+    ("is invalid", "invalid-object"),
+    ("unable to build kubernetes objects", "manifest-build"),
+    ("no matches for kind", "missing-crd"),
+    ("the object has been modified", "conflict"),
+    ("job failed", "job-failed"),
+    ("backofflimitexceeded", "job-failed"),
+    ("exceeded quota", "quota"),
+    ("insufficient", "insufficient-resources"),
 ];
 
 /// A HelmRelease's conditions that hold the last Helm action's own error, each with the status
@@ -993,6 +1005,16 @@ mod tests {
                 json!([{"type": "Ready", "status": "False", "reason": "InstallFailed",
                     "message": "values don't meet the specifications of the schema(s): api.org: Does not match pattern"}]),
                 "(False: InstallFailed; message values-schema)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "UpgradeFailed",
+                    "message": "resource not ready, name: api, kind: Deployment, status: InProgress"}]),
+                "(False: UpgradeFailed; message not-ready)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "UpgradeFailed",
+                    "message": "pre-upgrade hook job migrate failed: BackoffLimitExceeded; another operation (install/upgrade/rollback) is in progress"}]),
+                "(False: UpgradeFailed; message operation-in-progress, job-failed)",
             ),
             (
                 json!([{"type": "Ready", "status": "False", "reason": "Progressing",
