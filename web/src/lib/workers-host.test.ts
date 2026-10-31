@@ -148,7 +148,9 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(planted((c) => (c.routes = [{ pattern: "app.owlhead.ai", custom_domain: true }]))).toEqual(only("routes"));
     expect(hostingProblems(tree({ "wrangler.jsonc": `${text}\n// account_id: 0123456789abcdef0123456789abcdef\n` }))).toEqual(only("account_id"));
     expect(config).not.toHaveProperty("account_id");
-    expect(config).not.toHaveProperty("vars");
+    expect(config.vars).toEqual({ OWLHEAD_DATA_SOURCE: "api", OWLHEAD_API_ORIGIN: "https://api-staging.owlhead.ai", OWLHEAD_WORKSPACE_ID: "01KDEM0000000000000000000W" });
+    expect(planted((c) => (c.vars = { ...(c.vars as object), NEXT_PUBLIC_EXTRA: "x" }))).toEqual(only("vars"));
+    expect(planted((c) => (c.vars = { OWLHEAD_API_ORIGIN: `sb_secret_${"x".repeat(32)}` }))).toEqual(only("secret"));
   });
 });
 

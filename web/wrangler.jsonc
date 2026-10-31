@@ -13,9 +13,14 @@
   "workers_dev": false,
   "preview_urls": false,
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
-  // The founder sets the Worker's variables in the dashboard (DEC-823 items 4 and 5), among them
-  // OWLHEAD_DATA_SOURCE, OWLHEAD_API_ORIGIN and OWLHEAD_WORKSPACE_ID (DEC-975). Without this, each
-  // deploy from main would delete them, since this file names none.
+  // The three public variables that point the app at staging's workspace (DEC-975, FOUNDER-STEPS
+  // section P), committed here since DEC-2414 so a deploy sets them; none is a secret. Any other
+  // variable the founder sets in the dashboard stays, through keep_vars (DEC-823 item 5).
+  "vars": {
+    "OWLHEAD_DATA_SOURCE": "api",
+    "OWLHEAD_API_ORIGIN": "https://api-staging.owlhead.ai",
+    "OWLHEAD_WORKSPACE_ID": "01KDEM0000000000000000000W"
+  },
   "keep_vars": true,
   // OpenNext calls the Worker itself through this binding for revalidation and caching.
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "owlhead-web" }]
