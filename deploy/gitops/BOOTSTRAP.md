@@ -151,15 +151,18 @@ order, because granting the founder's membership is your own act, not an agent's
 3. **The grant (your edit, after step 2).** Wait until the `mandate` image staging runs, as
    promoted in `clusters/staging/images.yaml`, has `workspace found --open`. Then, in the same
    file, set `founding.enabled: true`, update the comment above `founding` so it no longer says
-   founding is off, and merge it. An older image refuses `--open`, and the release fails. Once it
-   is on, the workspace chart's `founding` hook runs on every apply: the first opens the
+   founding is off, and merge it. An older image refuses `--open`, and the Job fails. Once it is
+   on, the workspace chart renders the `founding` Job into the ConfigMap `founding-job`, and every
+   apply makes it from there as itself, after the release (DEC-2860: its pods are the control
+   process's, which helm-controller's service account may not make, DEC-2046). The first opens the
    workspace's control stream if it is empty and writes your founding grant; every later one finds
    it and commits nothing. Two runs racing on an empty stream never open it twice: the one that
-   loses fails closed, committing nothing, and the hook's retry finds the stream opened and founds
-   it (or finds the grant). Verify's `founding` Job line confirms it.
+   loses fails closed, committing nothing, and the Job's retry finds the stream opened and founds
+   it (or finds the grant). The apply logs `founding: founded`, and verify's `founding` Job line
+   confirms it.
 
 If the control stream already holds records and no membership, the grant is refused
-`workspace_not_new`: the release fails, and verify's `founding` Job line names only that code. The
+`workspace_not_new`: the Job fails, and verify's `founding` Job line names only that code. The
 fix is a fresh workspace ULID in `api.workspace`, through a gitops change and a decision; no journal
 row is ever deleted.
 

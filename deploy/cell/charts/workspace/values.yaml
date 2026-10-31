@@ -215,8 +215,9 @@ verify:
   id: ""
   streams: []
 
-# The workspace's founding grant (DEC-2114): with `enabled`, a post-install and post-upgrade hook
-# runs `workspace found --open` for `member`, the founder's principal ULID, on `api.workspace`.
+# The workspace's founding grant (DEC-2114, DEC-2860): with `enabled`, the chart renders the Job that
+# runs `workspace found --open` for `member`, the founder's principal ULID, on `api.workspace`, into
+# the ConfigMap `founding-job`, and the infra apply makes it.
 # Never the founder's identity-provider subject: the sign-in link is the `subject-links` ConfigMap.
 founding:
   enabled: false

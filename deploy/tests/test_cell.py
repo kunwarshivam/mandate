@@ -2107,25 +2107,40 @@ def test_ingress_peers_are_exact_addresses_set_only_when_named():
 
 FOUNDER = "01KDEM0000000000000000000F"
 FOUNDING = ("--set", "founding.enabled=true", "--set", f"founding.member={FOUNDER}")
-FOUNDING_HOOK = "post-install,post-upgrade"
+FOUNDING_JOB = "founding-job"
 
 
-def founding_hook(docs: list[dict]) -> list[str]:
-    """With founding on (DEC-2114), the one `founding` Job is the control process's: a post-install
-    and post-upgrade hook made again before each run, running exactly `workspace found --open` for
-    the founder on the hosted workspace as the control role, and naming no identity-provider
-    subject anywhere."""
-    jobs = [d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] == "founding"]
-    if len(jobs) != 1:
-        return [f"{len(jobs)} founding Jobs"]
-    job = jobs[0]
+def founding_jobs(docs: list[dict]) -> list[dict]:
+    """The Jobs the `founding-job` ConfigMaps hold, as the infra apply makes them (DEC-2860)."""
+    maps = [d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == FOUNDING_JOB]
+    return [json.loads(m["data"]["job.json"]) for m in maps if "job.json" in m.get("data", {})]
+
+
+def with_founding_job(docs: list[dict]) -> list[dict]:
+    """`docs` with the founding ConfigMap's Job among them, so the checks over every Job see it."""
+    return [*docs, *founding_jobs(docs)]
+
+
+def founding_job(docs: list[dict]) -> list[str]:
+    """With founding on (DEC-2114, DEC-2860), the chart renders no `founding` Job of its own, and no
+    Helm hook: the one `founding-job` ConfigMap holds the control process's Job, which the infra
+    apply makes, since no service account may make a control Job (DEC-2046). The Job runs exactly
+    `workspace found --open` for the founder on the hosted workspace as the control role, and names
+    no identity-provider subject anywhere."""
     problems = []
-    annotations = job["metadata"].get("annotations", {})
-    if annotations.get("helm.sh/hook") != FOUNDING_HOOK:
-        problems.append(f"the founding Job is not a {FOUNDING_HOOK} hook: {annotations}")
-    if annotations.get("helm.sh/hook-delete-policy") != "before-hook-creation":
-        problems.append(f"the founding Job is not made again before each run: {annotations}")
-    if job["metadata"]["labels"].get("mandate.dev/process") != "control":
+    rendered = [d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] == "founding"]
+    if rendered:
+        problems.append("the chart renders the founding Job itself, which helm-controller would make")
+    jobs = founding_jobs(docs)
+    if len(jobs) != 1:
+        return [*problems, f"{len(jobs)} founding Jobs in {FOUNDING_JOB}"]
+    job = jobs[0]
+    if job.get("kind") != "Job" or job["metadata"].get("name") != "founding":
+        problems.append(f"{FOUNDING_JOB} holds {job.get('kind')} {job['metadata'].get('name')}")
+    hooks = [k for k in job["metadata"].get("annotations", {}) if k.startswith("helm.sh/")]
+    if hooks:
+        problems.append(f"the founding Job carries Helm's annotations {hooks}")
+    if job["spec"]["template"]["metadata"]["labels"].get("mandate.dev/process") != "control":
         problems.append(f"the founding Job is not the control process's: {job['metadata']['labels']}")
     run = pod_spec(job)["containers"]
     if len(run) != 1:
@@ -2156,30 +2171,41 @@ def founding_hook(docs: list[dict]) -> list[str]:
     return problems
 
 
-def test_the_founding_grant_is_a_hook_of_the_control_process():
-    """Off by default; on, one hook Job of `control` with control's role, gate, hardening, files
-    and egress, and nothing else changed; refused without the workspace, the member, or the control
-    process's image (DEC-2114)."""
-    assert not [d for d in render_all() if d["metadata"]["name"] == "founding"]
+def changed_founding_job(docs: list[dict], change) -> list[dict]:
+    """`docs` with `change` made to the Job the `founding-job` ConfigMap holds."""
+    docs = copy.deepcopy(docs)
+    held = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == FOUNDING_JOB)
+    job = json.loads(held["data"]["job.json"])
+    change(job)
+    held["data"]["job.json"] = json.dumps(job)
+    return docs
+
+
+def test_the_founding_grant_is_the_control_process_job_the_apply_makes():
+    """Off by default; on, one ConfigMap holding one Job of `control` with control's role, gate,
+    hardening, files and egress, and nothing else changed; refused without the workspace, the
+    member, or the control process's image (DEC-2114, DEC-2860)."""
+    assert not [d for d in render_all() if d["metadata"]["name"] in ("founding", FOUNDING_JOB)]
     base = ("-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set-json", f'egress.kube-api=["{KUBE_API}"]')
     docs = render(*base, *FOUNDING)
     plain = render(*base)
-    assert founding_hook(docs) == []
-    assert [d for d in docs if d["metadata"]["name"] != "founding"] == plain, "founding adds only its Job"
+    assert founding_job(docs) == []
+    assert [d for d in docs if d["metadata"]["name"] != FOUNDING_JOB] == plain, "founding adds only its ConfigMap"
     for check in (gated, hardened, secrets_as_files, egress_exact):
-        assert check(docs) == [], check.__name__
+        assert check(with_founding_job(docs)) == [], check.__name__
     for seed in (
-        lambda j: j["metadata"]["annotations"].update({"helm.sh/hook": "pre-install,pre-upgrade"}),
-        lambda j: j["metadata"]["annotations"].pop("helm.sh/hook-delete-policy"),
-        lambda j: j["metadata"]["labels"].update({"mandate.dev/process": "api"}),
+        lambda j: j["metadata"].setdefault("annotations", {}).update({"helm.sh/hook": "post-upgrade"}),
+        lambda j: j["spec"]["template"]["metadata"]["labels"].update({"mandate.dev/process": "api"}),
+        lambda j: j.update(kind="Pod"),
         lambda j: pod_spec(j)["containers"][0]["args"].remove("--open"),
         lambda j: pod_spec(j)["containers"][0]["args"].append("--subject"),
         lambda j: pod_spec(j)["containers"][0]["env"].append({"name": "FOUNDER_OIDC_SUBJECT", "value": "x"}),
         lambda j: pod_spec(j)["containers"][0]["env"][0].update(value="postgres://mandate_migrator@journal-rw"),
         lambda j: pod_spec(j)["containers"].append(pod_spec(j)["containers"][0]),
     ):
-        assert founding_hook(mutate(docs, "founding", "Job", seed)), seed
-    assert founding_hook([d for d in docs if d["metadata"]["name"] != "founding"])
+        assert founding_job(changed_founding_job(docs, seed)), seed
+    assert founding_job([d for d in docs if d["metadata"]["name"] != FOUNDING_JOB])
+    assert founding_job([*docs, *founding_jobs(docs)]), "a founding Job the chart renders itself"
     for refused in (
         ("--set", "founding.member="),
         ("--set", "api.workspace="),
