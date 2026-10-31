@@ -1488,7 +1488,12 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
         for w in workloads(docs)
         for name in APPROLE_NAME.findall(json.dumps(w))
         if (w["metadata"]["name"], name)
-        not in ((PROVISIONER, "vault-approle-provisioner"), (FINISH, "vault-approle-connection-manager"))
+        not in (
+            (PROVISIONER, "vault-approle-provisioner"),
+            (FINISH, "vault-approle-connection-manager"),
+            ("model-gateway", "vault-approle-model-gateway"),
+            ("data", "vault-approle-bars-reader"),
+        )
     )
     if holders != ([("Deployment", "api", "vault-approle-api")] if on else []):
         problems.append(f"the AppRoles are named by {holders}")
