@@ -2,7 +2,10 @@
 # Cloudflare R2 with bucket lock (DEC-2605 row 4), from lane IAC (E21-56); the endpoint comes from
 # the bootstrap (base/journal.yaml). The key is the Secret `journal-archive-key` the bootstrap
 # creates, never a value (DEC-2015 item 4, DEC-2018). The archive's clients reach exactly R2's two
-# addresses on 443, which fails closed if they change (DEC-2017 items 1 and 2).
+# addresses on 443, which fails closed if they change (DEC-2017 items 1 and 2). Each instance asks
+# for 250m of CPU, so its two instances (each with the archive's 250m sidecar) leave room on
+# staging's two 2-vCPU nodes for the workspace's processes and its migration hook, which stayed
+# Pending on CPU at 500m (staging apply 41157185277).
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -14,7 +17,7 @@ spec:
       size: 10Gi
       storageClass: do-block-storage
     resources:
-      cpu: 500m
+      cpu: 250m
       memory: 1Gi
     archive:
       destinationPath: s3://mandate-journal-archive-west-staging/journal-db
