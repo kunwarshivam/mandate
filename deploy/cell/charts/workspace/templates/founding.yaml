@@ -1,11 +1,13 @@
 {{- /*
-The founding grant (DEC-2114): with `founding.enabled`, the `control` process's one-off Job runs
-`mandate workspace found --open` for `founding.member` on the workspace `api.workspace` names. It
-is a post-install and post-upgrade hook, made again before each run, so it runs after the
-migration and the release's own policies on every apply, and the last run is kept for verify.
-Re-running it for the same member commits nothing, so every upgrade may run it; a refusal fails the
-hook, and the release, loudly. It carries no identity-provider subject: the founder's sign-in link
-is the `subject-links` ConfigMap, which the infra apply writes as a digest.
+The founding grant (DEC-2114, DEC-2860): with `founding.enabled`, the `control` process's one-off Job
+runs `mandate workspace found --open` for `founding.member` on the workspace `api.workspace` names.
+Its pods are the control process's, and no service account may make such a Job
+(`mandate-control-jobs`, DEC-2046), so Helm, whose controller is one, never makes it: the chart
+renders the Job into the ConfigMap `founding-job`, and the infra apply makes it from there as
+itself, after the release, deleting the last run first and keeping this one for verify.
+Re-running it for the same member commits nothing, so every apply may run it; a refusal fails the
+apply loudly. It carries no identity-provider subject: the founder's sign-in link is the
+`subject-links` ConfigMap, which the infra apply writes as a digest.
 */ -}}
 {{- define "mandate.founding" -}}
 apiVersion: batch/v1
@@ -14,9 +16,6 @@ metadata:
   name: founding
   labels:
     {{- include "mandate.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 180
@@ -25,6 +24,19 @@ spec:
     {{- $mounts := "- {name: work, mountPath: /work}" }}
     {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" "founding" "args" $args "mounts" $mounts) }}
     {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container) | nindent 4 }}
+{{- end -}}
+{{- define "mandate.foundingJob" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: founding-job
+  labels:
+    app.kubernetes.io/name: mandate-workspace
+    app.kubernetes.io/instance: {{ .root.Release.Name | quote }}
+    app.kubernetes.io/component: founding
+    mandate.dev/workspace: {{ .root.Values.workspace | quote }}
+data:
+  job.json: {{ .job | quote }}
 {{- end -}}
 {{- $root := . }}
 {{- if .Values.founding.enabled }}
@@ -37,6 +49,6 @@ spec:
 {{- if not $control }}{{ fail "founding.enabled needs the control process, so images.mandate" }}{{ end }}
 {{- range $control }}
 ---
-{{ include "mandate.emit" (include "mandate.founding" (dict "root" $root "p" .)) }}
+{{ include "mandate.emit" (include "mandate.foundingJob" (dict "root" $root "job" (include "mandate.emit" (include "mandate.founding" (dict "root" $root "p" .))))) }}
 {{- end }}
 {{- end }}

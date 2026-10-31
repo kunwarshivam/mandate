@@ -2344,6 +2344,11 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     for word in flux_reset::reset_stalled(&in_cluster, &format!("infra-{run}"))? {
         eprintln!("    flux: {word}");
     }
+    let founded = founding::found_workspace(&founding::FoundSteps {
+        kubectl: &in_cluster,
+        pause: &std::thread::sleep,
+    })?;
+    eprintln!("    founding: {founded} (DEC-2860)");
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);

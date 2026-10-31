@@ -7,12 +7,16 @@
 //! (DEC-2114 item 2). The subject
 //! is masked the moment it is read and is never an argument, an environment variable, a file, a
 //! cluster object, or a log line: only its digest reaches the cluster. The founding grant itself is
-//! the workspace chart's `founding` hook, which carries no subject at all.
+//! the workspace chart's `founding` Job, which carries no subject at all. Its pods are the control
+//! process's, which no service account may make (DEC-2046), so helm-controller never makes it: the
+//! chart renders it into the ConfigMap `founding-job`, and the apply makes it from there as itself
+//! once the release has rendered it ([`found_workspace`], DEC-2860).
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::json;
@@ -160,6 +164,129 @@ fn linked_text(steps: &Steps<'_>, founder: &Founder, subject: &str) -> Result<St
     Ok(text)
 }
 
+/// The ConfigMap the workspace chart renders the founding Job into, and its one key (DEC-2860).
+pub(crate) const FOUNDING_JOB_CONFIGMAP: &str = "founding-job";
+const FOUNDING_JOB_KEY: &str = "job.json";
+/// The Job's name, as the chart renders it.
+const FOUNDING_JOB: &str = "founding";
+/// How many times, [`FOUNDING_POLL`] apart, the apply looks for the chart's founding Job before
+/// it says the release has rendered none: the window a stalled release's reset needs to upgrade.
+pub(crate) const FOUNDING_LOOKS: u32 = 30;
+pub(crate) const FOUNDING_POLL: Duration = Duration::from_secs(10);
+/// How long the apply waits for the workspace release to be Ready, so the Job it makes is the
+/// release's own and runs after that release's migration; past it, the Job the cluster holds is
+/// made anyway.
+const RELEASE_WAIT: &str = "--timeout=300s";
+/// How long the apply waits for the founding Job to complete: its own `activeDeadlineSeconds`
+/// (180) and a minute to schedule.
+const FOUNDING_WAIT: &str = "--timeout=240s";
+
+/// What [`found_workspace`] needs: `kubectl` against staging as the apply's own identity, never a
+/// service account, and a pause between looks.
+pub(crate) struct FoundSteps<'a> {
+    pub(crate) kubectl: Kubectl<'a>,
+    pub(crate) pause: &'a dyn Fn(Duration),
+}
+
+/// Makes the workspace's founding Job (DEC-2114 item 4, DEC-2860): waits for the workspace release
+/// to be Ready, reads the Job the chart rendered into [`FOUNDING_JOB_CONFIGMAP`], looking [`FOUNDING_LOOKS`] times while the release upgrades,
+/// deletes the last run, makes this one as the apply itself, and waits for it to complete. Answers
+/// in fixed words; a Job that does not complete is left in place, where verify names its refusal
+/// by class, so this answers rather than fails.
+///
+/// # Errors
+/// When `kubectl` cannot be run, the ConfigMap holds no Job, or the Job cannot be deleted or made.
+pub(crate) fn found_workspace(steps: &FoundSteps<'_>) -> Result<String> {
+    let (released, _) = (steps.kubectl)(
+        &[
+            "wait",
+            "--for=condition=ready",
+            "helmrelease/workspace",
+            "--namespace",
+            "flux-system",
+            RELEASE_WAIT,
+        ],
+        None,
+    )?;
+    let mut job = None;
+    for look in 0..FOUNDING_LOOKS {
+        if look > 0 {
+            (steps.pause)(FOUNDING_POLL);
+        }
+        let (found, json) = (steps.kubectl)(
+            &[
+                "get",
+                "configmap",
+                FOUNDING_JOB_CONFIGMAP,
+                "--namespace",
+                WORKSPACE_NAMESPACE,
+                "-o",
+                "json",
+            ],
+            None,
+        )?;
+        if found {
+            job = Some(json);
+            break;
+        }
+    }
+    let Some(json) = job else {
+        return Ok(format!(
+            "the release has rendered no {FOUNDING_JOB_CONFIGMAP} ConfigMap: nothing founded"
+        ));
+    };
+    let object: serde_json::Value = serde_json::from_str(&json)
+        .with_context(|| format!("the {FOUNDING_JOB_CONFIGMAP} ConfigMap is not JSON"))?;
+    let manifest = object["data"][FOUNDING_JOB_KEY]
+        .as_str()
+        .with_context(|| format!("the {FOUNDING_JOB_CONFIGMAP} ConfigMap holds no Job"))?;
+    let held: serde_json::Value = serde_json::from_str(manifest)
+        .with_context(|| format!("the {FOUNDING_JOB_CONFIGMAP} ConfigMap's Job is not JSON"))?;
+    ensure!(
+        held["kind"] == "Job" && held["metadata"]["name"] == FOUNDING_JOB,
+        "the {FOUNDING_JOB_CONFIGMAP} ConfigMap holds something other than the founding Job"
+    );
+    let (deleted, _) = (steps.kubectl)(
+        &[
+            "delete",
+            "job",
+            FOUNDING_JOB,
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+            "--ignore-not-found",
+            "--wait=true",
+        ],
+        None,
+    )?;
+    ensure!(deleted, "kubectl could not delete the last founding Job");
+    let (made, _) = (steps.kubectl)(
+        &["create", "--namespace", WORKSPACE_NAMESPACE, "-f", "-"],
+        Some(manifest),
+    )?;
+    ensure!(made, "kubectl could not make the founding Job");
+    let (complete, _) = (steps.kubectl)(
+        &[
+            "wait",
+            "--for=condition=complete",
+            &format!("job/{FOUNDING_JOB}"),
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+            FOUNDING_WAIT,
+        ],
+        None,
+    )?;
+    let word = if complete {
+        "founded"
+    } else {
+        "the founding Job did not complete: verify names why"
+    };
+    Ok(if released {
+        word.to_owned()
+    } else {
+        format!("{word} (the workspace release was not Ready)")
+    })
+}
+
 /// The `subject-links` ConfigMap's content now, or `None` when there is none.
 fn current(steps: &Steps<'_>) -> Result<Option<String>> {
     let (found, json) = (steps.kubectl)(
@@ -266,9 +393,164 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        CONFIGMAP, Founder, STEP_SECRETS, Steps, link_command, link_founder, run_mandate,
-        staging_founder, value_in, without_step_secrets,
+        CONFIGMAP, FOUNDING_LOOKS, FoundSteps, Founder, STEP_SECRETS, Steps, found_workspace,
+        link_command, link_founder, run_mandate, staging_founder, value_in, without_step_secrets,
     };
+
+    const FOUNDING_MANIFEST: &str =
+        r#"{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"founding"},"spec":{}}"#;
+
+    /// Each `kubectl` call's arguments and standard input.
+    type Calls = Vec<(Vec<String>, Option<String>)>;
+
+    /// How the founding fakes answer: the look on which the chart's ConfigMap first appears
+    /// (`None`: never), the Job it holds, and whether the make and the wait succeed.
+    struct Release {
+        appears_on: Option<u32>,
+        manifest: &'static str,
+        makes: bool,
+        completes: bool,
+        ready: bool,
+    }
+
+    impl Default for Release {
+        fn default() -> Self {
+            Self {
+                appears_on: Some(0),
+                manifest: FOUNDING_MANIFEST,
+                makes: true,
+                completes: true,
+                ready: true,
+            }
+        }
+    }
+
+    /// Runs [`found_workspace`] against `release`, answering what it said and each `kubectl`
+    /// call's arguments and standard input, and how many pauses it took.
+    fn found(release: &Release) -> (Result<String>, Calls, u32) {
+        let calls = RefCell::new(Vec::new());
+        let looks = RefCell::new(0_u32);
+        let pauses = RefCell::new(0_u32);
+        let kubectl = |args: &[&str], stdin: Option<&str>| -> Result<(bool, String)> {
+            calls.borrow_mut().push((
+                args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>(),
+                stdin.map(str::to_owned),
+            ));
+            Ok(match args.first().copied() {
+                Some("wait") if args.contains(&"helmrelease/workspace") => {
+                    (release.ready, String::new())
+                }
+                Some("get") => {
+                    let look = *looks.borrow();
+                    *looks.borrow_mut() += 1;
+                    if release.appears_on.is_some_and(|on| look >= on) {
+                        let map = serde_json::json!({"data": {"job.json": release.manifest}});
+                        (true, map.to_string())
+                    } else {
+                        (false, String::new())
+                    }
+                }
+                Some("create") => (release.makes, String::new()),
+                Some("wait") => (release.completes, String::new()),
+                _ => (true, String::new()),
+            })
+        };
+        let pause = |_| *pauses.borrow_mut() += 1;
+        let said = found_workspace(&FoundSteps {
+            kubectl: &kubectl,
+            pause: &pause,
+        });
+        (said, calls.into_inner(), pauses.into_inner())
+    }
+
+    /// The apply makes the founding Job the chart rendered, as itself, once the release has
+    /// rendered it: the last run deleted first, this one made from the ConfigMap's own manifest on
+    /// standard input, then waited for (DEC-2860).
+    #[test]
+    fn the_apply_makes_the_founding_job_the_release_rendered() -> Result<()> {
+        let (said, calls, pauses) = found(&Release {
+            appears_on: Some(2),
+            ..Release::default()
+        });
+        assert_eq!(said?, "founded");
+        assert_eq!(pauses, 2, "it looked again while the release upgraded");
+        let verbs: Vec<&str> = calls.iter().map(|(args, _)| args[0].as_str()).collect();
+        assert_eq!(
+            verbs,
+            ["wait", "get", "get", "get", "delete", "create", "wait"]
+        );
+        assert!(
+            calls[0].0.contains(&"helmrelease/workspace".to_owned()),
+            "{:?}",
+            calls[0].0
+        );
+        let delete = &calls[4].0;
+        for flag in ["--ignore-not-found", "--wait=true"] {
+            assert!(delete.contains(&flag.to_owned()), "{delete:?}");
+        }
+        assert_eq!(calls[5].1.as_deref(), Some(FOUNDING_MANIFEST));
+        assert!(
+            calls[6].0.contains(&"job/founding".to_owned()),
+            "{:?}",
+            calls[6].0
+        );
+        for (args, _) in &calls[1..] {
+            assert!(args.contains(&"ws-ws1".to_owned()), "{args:?}");
+        }
+        let (said, ..) = found(&Release {
+            ready: false,
+            ..Release::default()
+        });
+        assert!(
+            said?.contains("not Ready"),
+            "a release not Ready is said, and founding goes on"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn no_rendered_founding_job_makes_nothing() -> Result<()> {
+        let (said, calls, pauses) = found(&Release {
+            appears_on: None,
+            ..Release::default()
+        });
+        assert!(said?.contains("nothing founded"));
+        assert_eq!(pauses, FOUNDING_LOOKS - 1);
+        assert!(calls[1..].iter().all(|(args, _)| args[0] == "get"));
+        Ok(())
+    }
+
+    /// A Job that does not complete is left for verify to name; one that cannot be made, or a
+    /// ConfigMap holding anything but the founding Job, fails the apply.
+    #[test]
+    fn a_founding_job_that_is_refused_or_not_the_founding_job_says_so() -> Result<()> {
+        let (said, ..) = found(&Release {
+            completes: false,
+            ..Release::default()
+        });
+        assert!(said?.contains("did not complete"));
+        let (said, ..) = found(&Release {
+            makes: false,
+            ..Release::default()
+        });
+        assert!(said.is_err());
+        for manifest in [
+            r#"{"kind":"Pod","metadata":{"name":"founding"}}"#,
+            r#"{"kind":"Job","metadata":{"name":"other"}}"#,
+            "not json",
+        ] {
+            let (said, calls, _) = found(&Release {
+                manifest,
+                ..Release::default()
+            });
+            assert!(said.is_err(), "{manifest}");
+            assert!(
+                calls[1..].iter().all(|(args, _)| args[0] == "get"),
+                "{manifest}"
+            );
+        }
+        Ok(())
+    }
 
     const CANARY: &str = "canary-subject-7f3c2b19-e4a1";
     const DIGEST: &str = "sha256:0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6";

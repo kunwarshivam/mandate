@@ -739,7 +739,7 @@
       }
     },
     "founding": {
-      "description": "The workspace's founding grant (DEC-2114): with enabled, a post-install and post-upgrade hook runs `workspace found --open` for member on api.workspace. Ids only: the founder's identity-provider subject is never a value",
+      "description": "The workspace's founding grant (DEC-2114, DEC-2860): with enabled, the chart renders the Job that runs `workspace found --open` for member on api.workspace into the ConfigMap founding-job, and the infra apply makes it. Ids only: the founder's identity-provider subject is never a value",
       "type": "object",
       "additionalProperties": false,
       "required": [
