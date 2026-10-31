@@ -157,9 +157,9 @@ request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variabl
 | `OWLHEAD_API_ORIGIN` | The API's origin: staging's is `https://api-staging.owlhead.ai` (DEC-2636); `http` only on a loopback host |
 | `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired: staging's is `01KDEM0000000000000000000W` (`deploy/gitops/clusters/staging/workspace.yaml`) |
 
-The deployed Worker reads all three from its own variables, which the founder sets in the Cloudflare
-dashboard (DEC-823 items 4 and 5). Nothing in the repository sets them, and `keep_vars` in
-`wrangler.jsonc` keeps them across deploys. Unset, the Worker serves the fixtures.
+The deployed Worker reads all three from its own variables. `web/wrangler.jsonc` commits them
+(DEC-2414), so each web-deploy from main sets them, and `keep_vars` keeps any other variable set in
+the Cloudflare dashboard. Unset, the Worker serves the fixtures.
 
 With `OWLHEAD_WORKSPACE_ID` unset, the browser opens its session and reads the workspace from its
 own memberships, `GET /v1/me/workspaces` (DEC-2113): exactly one membership is the workspace, and

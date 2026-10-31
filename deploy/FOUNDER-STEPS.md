@@ -597,17 +597,11 @@ nothing and takes no command.
 2. **Allow the app's address in Supabase.** In that project's dashboard, open **Authentication →
    URL Configuration** and add the redirect URL `https://app.owlhead.ai/**`. Keep the `localhost`
    entries. Without it, Google sign-in on app.owlhead.ai ends on an error page.
-3. **Set the three Worker variables.** In the Cloudflare dashboard, open **Workers & Pages →
-   `owlhead-web` → Settings → Variables and Secrets**. Add each one as a plain-text variable:
-
-   | Variable | Value |
-   |---|---|
-   | `OWLHEAD_DATA_SOURCE` | `api` |
-   | `OWLHEAD_API_ORIGIN` | `https://api-staging.owlhead.ai` |
-   | `OWLHEAD_WORKSPACE_ID` | `01KDEM0000000000000000000W` |
-
-   Click **Deploy**. None is a secret. The Worker reads them on every request, and `keep_vars` in
-   `web/wrangler.jsonc` keeps them across later deploys, so you set them once.
+3. **The three Worker variables are set by the deploy.** Since [DEC-2414](../docs/project/decisions/DEC-2414.md),
+   `web/wrangler.jsonc` commits `OWLHEAD_DATA_SOURCE` `api`, `OWLHEAD_API_ORIGIN`
+   `https://api-staging.owlhead.ai` and `OWLHEAD_WORKSPACE_ID` `01KDEM0000000000000000000W`, and
+   the web-deploy from main sets them, from its first run after DEC-2414 merged. There is nothing
+   to set in the dashboard.
 4. **Sign in at `https://app.owlhead.ai`, then follow the app.** Everything after this is the
    app's own journey, the same as any customer's: there is no further operator step. The dashboard
    shows staging's workspace, or says that something is not reported. It never shows the example
@@ -618,5 +612,5 @@ nothing and takes no command.
    waits its 24 hours (DEC-2108 item 5). The waiver ends at its expiry, no later than
    2026-11-05T00:00Z, and a passkey still inside its first 24 hours then waits out the rest.
 
-**To undo:** delete `OWLHEAD_DATA_SOURCE` from the Worker's variables and deploy. The app then
+**To undo:** set `OWLHEAD_DATA_SOURCE` to `fixtures` in `web/wrangler.jsonc` and merge. The app then
 shows the fixtures again. Nothing in staging changes, and any passkey added stays enrolled.
