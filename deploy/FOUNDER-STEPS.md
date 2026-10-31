@@ -600,7 +600,8 @@ nothing and takes no command.
 3. **The three Worker variables are set by the deploy.** Since [DEC-2414](../docs/project/decisions/DEC-2414.md),
    `web/wrangler.jsonc` commits `OWLHEAD_DATA_SOURCE` `api`, `OWLHEAD_API_ORIGIN`
    `https://api-staging.owlhead.ai` and `OWLHEAD_WORKSPACE_ID` `01KDEM0000000000000000000W`, and
-   the web-deploy from main sets them. There is nothing to set in the dashboard.
+   the web-deploy from main sets them, from its first run after DEC-2414 merged. There is nothing
+   to set in the dashboard.
 4. **Sign in at `https://app.owlhead.ai`, then follow the app.** Everything after this is the
    app's own journey, the same as any customer's: there is no further operator step. The dashboard
    shows staging's workspace, or says that something is not reported. It never shows the example
