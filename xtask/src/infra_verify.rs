@@ -143,7 +143,7 @@ fn flux(list: &mut Checklist, kubectl: Kubectl<'_>) {
 
 /// What a Flux object's condition messages say, as fixed class words alone: a message may quote a
 /// value, an image or a path, so none is printed, only which of these it matched.
-const FLUX_CLASSES: [(&str, &str); 16] = [
+const FLUX_CLASSES: [(&str, &str); 28] = [
     ("dependency", "dependency"),
     ("context deadline exceeded", "timeout"),
     ("timed out", "timeout"),
@@ -160,6 +160,18 @@ const FLUX_CLASSES: [(&str, &str); 16] = [
     ("forbidden", "forbidden"),
     ("unauthorized", "auth-failed"),
     ("retries exhausted", "retries-exhausted"),
+    ("deadlineexceeded", "timeout"),
+    ("resource not ready", "not-ready"),
+    ("another operation", "operation-in-progress"),
+    ("already exists", "already-exists"),
+    ("is invalid", "invalid-object"),
+    ("unable to build kubernetes objects", "manifest-build"),
+    ("no matches for kind", "missing-crd"),
+    ("the object has been modified", "conflict"),
+    ("job failed", "job-failed"),
+    ("backofflimitexceeded", "job-failed"),
+    ("exceeded quota", "quota"),
+    ("insufficient", "insufficient-resources"),
 ];
 
 /// A HelmRelease's conditions that hold the last Helm action's own error, each with the status
@@ -373,7 +385,7 @@ fn crashing(pod: &Value) -> Option<&str> {
 
 /// What a failing Job's last log lines say, as fixed class words alone: its lines may echo a
 /// connection string or SQL, so none of them is printed, only which of these it matched.
-const LOG_CLASSES: [(&str, &str); 22] = [
+const LOG_CLASSES: [(&str, &str); 33] = [
     ("password authentication failed", "auth-failed"),
     ("connection refused", "connection-refused"),
     ("timeout expired", "timeout"),
@@ -396,6 +408,20 @@ const LOG_CLASSES: [(&str, &str); 22] = [
     ("no such file", "missing-file"),
     ("address already in use", "port-in-use"),
     ("panicked", "panic"),
+    ("release_unsigned", "release-unsigned"),
+    ("release_signature", "release-signature"),
+    ("release_unreadable", "release-unreadable"),
+    ("required setting is absent or malformed", "setting"),
+    ("session signing key", "session-key"),
+    ("secret-named variable", "secret-in-environment"),
+    ("database url carries a password", "password-in-url"),
+    ("connection settings are refused", "journal-settings"),
+    (
+        "control stream is not shown to be paper",
+        "control-stream-not-paper",
+    ),
+    ("bind address", "bind"),
+    ("missing or invalid", "binding-incomplete"),
 ];
 
 /// The classes `logs` matches, in [`LOG_CLASSES`]' order, each once; a line that says it failed
@@ -410,7 +436,7 @@ fn log_classes(logs: &str) -> Vec<&'static str> {
     }
     let failed = lower
         .lines()
-        .any(|line| line.contains("error") || line.contains("fatal"));
+        .any(|line| line.contains("error") || line.contains("fatal") || line.contains("refused"));
     if found.is_empty() && failed {
         found.push("unclassified");
     }
@@ -981,6 +1007,16 @@ mod tests {
                 "(False: InstallFailed; message values-schema)",
             ),
             (
+                json!([{"type": "Ready", "status": "False", "reason": "UpgradeFailed",
+                    "message": "resource not ready, name: api, kind: Deployment, status: InProgress"}]),
+                "(False: UpgradeFailed; message not-ready)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "UpgradeFailed",
+                    "message": "pre-upgrade hook job migrate failed: BackoffLimitExceeded; another operation (install/upgrade/rollback) is in progress"}]),
+                "(False: UpgradeFailed; message operation-in-progress, job-failed)",
+            ),
+            (
                 json!([{"type": "Ready", "status": "False", "reason": "Progressing",
                     "message": "something new and odd: hunter2"}]),
                 "(False: Progressing; message unclassified)",
@@ -1342,6 +1378,22 @@ mod tests {
             ["unclassified"]
         );
         assert!(log_classes("already applied: 0001.sql\n").is_empty());
+        assert_eq!(
+            log_classes(
+                "refused: MANDATE_API_INTERNAL_PAPER_WORKSPACE is on, and the control stream is not shown to be paper\n"
+            ),
+            ["control-stream-not-paper"]
+        );
+        assert_eq!(
+            log_classes("refused: a required setting is absent or malformed: MANDATE_API_X\n"),
+            ["setting"]
+        );
+        assert_eq!(
+            log_classes("refused: finish off: MANDATE_API_DATABASE_URL missing or invalid\n"),
+            ["binding-incomplete"]
+        );
+        assert_eq!(log_classes("release_unsigned\n"), ["release-unsigned"]);
+        assert_eq!(log_classes("refused: something new\n"), ["unclassified"]);
 
         let mut staging = Staging::up();
         staging.pods[3] = pulling;
