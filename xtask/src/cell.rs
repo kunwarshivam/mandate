@@ -1645,6 +1645,10 @@ const IMPORT_ATTEMPTS: u32 = 3;
 fn import_image(image: &str) -> Result<()> {
     for attempt in 1..=IMPORT_ATTEMPTS {
         let imported = sh("k3d", &["image", "import", "--cluster", CLUSTER, image]);
+        if imported.is_err() && node_restarted() {
+            node_diagnosis();
+            bail!("the cell's node restarted while importing {image}");
+        }
         api_server_ready()?;
         if imported.is_ok() && node_holds(image) {
             return Ok(());
@@ -1665,10 +1669,13 @@ fn import_images(images: &[&String]) -> Result<()> {
     let mut args = vec!["image", "import", "--cluster", CLUSTER];
     args.extend(images.iter().map(|image| image.as_str()));
     if sh("k3d", &args).is_err() {
+        node_diagnosis();
+        if node_restarted() {
+            bail!("the cell's node restarted during the batched image import");
+        }
         eprintln!(
             "xtask: the batched image import failed; importing what the node lacks one by one"
         );
-        node_diagnosis();
     }
     api_server_ready()?;
     for image in images {
@@ -1729,6 +1736,33 @@ fn node_takes_images() -> Result<()> {
     }
     node_diagnosis();
     bail!("the cell's node never became ready to take images")
+}
+
+/// Whether the cell's node container has restarted or is not running: once k3s's containerd dies
+/// in an import, the node crash-loops and never takes an image again, so `up` makes the cluster
+/// again at once rather than waiting out the API server and the single imports first. A node
+/// whose state cannot be read counts as restarted.
+fn node_restarted() -> bool {
+    output(
+        "docker",
+        &[
+            "inspect",
+            "--format",
+            "{{.State.Status}} {{.RestartCount}}",
+            NODE,
+        ],
+    )
+    .map_or(true, |state| state_restarted(&state))
+}
+
+/// Whether `docker inspect`'s `{{.State.Status}} {{.RestartCount}}` output names a container that
+/// is not running or has restarted at least once; anything it cannot read counts as restarted.
+fn state_restarted(state: &str) -> bool {
+    let mut words = state.split_whitespace();
+    !matches!(
+        (words.next(), words.next().map(str::parse::<u64>)),
+        (Some("running"), Some(Ok(0)))
+    )
 }
 
 /// The cell node container's state and the last lines of its log, each printed or its error.
@@ -7857,6 +7891,17 @@ mod tests {
             "mandate.local/api:3ab66e87ffdd"
         ));
         assert!(!listed_holds("", "mandate.local/api:3ab66e87ffdd"));
+    }
+
+    #[test]
+    fn a_node_that_restarted_or_stopped_is_made_again_and_a_running_one_is_kept() {
+        assert!(!state_restarted("running 0\n"));
+        assert!(state_restarted("running 1"));
+        assert!(state_restarted("restarting 14"));
+        assert!(state_restarted("exited 0"));
+        assert!(state_restarted("running"));
+        assert!(state_restarted("running x"));
+        assert!(state_restarted(""));
     }
 
     #[test]
