@@ -373,7 +373,7 @@ fn crashing(pod: &Value) -> Option<&str> {
 
 /// What a failing Job's last log lines say, as fixed class words alone: its lines may echo a
 /// connection string or SQL, so none of them is printed, only which of these it matched.
-const LOG_CLASSES: [(&str, &str); 22] = [
+const LOG_CLASSES: [(&str, &str); 33] = [
     ("password authentication failed", "auth-failed"),
     ("connection refused", "connection-refused"),
     ("timeout expired", "timeout"),
@@ -396,6 +396,20 @@ const LOG_CLASSES: [(&str, &str); 22] = [
     ("no such file", "missing-file"),
     ("address already in use", "port-in-use"),
     ("panicked", "panic"),
+    ("release_unsigned", "release-unsigned"),
+    ("release_signature", "release-signature"),
+    ("release_unreadable", "release-unreadable"),
+    ("required setting is absent or malformed", "setting"),
+    ("session signing key", "session-key"),
+    ("secret-named variable", "secret-in-environment"),
+    ("database url carries a password", "password-in-url"),
+    ("connection settings are refused", "journal-settings"),
+    (
+        "control stream is not shown to be paper",
+        "control-stream-not-paper",
+    ),
+    ("bind address", "bind"),
+    ("missing or invalid", "binding-incomplete"),
 ];
 
 /// The classes `logs` matches, in [`LOG_CLASSES`]' order, each once; a line that says it failed
@@ -410,7 +424,7 @@ fn log_classes(logs: &str) -> Vec<&'static str> {
     }
     let failed = lower
         .lines()
-        .any(|line| line.contains("error") || line.contains("fatal"));
+        .any(|line| line.contains("error") || line.contains("fatal") || line.contains("refused"));
     if found.is_empty() && failed {
         found.push("unclassified");
     }
@@ -1342,6 +1356,22 @@ mod tests {
             ["unclassified"]
         );
         assert!(log_classes("already applied: 0001.sql\n").is_empty());
+        assert_eq!(
+            log_classes(
+                "refused: MANDATE_API_INTERNAL_PAPER_WORKSPACE is on, and the control stream is not shown to be paper\n"
+            ),
+            ["control-stream-not-paper"]
+        );
+        assert_eq!(
+            log_classes("refused: a required setting is absent or malformed: MANDATE_API_X\n"),
+            ["setting"]
+        );
+        assert_eq!(
+            log_classes("refused: finish off: MANDATE_API_DATABASE_URL missing or invalid\n"),
+            ["binding-incomplete"]
+        );
+        assert_eq!(log_classes("release_unsigned\n"), ["release-unsigned"]);
+        assert_eq!(log_classes("refused: something new\n"), ["unclassified"]);
 
         let mut staging = Staging::up();
         staging.pods[3] = pulling;
