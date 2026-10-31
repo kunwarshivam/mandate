@@ -1,8 +1,11 @@
 # Every image of this repository's must carry the keyless signature `release.yml` made on a push to
 # `main`, logged in Rekor: the same identity Flux checks on the charts (DEC-2015 item 3,
 # DEC-2016 item 4). release.yml's cosign 3 stores each signature as a Sigstore bundle, an OCI
-# referrer of the image, and writes no legacy `.sig` tag, so the authority reads bundles; under
-# policy-controller's default, `legacy`, it finds no signature and denies every workload.
+# referrer of the image, and writes no legacy `.sig` tag. policy-controller v0.13.1 reads a bundle
+# only as an attestation ("bundle support for image signatures is not yet implemented"), and in a
+# bundle cosign's image signature is an in-toto statement of predicate type
+# https://sigstore.dev/cosign/sign/v1 over the image digest, so the authority requires that
+# attestation from the same identity (DEC-2088).
 apiVersion: policy.sigstore.dev/v1beta1
 kind: ClusterImagePolicy
 metadata:
@@ -19,3 +22,6 @@ spec:
       ctlog:
         url: https://rekor.sigstore.dev
       signatureFormat: bundle
+      attestations:
+        - name: release-signature
+          predicateType: https://sigstore.dev/cosign/sign/v1
