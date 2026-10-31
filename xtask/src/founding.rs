@@ -173,6 +173,10 @@ const FOUNDING_JOB: &str = "founding";
 /// it says the release has rendered none: the window a stalled release's reset needs to upgrade.
 pub(crate) const FOUNDING_LOOKS: u32 = 30;
 pub(crate) const FOUNDING_POLL: Duration = Duration::from_secs(10);
+/// How long the apply waits for the workspace release to be Ready, so the Job it makes is the
+/// release's own and runs after that release's migration; past it, the Job the cluster holds is
+/// made anyway.
+const RELEASE_WAIT: &str = "--timeout=300s";
 /// How long the apply waits for the founding Job to complete: its own `activeDeadlineSeconds`
 /// (180) and a minute to schedule.
 const FOUNDING_WAIT: &str = "--timeout=240s";
@@ -184,8 +188,8 @@ pub(crate) struct FoundSteps<'a> {
     pub(crate) pause: &'a dyn Fn(Duration),
 }
 
-/// Makes the workspace's founding Job (DEC-2114 item 4, DEC-2860): reads the Job the chart rendered
-/// into [`FOUNDING_JOB_CONFIGMAP`], looking [`FOUNDING_LOOKS`] times while the release upgrades,
+/// Makes the workspace's founding Job (DEC-2114 item 4, DEC-2860): waits for the workspace release
+/// to be Ready, reads the Job the chart rendered into [`FOUNDING_JOB_CONFIGMAP`], looking [`FOUNDING_LOOKS`] times while the release upgrades,
 /// deletes the last run, makes this one as the apply itself, and waits for it to complete. Answers
 /// in fixed words; a Job that does not complete is left in place, where verify names its refusal
 /// by class, so this answers rather than fails.
@@ -193,6 +197,17 @@ pub(crate) struct FoundSteps<'a> {
 /// # Errors
 /// When `kubectl` cannot be run, the ConfigMap holds no Job, or the Job cannot be deleted or made.
 pub(crate) fn found_workspace(steps: &FoundSteps<'_>) -> Result<String> {
+    let (released, _) = (steps.kubectl)(
+        &[
+            "wait",
+            "--for=condition=ready",
+            "helmrelease/workspace",
+            "--namespace",
+            "flux-system",
+            RELEASE_WAIT,
+        ],
+        None,
+    )?;
     let mut job = None;
     for look in 0..FOUNDING_LOOKS {
         if look > 0 {
@@ -260,10 +275,15 @@ pub(crate) fn found_workspace(steps: &FoundSteps<'_>) -> Result<String> {
         ],
         None,
     )?;
-    Ok(if complete {
-        "founded".to_owned()
+    let word = if complete {
+        "founded"
     } else {
-        "the founding Job did not complete: verify names why".to_owned()
+        "the founding Job did not complete: verify names why"
+    };
+    Ok(if released {
+        word.to_owned()
+    } else {
+        format!("{word} (the workspace release was not Ready)")
     })
 }
 
@@ -390,6 +410,7 @@ mod tests {
         manifest: &'static str,
         makes: bool,
         completes: bool,
+        ready: bool,
     }
 
     impl Default for Release {
@@ -399,6 +420,7 @@ mod tests {
                 manifest: FOUNDING_MANIFEST,
                 makes: true,
                 completes: true,
+                ready: true,
             }
         }
     }
@@ -415,6 +437,9 @@ mod tests {
                 stdin.map(str::to_owned),
             ));
             Ok(match args.first().copied() {
+                Some("wait") if args.contains(&"helmrelease/workspace") => {
+                    (release.ready, String::new())
+                }
                 Some("get") => {
                     let look = *looks.borrow();
                     *looks.borrow_mut() += 1;
@@ -450,21 +475,36 @@ mod tests {
         assert_eq!(said?, "founded");
         assert_eq!(pauses, 2, "it looked again while the release upgraded");
         let verbs: Vec<&str> = calls.iter().map(|(args, _)| args[0].as_str()).collect();
-        assert_eq!(verbs, ["get", "get", "get", "delete", "create", "wait"]);
-        let delete = &calls[3].0;
-        assert!(
-            delete.contains(&"--ignore-not-found".to_owned()),
-            "{delete:?}"
+        assert_eq!(
+            verbs,
+            ["wait", "get", "get", "get", "delete", "create", "wait"]
         );
-        assert_eq!(calls[4].1.as_deref(), Some(FOUNDING_MANIFEST));
         assert!(
-            calls[5].0.contains(&"job/founding".to_owned()),
+            calls[0].0.contains(&"helmrelease/workspace".to_owned()),
             "{:?}",
-            calls[5].0
+            calls[0].0
         );
-        for (args, _) in &calls {
+        let delete = &calls[4].0;
+        for flag in ["--ignore-not-found", "--wait=true"] {
+            assert!(delete.contains(&flag.to_owned()), "{delete:?}");
+        }
+        assert_eq!(calls[5].1.as_deref(), Some(FOUNDING_MANIFEST));
+        assert!(
+            calls[6].0.contains(&"job/founding".to_owned()),
+            "{:?}",
+            calls[6].0
+        );
+        for (args, _) in &calls[1..] {
             assert!(args.contains(&"ws-ws1".to_owned()), "{args:?}");
         }
+        let (said, ..) = found(&Release {
+            ready: false,
+            ..Release::default()
+        });
+        assert!(
+            said?.contains("not Ready"),
+            "a release not Ready is said, and founding goes on"
+        );
         Ok(())
     }
 
@@ -476,7 +516,7 @@ mod tests {
         });
         assert!(said?.contains("nothing founded"));
         assert_eq!(pauses, FOUNDING_LOOKS - 1);
-        assert!(calls.iter().all(|(args, _)| args[0] == "get"));
+        assert!(calls[1..].iter().all(|(args, _)| args[0] == "get"));
         Ok(())
     }
 
@@ -504,7 +544,10 @@ mod tests {
                 ..Release::default()
             });
             assert!(said.is_err(), "{manifest}");
-            assert!(calls.iter().all(|(args, _)| args[0] == "get"), "{manifest}");
+            assert!(
+                calls[1..].iter().all(|(args, _)| args[0] == "get"),
+                "{manifest}"
+            );
         }
         Ok(())
     }
