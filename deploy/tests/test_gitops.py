@@ -83,6 +83,9 @@ ADMISSION_AUTHORITY = {
     },
     "ctlog": {"url": "https://rekor.sigstore.dev"},
     "signatureFormat": "bundle",
+    "attestations": [
+        {"name": "release-signature", "predicateType": "https://sigstore.dev/cosign/sign/v1"}
+    ],
 }
 ADMISSION_LABEL = {"policy.sigstore.dev/include": "true"}
 # The journal's archive: R2's S3 endpoint for one account, reached only at R2's two addresses on 443,
@@ -782,6 +785,8 @@ ADMISSION_BUGS = [
     lambda p, d: p[0]["spec"]["authorities"][0]["keyless"]["identities"][0].update(subjectRegExp=".*"),
     lambda p, d: p[0]["spec"]["authorities"][0].pop("ctlog"),
     lambda p, d: p[0]["spec"]["authorities"][0].pop("signatureFormat"),
+    lambda p, d: p[0]["spec"]["authorities"][0].pop("attestations"),
+    lambda p, d: p[0]["spec"]["authorities"][0]["attestations"][0].update(predicateType="cyclonedx"),
     lambda p, d: next(n for n in d if n["metadata"]["name"] == "ws-ws1")["metadata"].pop("labels"),
     lambda p, d: p.append(copy.deepcopy(p[0])),
 ]
