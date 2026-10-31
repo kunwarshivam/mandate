@@ -231,7 +231,24 @@ fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
             what.push_str(", so unsealed");
         }
         if !up {
-            what.push_str(&format!(" ({})", why(pod)));
+            let mut detail = why(pod);
+            if let Some(container) = crashing(pod) {
+                let logs = kubectl(&[
+                    "logs",
+                    text(pod, &["metadata", "name"]),
+                    "--namespace",
+                    text(pod, &["metadata", "namespace"]),
+                    "--container",
+                    container,
+                    "--previous",
+                    "--tail=30",
+                ]);
+                let classes = logs.map_or_else(|_| vec!["unreadable"], |text| log_classes(&text));
+                if !classes.is_empty() {
+                    detail.push_str(&format!("; logs {}", classes.join(", ")));
+                }
+            }
+            what.push_str(&format!(" ({detail})"));
         }
         list.check(up, what);
     }
@@ -270,8 +287,10 @@ fn word(raw: &str) -> String {
         .collect()
 }
 
-/// Why a pod is not up, from its status alone: its phase, its own reason, and the first reason a
-/// container is waiting or terminated with. No message and no log, which may hold anything.
+/// Why a pod is not up, from its status alone: its phase, its own reason, the first reason a
+/// container is waiting or terminated with and how its last run ended, and, for a pod the
+/// scheduler left unplaced, that condition's reason and [`SCHEDULING_CLASSES`]. No message or log
+/// is printed, since either may hold anything.
 fn why(pod: &Value) -> String {
     let status = &pod["status"];
     let mut words = vec![word(text(status, &["phase"]))];
@@ -293,7 +312,27 @@ fn why(pod: &Value) -> String {
             if let Some(code) = container["state"]["terminated"]["exitCode"].as_i64() {
                 words.push(format!("exit {code}"));
             }
+            let last = &container["lastState"]["terminated"];
+            if !text(last, &["reason"]).is_empty() {
+                words.push(format!("last {}", word(text(last, &["reason"]))));
+                if let Some(code) = last["exitCode"].as_i64() {
+                    words.push(format!("exit {code}"));
+                }
+            }
             break;
+        }
+    }
+    let unscheduled = status["conditions"].as_array().and_then(|all| {
+        all.iter()
+            .find(|c| text(c, &["type"]) == "PodScheduled" && text(c, &["status"]) == "False")
+    });
+    if let Some(condition) = unscheduled {
+        words.push(word(text(condition, &["reason"])));
+        let lower = text(condition, &["message"]).to_lowercase();
+        for (needle, class) in SCHEDULING_CLASSES {
+            if lower.contains(needle) && !words.iter().any(|said| said == class) {
+                words.push(class.to_owned());
+            }
         }
     }
     let mut said: Vec<String> = words.into_iter().filter(|w| !w.is_empty()).collect();
@@ -307,9 +346,34 @@ fn why(pod: &Value) -> String {
     }
 }
 
+/// Why the scheduler left a pod unplaced, as fixed class words alone: its message names nodes and
+/// counts, so only which of these it matched is printed.
+const SCHEDULING_CLASSES: [(&str, &str); 9] = [
+    ("insufficient cpu", "cpu"),
+    ("insufficient memory", "memory"),
+    ("unbound immediate persistentvolumeclaims", "unbound-pvc"),
+    ("persistentvolumeclaim", "pvc"),
+    ("volume node affinity conflict", "volume-zone"),
+    ("node affinity", "affinity"),
+    ("untolerated taint", "taint"),
+    ("too many pods", "pod-limit"),
+    ("max volume count", "volume-limit"),
+];
+
+/// The first container of `pod` waiting in `CrashLoopBackOff`, whose last run's log says why it
+/// ended.
+fn crashing(pod: &Value) -> Option<&str> {
+    pod["status"]["containerStatuses"]
+        .as_array()?
+        .iter()
+        .find(|c| text(c, &["state", "waiting", "reason"]) == "CrashLoopBackOff")
+        .map(|c| text(c, &["name"]))
+        .filter(|name| !name.is_empty())
+}
+
 /// What a failing Job's last log lines say, as fixed class words alone: its lines may echo a
 /// connection string or SQL, so none of them is printed, only which of these it matched.
-const LOG_CLASSES: [(&str, &str); 13] = [
+const LOG_CLASSES: [(&str, &str); 22] = [
     ("password authentication failed", "auth-failed"),
     ("connection refused", "connection-refused"),
     ("timeout expired", "timeout"),
@@ -323,6 +387,15 @@ const LOG_CLASSES: [(&str, &str); 13] = [
     ("workspace_not_new", "workspace_not_new"),
     ("members_exist", "members_exist"),
     ("workspace_not_open", "workspace_not_open"),
+    ("vault", "vault"),
+    ("approle", "approle"),
+    ("subject-links", "subject-links"),
+    ("subject link", "subject-links"),
+    ("founding", "founding"),
+    ("issuer", "issuer"),
+    ("no such file", "missing-file"),
+    ("address already in use", "port-in-use"),
+    ("panicked", "panic"),
 ];
 
 /// The classes `logs` matches, in [`LOG_CLASSES`]' order, each once; a line that says it failed
@@ -1278,6 +1351,49 @@ mod tests {
             ["pod ws-ws1/migrate-b is Running and Ready (Pending: ImagePullBackOff)"],
             "{text}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_crashing_pod_says_how_its_last_run_ended_and_an_unplaced_one_why() -> Result<()> {
+        let mut staging = Staging::up();
+        staging.pods[3] = json!({
+            "metadata": {"name": "api-x", "namespace": "ws-ws1"},
+            "status": {
+                "phase": "Running",
+                "containerStatuses": [{
+                    "name": "api",
+                    "ready": false,
+                    "state": {"waiting": {"reason": "CrashLoopBackOff"}},
+                    "lastState": {"terminated": {"reason": "Error", "exitCode": 1}},
+                }],
+            },
+        });
+        staging.pods.push(json!({
+            "metadata": {"name": "data-x", "namespace": "ws-ws1"},
+            "status": {
+                "phase": "Pending",
+                "conditions": [{
+                    "type": "PodScheduled",
+                    "status": "False",
+                    "reason": "Unschedulable",
+                    "message": "0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims node-7f3",
+                }],
+            },
+        }));
+        staging.logs = "api: reading the vault AppRole secret id at /vault/secret-id: token s.hunter2 rejected";
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            [
+                "pod ws-ws1/api-x is Running and Ready (Running: CrashLoopBackOff: last Error: exit 1; logs vault, approle)",
+                "pod ws-ws1/data-x is Running and Ready (Pending: Unschedulable: unbound-pvc: pvc)",
+            ],
+            "{text}"
+        );
+        for leak in ["hunter2", "/vault/secret-id", "node-7f3"] {
+            assert!(!text.contains(leak), "{leak}: {text}");
+        }
         Ok(())
     }
 }
