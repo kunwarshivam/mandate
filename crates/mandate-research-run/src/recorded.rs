@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
-use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
+use mandate_gateway::registry::{
+    Endpoint, Locality, Registry, Reported, Route, Status, Unsupported,
+};
 use mandate_gateway::schema::fits;
 
 use crate::entry::{EntryError, ResearchEntry};
@@ -170,6 +172,7 @@ pub(crate) fn hosted(
             route: Route {
                 upstream: endpoint.text("upstream")?.to_owned(),
                 reported_provider: reported_provider.to_owned(),
+                unsupported: endpoint.unsupported_sampling()?,
             },
             prices,
         },
@@ -184,6 +187,22 @@ pub(crate) fn hosted(
 pub(crate) struct Field<'a>(pub(crate) &'a Value);
 
 impl Field<'_> {
+    /// The endpoint's `unsupported_sampling` (DEC-2295): absent is none; present, a list of
+    /// distinct names from `temperature`, `seed` and `top_p`.
+    fn unsupported_sampling(&self) -> Result<Unsupported, RecordedError> {
+        const MEMBER: &str = "unsupported_sampling";
+        let Some(listed) = self.0.get(MEMBER) else {
+            return Ok(Unsupported::default());
+        };
+        let names: Option<Vec<&str>> = listed
+            .as_array()
+            .map(|names| names.iter().map(Value::as_str).collect())
+            .unwrap_or(None);
+        names
+            .and_then(Unsupported::from_names)
+            .ok_or(RecordedError::Malformed(MEMBER))
+    }
+
     pub(crate) fn text(&self, member: &'static str) -> Result<&str, RecordedError> {
         self.0
             .get(member)

@@ -321,3 +321,50 @@ fn a_monitor_reply_names_the_least_thesis_the_call_showed() {
     let garbled = std::collections::BTreeMap::from([("memory".to_owned(), "{}".to_owned())]);
     assert!(memory_theses(&garbled).is_empty());
 }
+
+/// DEC-2295: a hosted endpoint's `unsupported_sampling` is read strictly. Absent, the upstream takes
+/// every pinned sampling member; present, a list of distinct names from `temperature`, `seed` and
+/// `top_p`; anything else is refused by its member's name.
+#[test]
+fn an_endpoint_names_the_sampling_its_upstream_does_not_take() {
+    use mandate_gateway::registry::Unsupported;
+    use mandate_research_run::recorded::hosted_endpoint;
+    let endpoint = |extra: &str| {
+        parse(
+            format!(
+                r#"{{"cached_per_million":"0.1","host":"openrouter.ai","id":"openrouter:google-vertex/global:llm.chat_sonnet","input_per_million":"2","output_per_million":"10","price_table":"t","region":"global","reported_provider":"Google","upstream":"google-vertex/global"{extra}}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap()
+    };
+    let read = |extra: &str| hosted_endpoint(&endpoint(extra), "anthropic/claude-sonnet-5.5");
+    assert_eq!(
+        read("").unwrap().0.route.unsupported,
+        Unsupported::default()
+    );
+    assert_eq!(
+        read(r#","unsupported_sampling":["temperature","seed"]"#)
+            .unwrap()
+            .0
+            .route
+            .unsupported,
+        Unsupported {
+            temperature: true,
+            seed: true,
+            top_p: false,
+        }
+    );
+    for refused in [
+        r#","unsupported_sampling":"temperature""#,
+        r#","unsupported_sampling":["temperature","temperature"]"#,
+        r#","unsupported_sampling":["max_tokens"]"#,
+        r#","unsupported_sampling":[7]"#,
+    ] {
+        assert_eq!(
+            read(refused).err(),
+            Some(RecordedError::Malformed("unsupported_sampling")),
+            "{refused}"
+        );
+    }
+}

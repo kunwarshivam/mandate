@@ -91,6 +91,7 @@ fn registry() -> (Registry, ModelRef) {
         route: Route {
             upstream: UPSTREAM.to_owned(),
             reported_provider: "Anthropic".to_owned(),
+            unsupported: mandate_gateway::registry::Unsupported::default(),
         },
         prices,
     };

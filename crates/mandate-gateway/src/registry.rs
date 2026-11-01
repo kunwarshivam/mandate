@@ -325,12 +325,45 @@ pub enum Locality {
     Local,
 }
 
-/// How a request is routed to exactly one upstream, and the provider name its response reports
-/// (DEC-997 item 2). `upstream` is the routing slug (`provider.order`, `provider.only`).
+/// How a request is routed to exactly one upstream, the provider name its response reports
+/// (DEC-997 item 2), and the pinned sampling that upstream does not take. `upstream` is the routing
+/// slug (`provider.order`, `provider.only`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
     pub upstream: String,
     pub reported_provider: String,
+    pub unsupported: Unsupported,
+}
+
+/// The pinned sampling parameters an endpoint's upstream does not take, which its requests leave
+/// out (inference spec §3.4, §4.1, DEC-2295). Like the endpoint, it is outside the content hash: the
+/// pinned sampling, the canonical request and the call record are unchanged by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Unsupported {
+    pub temperature: bool,
+    pub seed: bool,
+    pub top_p: bool,
+}
+
+impl Unsupported {
+    /// The names the registry file lists, each one of `temperature`, `seed` and `top_p` and each
+    /// once; `None` for any other name or a repeat.
+    pub fn from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<Self> {
+        let mut unsupported = Self::default();
+        for name in names {
+            let flag = match name {
+                "temperature" => &mut unsupported.temperature,
+                "seed" => &mut unsupported.seed,
+                "top_p" => &mut unsupported.top_p,
+                _ => return None,
+            };
+            if *flag {
+                return None;
+            }
+            *flag = true;
+        }
+        Some(unsupported)
+    }
 }
 
 /// An endpoint attested to serve exactly an entry's identity (inference spec §4.1), outside the

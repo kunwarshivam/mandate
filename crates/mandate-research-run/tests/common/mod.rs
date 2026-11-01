@@ -327,6 +327,7 @@ pub fn endpoint() -> Endpoint {
         route: Route {
             upstream: UPSTREAM.to_owned(),
             reported_provider: REPORTED_PROVIDER.to_owned(),
+            unsupported: mandate_gateway::registry::Unsupported::default(),
         },
         prices: PriceTable::new(
             TokenPrice::per_million(Usd6::parse("3").unwrap_or_else(|e| panic!("{e}"))),
