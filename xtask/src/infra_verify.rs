@@ -798,7 +798,7 @@ pub(crate) fn gateway_calls(kubectl: Kubectl<'_>) -> String {
     };
     let sql = format!(
         "SELECT event_type, coalesce({}, '-'), coalesce({}, {}, '-') FROM journal.events \
-         WHERE event_type IN ({events}) AND stream_id NOT LIKE 'dmeter:%' \\
+         WHERE event_type IN ({events}) AND stream_id NOT LIKE 'dmeter:%' \
          ORDER BY recorded_at COLLATE \"C\" DESC LIMIT {CALLS_READ}",
         field("purpose"),
         field("outcome"),
@@ -1609,10 +1609,18 @@ mod tests {
             &seen[1][..4],
             ["exec", "journal-1", "--namespace", "ws-ws1"]
         );
+        let sql = seen[1].last().cloned().unwrap_or_default();
         assert!(
-            seen[1]
-                .last()
-                .is_some_and(|sql| sql.starts_with("SELECT") && sql.contains("LIMIT 12"))
+            sql.starts_with("SELECT") && sql.ends_with("LIMIT 12"),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains('\\') && !sql.contains('\n'),
+            "one line of plain SQL: {sql}"
+        );
+        assert!(
+            sql.contains("NOT LIKE 'dmeter:%' ORDER BY recorded_at COLLATE \"C\" DESC"),
+            "{sql}"
         );
         let failing = |_: &[&str]| -> Result<String> { anyhow::bail!("no") };
         assert_eq!(super::gateway_calls(&failing), "unreadable");
