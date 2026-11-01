@@ -2376,6 +2376,10 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         },
     )?;
     eprint!("{}", checklist.render_titled("infra verify (staging)"));
+    eprintln!(
+        "    model gateway, latest first: {}",
+        infra_verify::gateway_calls(&get)
+    );
     ensure!(
         checklist.complete(),
         "staging is not up after {} seconds: each MISSING line above names what is not (DEC-2050)",

@@ -727,6 +727,138 @@ pub(crate) fn verify(kubectl: Kubectl<'_>, http: &dyn Http, edge: &Edge<'_>) -> 
     }
 }
 
+/// The journal records [`gateway_calls`] reads: each model call's settlement and each chat run's end.
+const CALL_EVENTS: [&str; 2] = ["MeterSettled", "ChatRunEnded"];
+/// A model call's purposes, as the gateway's `Purpose::code` writes them.
+const CALL_PURPOSES: [&str; 6] = [
+    "research",
+    "llm_signal",
+    "fast_signal",
+    "compiler",
+    "evaluation",
+    "chat",
+];
+/// A call's outcomes (the gateway's `Outcome::code`) and a chat run's end codes (`End::code`).
+const CALL_WORDS: [&str; 21] = [
+    "ok",
+    "policy_denied",
+    "budget_exhausted",
+    "rate_limited_local",
+    "meter_unavailable",
+    "input_rejected",
+    "model_withdrawn",
+    "deadline_exceeded",
+    "provider_unavailable",
+    "rate_limited_provider",
+    "credential_invalid",
+    "content_refused",
+    "schema_invalid",
+    "identity_mismatch",
+    "answered",
+    "stopped",
+    "budget",
+    "model_error",
+    "refused",
+    "halted",
+    "ceiling",
+];
+/// How many of the latest records [`gateway_calls`] reads.
+const CALLS_READ: u32 = 12;
+
+/// The model gateway's latest calls and chat runs, read from the workspace journal through its
+/// database's own pod, as fixed words alone: each record's type, purpose and outcome or end code,
+/// newest first, with a count for each run of the same three. A word outside the closed sets reads
+/// `other`, so nothing a record holds but these codes is printed. When the journal cannot be read,
+/// `unreadable`; when it holds none, `no calls yet`.
+pub(crate) fn gateway_calls(kubectl: Kubectl<'_>) -> String {
+    let Ok(pod) = kubectl(&[
+        "get",
+        "pods",
+        "--namespace",
+        "ws-ws1",
+        "--selector",
+        "cnpg.io/cluster=journal",
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+    ]) else {
+        return "unreadable".to_owned();
+    };
+    let pod = pod.trim();
+    if pod.is_empty() || !pod.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return "unreadable".to_owned();
+    }
+    let events = CALL_EVENTS
+        .iter()
+        .map(|e| format!("'{e}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let field = |name: &str| {
+        format!("substring(convert_from(body, 'UTF8') from '\"{name}\":\"([a-z_]+)\"')")
+    };
+    let sql = format!(
+        "SELECT event_type, coalesce({}, '-'), coalesce({}, {}, '-') FROM journal.events \
+         WHERE event_type IN ({events}) ORDER BY recorded_at DESC LIMIT {CALLS_READ}",
+        field("purpose"),
+        field("outcome"),
+        field("reason"),
+    );
+    let Ok(rows) = kubectl(&[
+        "exec",
+        pod,
+        "--namespace",
+        "ws-ws1",
+        "--container",
+        "postgres",
+        "--",
+        "psql",
+        "-d",
+        "mandate",
+        "-tAc",
+        &sql,
+    ]) else {
+        return "unreadable".to_owned();
+    };
+    let word = |w: &str, allowed: &[&'static str]| -> &'static str {
+        allowed
+            .iter()
+            .find(|a| **a == w)
+            .copied()
+            .unwrap_or("other")
+    };
+    let mut runs: Vec<(String, u32)> = Vec::new();
+    for line in rows.lines().filter(|l| !l.trim().is_empty()) {
+        let parts: Vec<&str> = line.trim().split('|').collect();
+        let [event, purpose, end] = parts.as_slice() else {
+            continue;
+        };
+        let said = format!(
+            "{} {} {}",
+            word(event, &CALL_EVENTS),
+            if *purpose == "-" {
+                "-"
+            } else {
+                word(purpose, &CALL_PURPOSES)
+            },
+            if *end == "-" {
+                "-"
+            } else {
+                word(end, &CALL_WORDS)
+            },
+        );
+        match runs.last_mut() {
+            Some((last, count)) if *last == said => *count += 1,
+            _ => runs.push((said, 1)),
+        }
+    }
+    if runs.is_empty() {
+        return "no calls yet".to_owned();
+    }
+    runs.iter()
+        .map(|(said, count)| format!("{said} x{count}"))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -1447,5 +1579,50 @@ mod tests {
             assert!(!text.contains(leak), "{leak}: {text}");
         }
         Ok(())
+    }
+
+    /// The gateway's latest calls read as fixed words alone, newest first and counted; anything a
+    /// record holds outside the closed sets reads `other`, and an unreadable journal says so.
+    #[test]
+    fn the_gateway_calls_read_as_fixed_words() {
+        let rows = "MeterSettled|chat|credential_invalid\nMeterSettled|chat|credential_invalid\n\
+                    ChatRunEnded|-|model_error\nMeterSettled|chat|hunter2\nOddEvent|x|y\n";
+        let seen = std::cell::RefCell::new(Vec::new());
+        let kubectl = |args: &[&str]| -> Result<String> {
+            seen.borrow_mut()
+                .push(args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>());
+            Ok(if args[0] == "get" {
+                "journal-1\n".to_owned()
+            } else {
+                rows.to_owned()
+            })
+        };
+        assert_eq!(
+            super::gateway_calls(&kubectl),
+            "MeterSettled chat credential_invalid x2; ChatRunEnded - model_error x1; \
+             MeterSettled chat other x1; other other other x1"
+        );
+        let seen = seen.into_inner();
+        assert_eq!(
+            &seen[1][..4],
+            ["exec", "journal-1", "--namespace", "ws-ws1"]
+        );
+        assert!(
+            seen[1]
+                .last()
+                .is_some_and(|sql| sql.starts_with("SELECT") && sql.contains("LIMIT 12"))
+        );
+        let failing = |_: &[&str]| -> Result<String> { anyhow::bail!("no") };
+        assert_eq!(super::gateway_calls(&failing), "unreadable");
+        let odd = |_: &[&str]| -> Result<String> { Ok("journal-1; rm".to_owned()) };
+        assert_eq!(super::gateway_calls(&odd), "unreadable");
+        let empty = |args: &[&str]| -> Result<String> {
+            Ok(if args[0] == "get" {
+                "journal-1".to_owned()
+            } else {
+                String::new()
+            })
+        };
+        assert_eq!(super::gateway_calls(&empty), "no calls yet");
     }
 }
