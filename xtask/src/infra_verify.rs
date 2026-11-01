@@ -766,7 +766,8 @@ const CALL_WORDS: [&str; 21] = [
 const CALLS_READ: u32 = 12;
 
 /// The model gateway's latest calls and chat runs, read from the workspace journal through its
-/// database's own pod, as fixed words alone: each record's type, purpose and outcome or end code,
+/// database's primary pod, leaving out the deployment meter's copies (`dmeter:`), as fixed words
+/// alone: each record's type, purpose (a settlement carries none, so `-`) and outcome or end code,
 /// newest first, with a count for each run of the same three. A word outside the closed sets reads
 /// `other`, so nothing a record holds but these codes is printed. When the journal cannot be read,
 /// `unreadable`; when it holds none, `no calls yet`.
@@ -777,7 +778,7 @@ pub(crate) fn gateway_calls(kubectl: Kubectl<'_>) -> String {
         "--namespace",
         "ws-ws1",
         "--selector",
-        "cnpg.io/cluster=journal",
+        "cnpg.io/cluster=journal,cnpg.io/instanceRole=primary",
         "-o",
         "jsonpath={.items[0].metadata.name}",
     ]) else {
@@ -797,7 +798,8 @@ pub(crate) fn gateway_calls(kubectl: Kubectl<'_>) -> String {
     };
     let sql = format!(
         "SELECT event_type, coalesce({}, '-'), coalesce({}, {}, '-') FROM journal.events \
-         WHERE event_type IN ({events}) ORDER BY recorded_at DESC LIMIT {CALLS_READ}",
+         WHERE event_type IN ({events}) AND stream_id NOT LIKE 'dmeter:%' \\
+         ORDER BY recorded_at COLLATE \"C\" DESC LIMIT {CALLS_READ}",
         field("purpose"),
         field("outcome"),
         field("reason"),
