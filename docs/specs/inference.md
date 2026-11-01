@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.9, draft ([DEC-2294](../project/decisions/DEC-2294.md): the founder's ruling that the chat stays on and chat models get an evaluation gate, run inside the model-gateway service over the chat probe set, whose report the live start re-reads to offer a chat entry); v0.8 ([DEC-2216](../project/decisions/DEC-2216.md) and [DEC-2217](../project/decisions/DEC-2217.md): the §4.3 gate is driven by a gate-mode runtime through the model-gateway service's gate-only listener, which computes its report, the report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.10, draft ([DEC-2295](../project/decisions/DEC-2295.md): an endpoint names the sampling parameters its upstream does not take, and the request leaves them out); v0.9 ([DEC-2294](../project/decisions/DEC-2294.md): the founder's ruling that the chat stays on and chat models get an evaluation gate, run inside the model-gateway service over the chat probe set, whose report the live start re-reads to offer a chat entry); v0.8 ([DEC-2216](../project/decisions/DEC-2216.md) and [DEC-2217](../project/decisions/DEC-2217.md): the §4.3 gate is driven by a gate-mode runtime through the model-gateway service's gate-only listener, which computes its report, the report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,11 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
+- **v0.10 ([DEC-2295](../project/decisions/DEC-2295.md)):** an endpoint may list
+  `unsupported_sampling`, the sampling parameters (`temperature`, `seed`, `top_p`) its upstream does
+  not take, and the request leaves exactly those out (§3.4, §4.1, §6). `require_parameters: true`
+  otherwise routes such a request to no upstream. The pinned sampling, and so every content hash,
+  is unchanged.
 - **v0.9 ([DEC-2294](../project/decisions/DEC-2294.md)):** the founder's ruling of 2026-10-30, "Chat
   is the main interaction, we can eval". §4.2: a chat entry the live registry file names with a gate
   report is offered only on that report and a passing identity probe; the two chat pins offered when
@@ -290,7 +295,11 @@ to give one. What it may have spent is on the service's meter stream.
   `call_id` is refused at append. After a crash, a call with a reservation and no result is never
   re-sent under the same `call_id`; the caller may start a new call with new inputs (§9).
 - **Determinism.** The gateway sets temperature 0 and a recorded seed where the provider supports
-  it. Hosted providers do not promise identical outputs for identical input, so nothing relies on
+  it: an endpoint's `unsupported_sampling` names those its upstream does not take, and the request
+  carries none of them (§4.1, DEC-2295). The canonical request, its `request_digest`, and journal
+  spec §9.19's `sampling` still hold the pinned sampling: what a call sent is that, less its
+  endpoint's `unsupported_sampling`, which is journaled configuration of the endpoint the record
+  names. The §4.3 gate's runs and identity probe send what every call to that endpoint sends. Hosted providers do not promise identical outputs for identical input, so nothing relies on
   recomputation: replay reads the journal (INF-10).
 
 ### 3.5 Caching
@@ -406,7 +415,7 @@ entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts
 | `output_schema` | JSON Schema of the output (mandate spec §8.2, or §8.4's thesis) |
 | `params_schema` | The user-set parameters; no defaults (DEC-52) |
 | `deadline_ms`, `max_output_tokens`, sampling parameters | Pinned with the model. The sampling parameters are temperature, `top_p`, the seed, and the **reasoning mode and effort** (for OpenRouter, `reasoning.effort`, or `reasoning.enabled: false`), since a model's behaviour changes with its reasoning setting as with its quantization (DEC-2203 item 22). `top_p` and reasoning are left out of the canonical object where the entry pins none, so no existing hash changes. The call record holds them through `model.content_hash` and `request_digest`, which both cover them, so journal spec §9.19's `sampling` member is unchanged |
-| `endpoints` | Outside the hash. Endpoints attested to serve exactly `identity`, each with region and locality (`hosted` or `local`) |
+| `endpoints` | Outside the hash. Endpoints attested to serve exactly `identity`, each with region and locality (`hosted` or `local`), and `unsupported_sampling`: the pinned sampling parameters (`temperature`, `seed`, `top_p`) its upstream does not take, which its requests leave out, empty when it takes them all (DEC-2295). It changes what is sent, never the pin: the pinned sampling and the hash stay as they are |
 | `methodology` | Documentation of method only; no performance claims (§8.1) |
 | `authorship` | `platform` in v1 |
 | `status` | Outside the hash. `evaluating`, `offered`, `deprecated` (with the provider's retirement date), `withdrawn` |
@@ -614,7 +623,9 @@ founder's "Keep OpenRouter" of 2026-10-17, Accepted on 2026-10-19 as DEC-2605 ro
   that turn, with `tool_choice` `auto`, or is absent when none is offered (always, for a
   `single_call` entry); no `functions` or `plugins` (web search among them), and `transforms` sent
   empty, so no prompt compression applies. `require_parameters: true` routes only to an upstream
-  that honours `tools` (DEC-2203). **Tool names on the wire:** OpenAI-compatible function names
+  that honours `tools` (DEC-2203), and to none when the request carries a parameter the pinned
+  upstream does not take, so a sampling parameter the endpoint lists in `unsupported_sampling` is
+  left out of the request (DEC-2295). **Tool names on the wire:** OpenAI-compatible function names
   allow only `[a-zA-Z0-9_-]`, so the adapter sends a declared name with each `.` written as `__`
   (`market.bars` as `market__bars`) and maps a reply's names back. Declared names are lower-case
   `[a-z_]` segments joined by `.`, and no segment holds `__`, so the mapping cannot collide; a reply
