@@ -12,12 +12,12 @@ metadata:
   name: mandate-backup-plugin-tls
   namespace: flux-system
   annotations:
-    mandate.dev/chart-version: 0.1.0+g3b69d9cd208e
+    mandate.dev/chart-version: 0.1.0+gdb682858e794
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-backup-plugin-tls
   ref:
-    digest: sha256:50636b7c120df9e1ad5dec555f6477170efaf7b8d715093d2d8dc45b29a42f80
+    digest: sha256:e9445d35481352b2344f46a0e14837f9646ce5d4bc14a460a2e727ef14675581
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -33,12 +33,12 @@ metadata:
   name: mandate-journal-db
   namespace: flux-system
   annotations:
-    mandate.dev/chart-version: 0.1.0+g3b69d9cd208e
+    mandate.dev/chart-version: 0.1.0+gdb682858e794
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-journal-db
   ref:
-    digest: sha256:bd09cc398db084539c14d6fcc5b3397f57c790d50cd753fb2f31a306358670b3
+    digest: sha256:53a960a3010dd976a9613807d999e989be7387b05a956f453df1692bac5b8128
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -54,12 +54,12 @@ metadata:
   name: mandate-workspace
   namespace: flux-system
   annotations:
-    mandate.dev/chart-version: 0.1.0+g3b69d9cd208e
+    mandate.dev/chart-version: 0.1.0+gdb682858e794
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-workspace
   ref:
-    digest: sha256:b9ccb95d92bb820b4000b859d8605af06e9109ab66c2b60ca6ef062a73fc1fc2
+    digest: sha256:9a31b9434ae2657d82ce2fa612da4b430b6bc7f70d609f98a5e9aafece9f0351
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -75,12 +75,12 @@ metadata:
   name: mandate-vault-server
   namespace: flux-system
   annotations:
-    mandate.dev/chart-version: 0.1.0+g3b69d9cd208e
+    mandate.dev/chart-version: 0.1.0+gdb682858e794
 spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-vault-server
   ref:
-    digest: sha256:8936fb3ee9f2b7b6d26cfc6af59e1756f0a97a2d1a8fccf9cd9529e433ef0534
+    digest: sha256:95ecc5e9e5f1420740c83530ce1f93653c9efb149a2588cb0e950657b7eb387d
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
