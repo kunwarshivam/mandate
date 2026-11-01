@@ -10,6 +10,7 @@ use mandate_gateway::meter::{Caps, MeterRecord, StoreError};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::CAPABILITY_MEMBERS;
 use mandate_gateway::provider::{Clock, Delivery};
+use mandate_gateway::registry::{PinnedContent, TopP, Unsupported};
 use mandate_gateway::{CallRecord, Outcome, Purpose};
 
 fn run(
@@ -66,7 +67,6 @@ fn an_ok_call_returns_the_validated_output_and_meters_it() {
 /// included, since that lock would route a request carrying them to no upstream.
 #[test]
 fn the_request_leaves_out_exactly_the_sampling_its_upstream_does_not_take() {
-    use mandate_gateway::registry::{PinnedContent, TopP, Unsupported};
     let content = PinnedContent {
         top_p: TopP::from_millionths(900_000),
         ..content()
@@ -124,7 +124,6 @@ fn the_request_leaves_out_exactly_the_sampling_its_upstream_does_not_take() {
 /// The registry file's names, each once, from the three sampling members alone.
 #[test]
 fn unsupported_sampling_reads_each_named_member_once() {
-    use mandate_gateway::registry::Unsupported;
     assert_eq!(Unsupported::from_names([]), Some(Unsupported::default()));
     assert_eq!(
         Unsupported::from_names(["seed", "temperature"]),
