@@ -10,6 +10,7 @@ use mandate_gateway::meter::{Caps, MeterRecord, StoreError};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::CAPABILITY_MEMBERS;
 use mandate_gateway::provider::{Clock, Delivery};
+use mandate_gateway::registry::{PinnedContent, TopP, Unsupported};
 use mandate_gateway::{CallRecord, Outcome, Purpose};
 
 fn run(
@@ -59,6 +60,99 @@ fn an_ok_call_returns_the_validated_output_and_meters_it() {
         "an honest reply never costs more than its reservation"
     );
     assert_eq!(r.risk_day.to_string(), "2026-10-16");
+}
+
+/// DEC-2295: an endpoint's `unsupported_sampling` leaves exactly those pinned sampling members out of
+/// the request, and keeps every other one and the whole routing lock, `require_parameters`
+/// included, since that lock would route a request carrying them to no upstream.
+#[test]
+fn the_request_leaves_out_exactly_the_sampling_its_upstream_does_not_take() {
+    let content = PinnedContent {
+        top_p: TopP::from_millionths(900_000),
+        ..content()
+    };
+    let prompt = mandate_gateway::provider::Prompt {
+        system: "s".to_owned(),
+        user: "u".to_owned(),
+        tools: vec![],
+        transcript: vec![],
+    };
+    let sent = |unsupported: Unsupported| {
+        let mut endpoint = endpoint();
+        endpoint.route.unsupported = unsupported;
+        let request = mandate_gateway::provider::ProviderAdapter::request(
+            &mandate_gateway::openrouter::OpenRouter,
+            &content,
+            &endpoint,
+            &prompt,
+        );
+        serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()
+    };
+    for temperature in [false, true] {
+        for seed in [false, true] {
+            for top_p in [false, true] {
+                let json = sent(Unsupported {
+                    temperature,
+                    seed,
+                    top_p,
+                });
+                let case = format!("temperature {temperature}, seed {seed}, top_p {top_p}");
+                assert_eq!(json.get("temperature").is_none(), temperature, "{case}");
+                assert_eq!(json.get("seed").is_none(), seed, "{case}");
+                assert_eq!(json.get("top_p").is_none(), top_p, "{case}");
+                if !temperature {
+                    assert_eq!(json["temperature"], 0, "{case}");
+                }
+                if !seed {
+                    assert_eq!(json["seed"], 7, "{case}");
+                }
+                if !top_p {
+                    assert_eq!(json["top_p"], serde_json::json!(0.9), "{case}");
+                }
+                assert_eq!(json["provider"]["require_parameters"], true, "{case}");
+                assert_eq!(
+                    json["provider"]["only"],
+                    serde_json::json!([UPSTREAM]),
+                    "{case}"
+                );
+                assert_eq!(json["max_tokens"], 1000, "{case}");
+            }
+        }
+    }
+}
+
+/// The registry file's names, each once, from the three sampling members alone.
+#[test]
+fn unsupported_sampling_reads_each_named_member_once() {
+    assert_eq!(Unsupported::from_names([]), Some(Unsupported::default()));
+    assert_eq!(
+        Unsupported::from_names(["seed", "temperature"]),
+        Some(Unsupported {
+            temperature: true,
+            seed: true,
+            top_p: false,
+        })
+    );
+    assert_eq!(
+        Unsupported::from_names(["top_p"]),
+        Some(Unsupported {
+            temperature: false,
+            seed: false,
+            top_p: true,
+        })
+    );
+    for refused in [
+        vec!["temperature", "temperature"],
+        vec!["max_tokens"],
+        vec!["Temperature"],
+        vec![""],
+    ] {
+        assert_eq!(
+            Unsupported::from_names(refused.clone()),
+            None,
+            "{refused:?}"
+        );
+    }
 }
 
 #[test]

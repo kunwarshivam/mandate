@@ -275,6 +275,7 @@ fn endpoint() -> Endpoint {
         route: Route {
             upstream: UPSTREAM.to_owned(),
             reported_provider: REPORTED_PROVIDER.to_owned(),
+            unsupported: mandate_gateway::registry::Unsupported::default(),
         },
         prices: PriceTable::new(
             TokenPrice::per_million(usd6("3")),

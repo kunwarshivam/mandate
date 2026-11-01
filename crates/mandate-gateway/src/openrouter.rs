@@ -1,7 +1,9 @@
 //! The OpenRouter adapter (DEC-997 item 2): one pinned model slug, one upstream provider with
 //! fallbacks off, zero data retention, and no capability beyond the tool declarations a turn
 //! offers, and a reply read for the reported model and provider that the gateway compares with the
-//! pin (INF-1, INF-2, INF-5).
+//! pin (INF-1, INF-2, INF-5). A pinned sampling parameter the endpoint's upstream does not take is
+//! left out of the request, since `require_parameters` would otherwise route it to no upstream
+//! (DEC-2295).
 //!
 //! A tool goes by its wire name ([`tools::wire_name`]: `.` becomes `__`), since OpenRouter's
 //! upstreams take only `[a-zA-Z0-9_-]` in a function name (DEC-2207). The transcript's tool calls
@@ -55,13 +57,16 @@ impl ProviderAdapter for OpenRouter {
             body.insert("tools".to_owned(), Json::Array(offered));
             body.insert("tool_choice".to_owned(), json!("auto"));
         }
-        body.insert("temperature".to_owned(), json!(0));
-        if let Some(top_p) = content.top_p
+        let unsupported = endpoint.route.unsupported;
+        if !unsupported.temperature {
+            body.insert("temperature".to_owned(), json!(0));
+        }
+        if let Some(top_p) = content.top_p.filter(|_| !unsupported.top_p)
             && let Ok(number) = top_p.text().parse::<Number>()
         {
             body.insert("top_p".to_owned(), Json::Number(number));
         }
-        if let Some(seed) = content.seed {
+        if let Some(seed) = content.seed.filter(|_| !unsupported.seed) {
             body.insert("seed".to_owned(), json!(seed));
         }
         match content.reasoning {

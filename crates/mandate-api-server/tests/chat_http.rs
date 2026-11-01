@@ -148,6 +148,7 @@ fn gateway_service_gated(
             route: Route {
                 upstream: UPSTREAM.to_owned(),
                 reported_provider: PROVIDER.to_owned(),
+                unsupported: mandate_gateway::registry::Unsupported::default(),
             },
             prices: PriceTable::new(
                 TokenPrice::per_million(Usd6::parse("3").expect("a price")),

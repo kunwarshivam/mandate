@@ -90,6 +90,10 @@ spec:
                 "price_table": "openrouter /api/v1/models/anthropic/claude-sonnet-5.5/endpoints read 2026-10-27",
                 "region": "global",
                 "reported_provider": "Google",
+                "unsupported_sampling": [
+                  "seed",
+                  "temperature"
+                ],
                 "upstream": "google-vertex/global"
               },
               "entry": {
@@ -112,6 +116,10 @@ spec:
                 "price_table": "openrouter /api/v1/models/anthropic/claude-haiku-5.5/endpoints read 2026-10-27",
                 "region": "global",
                 "reported_provider": "Google",
+                "unsupported_sampling": [
+                  "seed",
+                  "temperature"
+                ],
                 "upstream": "google-vertex/global"
               },
               "entry": {
@@ -136,6 +144,10 @@ spec:
                 "price_table": "openrouter /api/v1/models/anthropic/claude-sonnet-5.5/endpoints read 2026-10-27",
                 "region": "global",
                 "reported_provider": "Google",
+                "unsupported_sampling": [
+                  "seed",
+                  "temperature"
+                ],
                 "upstream": "google-vertex/global"
               },
               "entry": {
@@ -161,6 +173,10 @@ spec:
                 "price_table": "openrouter /api/v1/models/anthropic/claude-haiku-5.5/endpoints read 2026-10-27",
                 "region": "global",
                 "reported_provider": "Google",
+                "unsupported_sampling": [
+                  "seed",
+                  "temperature"
+                ],
                 "upstream": "google-vertex/global"
               },
               "entry": {
@@ -186,6 +202,9 @@ spec:
                 "price_table": "openrouter /api/v1/models/openai/gpt-5.6-terra/endpoints read 2026-10-27",
                 "region": "global",
                 "reported_provider": "Azure",
+                "unsupported_sampling": [
+                  "temperature"
+                ],
                 "upstream": "azure"
               },
               "entry": {
