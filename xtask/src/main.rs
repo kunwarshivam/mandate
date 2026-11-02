@@ -2190,7 +2190,9 @@ fn opens_window(environment: &str, action: &str) -> bool {
 /// (DEC-2050), which reads staging until it is up and fails the run if it never is: the workload secrets
 /// from OpenTofu's outputs, each wrapped in a [`gitops::Secret`], which masks it, the moment it is
 /// read; a kubeconfig that expires in 900 seconds, at mode 0600 in `$RUNNER_TEMP` and deleted
-/// however the bootstrap ends; and the bootstrap itself, which confirms the context first.
+/// however the bootstrap ends, and a second one like it for verify, fetched once the founding Job
+/// has run, so verify's own window starts on a credential that outlives it; and the bootstrap
+/// itself, which confirms the context first.
 fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str) -> Result<()> {
     let output = |name: &str| -> Result<String> {
         let out = tofu(&[
@@ -2353,10 +2355,18 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
     mask::add_mask(tunnel_id.trim());
+    let verifying = infra_window::fetch_kubeconfig(
+        &infra_window::Curl,
+        &token,
+        cluster_id.trim(),
+        &context,
+        Path::new(&temp),
+        &format!("{run}-verify"),
+    )?;
     let get = |args: &[&str]| -> Result<String> {
         let out = gitops::tool("kubectl")
             .args(["--v=0", "--kubeconfig"])
-            .arg(kubeconfig.path())
+            .arg(verifying.path())
             .args(["--context", &context, "--request-timeout=30s"])
             .args(args)
             .output()

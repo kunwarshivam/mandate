@@ -176,7 +176,7 @@ pub(crate) const FOUNDING_POLL: Duration = Duration::from_secs(10);
 /// How long the apply waits for the workspace release to be Ready, so the Job it makes is the
 /// release's own and runs after that release's migration; past it, the Job the cluster holds is
 /// made anyway.
-const RELEASE_WAIT: &str = "--timeout=300s";
+const RELEASE_WAIT: &str = "--timeout=240s";
 /// How long the apply waits for the founding Job to complete: its own `activeDeadlineSeconds`
 /// (180) and a minute to schedule.
 const FOUNDING_WAIT: &str = "--timeout=240s";
