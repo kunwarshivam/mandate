@@ -3,14 +3,14 @@
 # gitops promote` (DEC-2016); change it only through a promotion.
 deploymentTier: staging
 images:
-  api: ghcr.io/kunwarshivam/mandate/mandate-api-server@sha256:e87130a958bb22029bff9792f2b594286c5ef004fef6e1af9d681d258a8d6952
-  data: ghcr.io/kunwarshivam/mandate/mandate-datad@sha256:14ba59945ab76dcdd3a918bbd740b339fa01b61bfeb17e3182fa219986ee33c5
-  deploy-manager: ghcr.io/kunwarshivam/mandate/mandate-deployd@sha256:e403e5e778ebafbbe65a02b7b2aa3c097a4f019184234de2933d444ff953f577
-  dispatcher: ghcr.io/kunwarshivam/mandate/mandate-dispatcher@sha256:a5a7bdda4eb9889423ae3b1c3c44753c6055979b3544ea3a6b4aaf98279ab521
-  executor: ghcr.io/kunwarshivam/mandate/mandate-executord@sha256:5652d42dc45a922032d11d08b9da283b2597f3a3c0e796e964808836bf992d4f
-  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:d342beda87bff483b316c76ec31f5ca54794b5f58b6210878807b41ff986a1dd
-  model-gateway: ghcr.io/kunwarshivam/mandate/mandate-gatewayd@sha256:a826f6953dda2bf1297af9672b28de412d5abd25c0004c978f3bf487e548c574
-  role-provisioner: ghcr.io/kunwarshivam/mandate/mandate-provisionerd@sha256:5081bdd88aeaf93f3c434d1d1fdd618f7aa8d182b3fec6293d76b86daede59cd
-  runtime: ghcr.io/kunwarshivam/mandate/mandate-daemon@sha256:293d45ef315555cb10bf0a7bef7fbf96bc2186238d951ceadbfa46c4b78ea7eb
-  scheduler: ghcr.io/kunwarshivam/mandate/mandate-scheduler@sha256:fca8d2b83bac9c548a30db80aa7cda1d8eaf3121b7f0adcacf4d9d9124315511
-  token-exchange: ghcr.io/kunwarshivam/mandate/mandate-token-exchange@sha256:78770979d7a1164f98c0c8866adad2e8bd7e9c53e5bf2fc1c0f53cec94c4f722
+  api: ghcr.io/kunwarshivam/mandate/mandate-api-server@sha256:58fa75dbc2888c4a2dd45fc02d429c2bcf7424f03b3e6792cdf416b809e6b355
+  data: ghcr.io/kunwarshivam/mandate/mandate-datad@sha256:15cf2b6276e1c30d09fe8760ce725a7807e206730f2e74be688e851929f4cfbd
+  deploy-manager: ghcr.io/kunwarshivam/mandate/mandate-deployd@sha256:150109ba05d32814747585a1615f045232618829ef293962d8655e79a0f9dde1
+  dispatcher: ghcr.io/kunwarshivam/mandate/mandate-dispatcher@sha256:57a1e33119a2766d6b0ac89037aa10c4a04848901e8e63304f52bd787550c8b9
+  executor: ghcr.io/kunwarshivam/mandate/mandate-executord@sha256:934783da75d6640bc0f862837c9ec825774669f91adfe728fee0348cee9b493e
+  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:d4a7a921dec3549eeefda8f99abab76c079aa0127bab2471d2f2b54634172731
+  model-gateway: ghcr.io/kunwarshivam/mandate/mandate-gatewayd@sha256:4eda9667c558797aee517969b4993e7da8dce78a9db586396b44be2905b62a2e
+  role-provisioner: ghcr.io/kunwarshivam/mandate/mandate-provisionerd@sha256:e9683e1022147d336faae0256841226b5c7aff812a6a8179576ef797238a560d
+  runtime: ghcr.io/kunwarshivam/mandate/mandate-daemon@sha256:245aec5b31b37213c7234de9f10e9f308572b0e9a5c5ed92e3ac99dabf1ad47c
+  scheduler: ghcr.io/kunwarshivam/mandate/mandate-scheduler@sha256:275496745614dd9ae409c459b4503b445f162c32fea3abe499c69bc87c212173
+  token-exchange: ghcr.io/kunwarshivam/mandate/mandate-token-exchange@sha256:5978609cd70c12648e0153c8dc70514f14b4f0e2f5e0c4f687f9e0c736efcd13
