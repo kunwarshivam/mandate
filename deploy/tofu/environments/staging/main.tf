@@ -69,6 +69,8 @@ module "cloudflare" {
   api_hostname   = "api-staging.owlhead.ai"
   api_origin     = var.api_origin
   archive_bucket = "mandate-journal-archive-west-${local.environment}"
+  # No Access in front of the API (DEC-2089): its own sign-in is the one gate.
+  access = false
 }
 
 resource "terraform_data" "applied_commit" {
