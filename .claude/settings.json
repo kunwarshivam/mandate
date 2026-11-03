@@ -3,7 +3,9 @@
     "allow": [
       "mcp__claude-code-remote__create_session",
       "mcp__claude-code-remote__send_message",
-      "Bash(/tmp/claude-0/-home-user-mandate/757d2be4-7f5e-5ee4-9e19-df08128b7e37/scratchpad/land.sh:*)"
+      "Bash(/tmp/claude-0/-home-user-mandate/757d2be4-7f5e-5ee4-9e19-df08128b7e37/scratchpad/land.sh:*)",
+      "Edit(crates/mandate-release/**)",
+      "Write(crates/mandate-release/**)"
     ]
   }
 }
