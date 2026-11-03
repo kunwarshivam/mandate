@@ -1,8 +1,8 @@
 # The environment's only ingress (DEC-2012 item 6, DEC-967 item 6): a remotely managed tunnel,
 # whose token becomes the workspace chart's cloudflared-tunnel Secret (lane GO places it); one
-# proxied DNS record for the API's hostname pointing at the tunnel; one Access application on that
-# hostname that admits only the named emails, or in staging, where none are named, only members
-# of the founder's own Cloudflare account (DEC-2030 item 2); and the journal's WAL and base-backup archive, an R2 bucket whose one lock
+# proxied DNS record for the API's hostname pointing at the tunnel; unless `access` is off, as in
+# staging (DEC-2089), one Access application on that hostname that admits only the named emails,
+# or where none are named, only members of the founder's own Cloudflare account (DEC-2030 item 2); and the journal's WAL and base-backup archive, an R2 bucket whose one lock
 # rule keeps every key for at least the archive's retention (DEC-973 item 6,
 # DEC-2012 item 9); and Barman's token for that bucket alone, Object Read and Write, minted here
 # (DEC-2029) and handed on only as sensitive outputs.
@@ -53,6 +53,12 @@ variable "api_origin" {
     condition     = can(regex("^https?://", var.api_origin))
     error_message = "The API origin must be a web URL, plain or over TLS."
   }
+}
+
+variable "access" {
+  description = "Whether an Access application guards the API host. Staging has none (DEC-2089): the API's own sign-in is its only gate, so the founder signs in once. Production keeps it."
+  type        = bool
+  default     = true
 }
 
 variable "access_allowed_emails" {
@@ -133,6 +139,7 @@ resource "cloudflare_dns_record" "api" {
 }
 
 resource "cloudflare_zero_trust_access_policy" "operators" {
+  count            = var.access ? 1 : 0
   account_id       = var.account_id
   name             = "${var.name}-operators"
   decision         = "allow"
@@ -147,6 +154,7 @@ resource "cloudflare_zero_trust_access_policy" "operators" {
 }
 
 resource "cloudflare_zero_trust_access_application" "api" {
+  count            = var.access ? 1 : 0
   account_id       = var.account_id
   name             = "${var.name}-api"
   type             = "self_hosted"
@@ -171,10 +179,20 @@ resource "cloudflare_zero_trust_access_application" "api" {
 
   policies = [
     {
-      id         = cloudflare_zero_trust_access_policy.operators.id
+      id         = cloudflare_zero_trust_access_policy.operators[0].id
       precedence = 1
     },
   ]
+}
+
+moved {
+  from = cloudflare_zero_trust_access_policy.operators
+  to   = cloudflare_zero_trust_access_policy.operators[0]
+}
+
+moved {
+  from = cloudflare_zero_trust_access_application.api
+  to   = cloudflare_zero_trust_access_application.api[0]
 }
 
 # The archive in western North America (DEC-2047). R2 honours a location only when a name is first

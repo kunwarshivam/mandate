@@ -638,7 +638,8 @@ fn edge_line(
 }
 
 /// The tunnel's health as Cloudflare records it, and the API's answer to a request without
-/// credentials: Access redirects it to its login or refuses it; a success means the API is open.
+/// credentials: Access, where it guards the host, redirects it to its login, and the API refuses it
+/// itself (DEC-2089); a success means the API is open.
 fn edge_checks(
     list: &mut Checklist,
     kubectl: Kubectl<'_>,
@@ -681,9 +682,7 @@ fn edge_checks(
             "the tunnel is healthy (Cloudflare did not answer)".to_owned(),
         ),
     }
-    let line = |answer: &str| {
-        format!("the API answers only through Access ({answer} without credentials)")
-    };
+    let line = |answer: &str| format!("the API refuses a request without credentials ({answer})");
     match http.get_public(&format!("https://{}/", edge.api_hostname)) {
         Ok(answer) if (200..300).contains(&answer.status) => {
             list.check(false, line(&answer.status.to_string()));
@@ -1299,7 +1298,7 @@ mod tests {
             "binding mandate-control-jobs denies",
             "webhook policy.sigstore.dev fails closed",
             "the tunnel is healthy",
-            "the API answers only through Access (302 without credentials)",
+            "the API refuses a request without credentials (302)",
         ] {
             assert!(
                 text.contains(&format!("[ok]      {line}")),
@@ -1357,7 +1356,7 @@ mod tests {
             ),
             (
                 |s| s.api = 200,
-                "the API answers only through Access (200 without credentials)",
+                "the API refuses a request without credentials (200)",
             ),
         ];
         for (fault, line) in faults {
@@ -1412,7 +1411,7 @@ mod tests {
             missing(&text),
             [
                 "the tunnel is healthy (Cloudflare reports down; no cloudflared pod)",
-                "the API answers only through Access (502 without credentials)",
+                "the API refuses a request without credentials (502)",
             ],
             "{text}"
         );
@@ -1421,7 +1420,7 @@ mod tests {
         assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
         for line in [
             "[pending #1] the tunnel is healthy (Cloudflare reports down; no cloudflared pod)",
-            "[pending #1] the API answers only through Access (502 without credentials)",
+            "[pending #1] the API refuses a request without credentials (502)",
         ] {
             assert!(text.contains(line), "{line}: {text}");
         }
@@ -1430,7 +1429,7 @@ mod tests {
         let list = checks(&|args| staging.kubectl(args), &staging, &edge(), Some("#1"))?;
         assert_eq!(
             missing(&list.render_titled("infra verify (staging)")),
-            ["the API answers only through Access (200 without credentials)"]
+            ["the API refuses a request without credentials (200)"]
         );
         Ok(())
     }

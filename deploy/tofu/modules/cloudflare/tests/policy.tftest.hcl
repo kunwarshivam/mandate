@@ -53,27 +53,45 @@ run "api_host_is_tunnel_only_and_behind_access" {
   }
 
   assert {
-    condition     = cloudflare_zero_trust_access_application.api.domain == "api-staging.example.com" && cloudflare_zero_trust_access_application.api.type == "self_hosted"
+    condition     = cloudflare_zero_trust_access_application.api[0].domain == "api-staging.example.com" && cloudflare_zero_trust_access_application.api[0].type == "self_hosted"
     error_message = "Access must guard the API host."
   }
 
   assert {
-    condition     = length(cloudflare_zero_trust_access_application.api.policies) == 1 && cloudflare_zero_trust_access_application.api.policies[0].id == cloudflare_zero_trust_access_policy.operators.id
+    condition     = length(cloudflare_zero_trust_access_application.api[0].policies) == 1 && cloudflare_zero_trust_access_application.api[0].policies[0].id == cloudflare_zero_trust_access_policy.operators[0].id
     error_message = "The Access application must carry the operators' policy and no other."
   }
 
   assert {
-    condition     = cloudflare_zero_trust_access_application.api.options_preflight_bypass == true && cloudflare_zero_trust_access_application.api.cors_headers == null
+    condition     = cloudflare_zero_trust_access_application.api[0].options_preflight_bypass == true && cloudflare_zero_trust_access_application.api[0].cors_headers == null
     error_message = "Access forwards unauthenticated OPTIONS alone to the API and sets no CORS headers itself, so the API alone names the allowed origin (DEC-2381)."
   }
 
   assert {
     condition = (
-      cloudflare_zero_trust_access_policy.operators.decision == "allow" &&
-      length(cloudflare_zero_trust_access_policy.operators.include) == 1 &&
-      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.cloudflare_account_member.account_id == "fedcba9876543210fedcba9876543210" && rule.everyone == null && rule.email_domain == null])
+      cloudflare_zero_trust_access_policy.operators[0].decision == "allow" &&
+      length(cloudflare_zero_trust_access_policy.operators[0].include) == 1 &&
+      alltrue([for rule in cloudflare_zero_trust_access_policy.operators[0].include : rule.cloudflare_account_member.account_id == "fedcba9876543210fedcba9876543210" && rule.everyone == null && rule.email_domain == null])
     )
     error_message = "The policy admits members of the founder's Cloudflare account alone, never everyone or a domain."
+  }
+}
+
+run "staging_has_no_access_and_the_api_its_own_sign_in" {
+  command = plan
+
+  variables {
+    access = false
+  }
+
+  assert {
+    condition     = length(cloudflare_zero_trust_access_application.api) == 0 && length(cloudflare_zero_trust_access_policy.operators) == 0
+    error_message = "With access off (DEC-2089), no Access application or policy guards the API host."
+  }
+
+  assert {
+    condition     = cloudflare_dns_record.api.proxied && cloudflare_dns_record.api.content == "c0ffee00-0000-4000-8000-000000000000.cfargotunnel.com"
+    error_message = "The API host stays a proxied CNAME to the tunnel."
   }
 }
 
@@ -149,8 +167,8 @@ run "named_emails_replace_account_membership" {
 
   assert {
     condition = (
-      length(cloudflare_zero_trust_access_policy.operators.include) == 1 &&
-      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.email.email == "founder@example.com" && rule.cloudflare_account_member == null && rule.everyone == null])
+      length(cloudflare_zero_trust_access_policy.operators[0].include) == 1 &&
+      alltrue([for rule in cloudflare_zero_trust_access_policy.operators[0].include : rule.email.email == "founder@example.com" && rule.cloudflare_account_member == null && rule.everyone == null])
     )
     error_message = "With emails named, the policy admits those emails alone, not the account's members."
   }
