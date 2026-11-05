@@ -286,6 +286,18 @@ connection binds is not flat`. Run with `--sim-clock 2026-10-29T15:00:00Z`: all 
 the script exits 0. Verify reads ctl 1 to 11, agent 1 to 11, and acct 1 to 31. Both refusals come
 before any place call.
 
+**Re-run on `main` at `a1d171a` (2026-10-29, the founder's Mac, macOS's own `date` and bash 3.2):
+every step passes, after one portability fix.** The clock fix this run carries: `--sim-clock`
+computed its instants with GNU `date -d` and `%s%N`, which macOS's BSD `date` rejects, so the
+script exited 2 at `--sim-clock: not an instant` before any step ran — the 2026-10-29 record
+above ran on a Linux CI host, so the gap hid on the founder's machine, where the runbook's step A1
+sends them. The clock math now runs in `python3 -I` (which the mandate fixture below already
+needs), and the `initdb` fallback's `installed[-1]` (bash 4.2) is `installed[${#installed[@]}-1]`,
+so stock bash 3.2 parses it. Run with `--sim-clock 2026-10-29T15:00:00Z`: all 33 steps pass, the
+script exits 0, 2u reads `the connection record is spent` and 2s `the account the connection
+binds is not flat`, both before any place call. The founder's runbook is
+[first-live-run.md](first-live-run.md).
+
 ## The step table (R22's code fixed and the stop's trigger scripted, run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`)
 
 | Step | R0 | Result | Output (last line) |

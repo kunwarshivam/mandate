@@ -43,19 +43,36 @@ done
 
 # The rehearsal's one timeline (DEC-962): SIM_CLOCK when the script starts, moving with the
 # system clock. sim_now prints its reading as canonical RFC 3339, read at each process's start.
+# The clock math runs in python3, which the mandate fixture below already needs: macOS's BSD date
+# has neither -d nor %N, and the founder rehearses on a Mac (DEC-954's portability floor).
+epoch_ns_of() {
+  python3 -I -c 'import re, sys
+from datetime import datetime, timezone
+text = re.sub(r"\\.(\d{1,9})", lambda m: "." + (m.group(1) + "000000")[:6], sys.argv[1], count=1)
+text = text[:-1] + "+00:00" if text.endswith("Z") else text
+moment = datetime.fromisoformat(text)
+if moment.tzinfo is None:
+    moment = moment.replace(tzinfo=timezone.utc)
+span = moment.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+print((span.days * 86400 + span.seconds) * 1000000000 + span.microseconds * 1000)' "$1"
+}
+now_ns() {
+  python3 -I -c 'import time; print(time.time_ns())'
+}
 CLI_FEATURES=()
 if [ -n "$SIM_CLOCK" ]; then
   [[ $SIM_CLOCK =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$ ]] ||
     { echo "--sim-clock: not an RFC 3339 instant" >&2; exit 2; }
-  SIM_EPOCH_NS=$(date -u -d "$SIM_CLOCK" +%s%N) || { echo "--sim-clock: not an instant" >&2; exit 2; }
-  REAL_EPOCH_NS=$(date -u +%s%N)
+  SIM_EPOCH_NS=$(epoch_ns_of "$SIM_CLOCK") || { echo "--sim-clock: not an instant" >&2; exit 2; }
+  REAL_EPOCH_NS=$(now_ns)
   CLI_FEATURES=(--features mandate-cli/rh-sim)
 fi
 sim_now() {
-  local ns fraction
-  ns=$((SIM_EPOCH_NS + $(date -u +%s%N) - REAL_EPOCH_NS))
-  fraction=$(printf %09d $((ns % 1000000000)))
-  date -u -d "@$((ns / 1000000000))" "+%Y-%m-%dT%H:%M:%S.${fraction}Z"
+  python3 -I -c 'import sys, time
+from datetime import datetime, timedelta, timezone
+ns = int(sys.argv[1]) + time.time_ns() - int(sys.argv[2])
+moment = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(microseconds=ns // 1000)
+print(moment.strftime("%Y-%m-%dT%H:%M:%S") + ".%09dZ" % (ns % 1000000000))' "$SIM_EPOCH_NS" "$REAL_EPOCH_NS"
 }
 # clocked COMMAND...: COMMAND on the rehearsal's clock, when one is set.
 clocked() {
@@ -158,7 +175,7 @@ start_postgres() {
     ADMIN_URL=$MANDATE_PG_URL
   else
     local installed=(/usr/lib/postgresql/*/bin/initdb)
-    PG_BIN=$(dirname "$(command -v initdb 2>/dev/null || echo "${installed[-1]}")")
+    PG_BIN=$(dirname "$(command -v initdb 2>/dev/null || echo "${installed[${#installed[@]}-1]}")")
     local dir port
     dir=$(mktemp -d "${TMPDIR:-/tmp}/r0-pg.XXXXXX")
     if [ "$(id -u)" = 0 ]; then chown postgres "$dir"; fi
